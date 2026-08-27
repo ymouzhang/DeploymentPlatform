@@ -49,7 +49,7 @@ const defaults: EnvironmentInput = {
   ssh_user: 'aaron',
   ssh_port: 22,
   ssh_password: '',
-  install_dir: '/opt/image-forward',
+  install_dir: '/opt/dp-demo',
   service_type: '',
   note: '',
   tag_ids: [],
@@ -524,7 +524,7 @@ export function EnvironmentsPage() {
               { pattern: /^\//, message: '安装目录必须是绝对路径' },
             ]}
           >
-            <Input placeholder="/opt/image-forward" />
+            <Input placeholder="/opt/dp-demo" />
           </Form.Item>
           <Form.Item name="note" label="备注">
             <Input.TextArea rows={2} maxLength={200} showCount placeholder="可选，最多 200 字" />

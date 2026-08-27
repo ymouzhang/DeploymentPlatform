@@ -34,7 +34,7 @@ flowchart LR
     FS[(数据目录)]
     SSH[SSH / SFTP]
     REMOTE[目标服务器]
-    HEALTH[image-forward /health]
+    HEALTH[dp-demo /healthz]
 
     U --> FE
     FE -->|REST JSON / 文件上传| API
@@ -71,10 +71,10 @@ flowchart LR
 | 构建工具 | Vite | 无需 SSR，开发启动和构建简单，官方提供 React/TypeScript 模板 |
 | 组件库 | Ant Design 6 | 面向企业后台，现成提供表格、表单、上传、抽屉、弹窗、状态反馈 |
 | 服务端状态 | TanStack Query | 统一处理请求、缓存、轮询、失效刷新和 mutation 状态 |
-| 路由 | React Router | 两个主页面及错误页足够，不使用重量级全栈框架 |
+| 路由 | React Router | 管理多角色业务页面和兜底跳转，不使用重量级全栈框架 |
 | 配置编辑器 | Monaco Editor | 提供 JSON/YAML 高亮、格式化和错误标记体验 |
 | 实时日志 | 浏览器原生 `EventSource` | 日志为服务端到浏览器的单向流，SSE 比 WebSocket 更简单 |
-| 测试 | Vitest + React Testing Library + Playwright | 分别覆盖组件与端到端关键流程 |
+| 测试 | Vitest + React Testing Library | 覆盖组件、客户端契约与关键交互 |
 
 版本策略：
 
@@ -152,10 +152,10 @@ flowchart LR
 
 #### 登录页视觉规范
 
-- 登录页使用与主控制台侧栏一致的深绿、荧光绿和暖灰白色体系，不采用与产品脱节的通用居中白卡片。
+- 登录页沿用全局靛青品牌色、分层中性色和半透明材质，不采用与产品脱节的通用居中白卡片。
 - 桌面端采用左右分区：左侧为品牌与产品能力区，右侧为登录表单区；整体内容设置最大宽度，在超宽屏上保持足够视觉体量和均衡留白。
 - 品牌区展示 DP Console 标识、部署管理定位，以及安装包、服务器环境、凭据安全三项核心能力；装饰图形只用于建立空间层次，不影响信息阅读。
-- 登录表单使用“欢迎回来”作为任务标题，输入框提供明确占位提示，主按钮延续控制台绿色；底部提示会话与凭据安全边界。
+- 登录表单使用“欢迎回来”作为任务标题，输入框提供明确占位提示，主按钮延续全局品牌色；底部提示会话与凭据安全边界。
 - 登录错误继续使用全局消息反馈；提交期间按钮显示加载状态，避免重复登录。
 - 在较窄桌面窗口中压缩品牌区并保持表单完整可用；当前产品仍以最小宽度 960px 为桌面使用边界。
 
@@ -268,7 +268,7 @@ flowchart LR
 web/
 ├── src/
 │   ├── app/                  # 路由、Provider、全局错误边界
-│   ├── api/                  # HTTP Client、OpenAPI 生成类型
+│   ├── api/                  # HTTP Client 与接口访问封装
 │   ├── components/           # 通用组件
 │   ├── features/
 │   │   ├── environments/     # 环境列表、表单、导入导出
@@ -338,8 +338,7 @@ internal/
 ├── remote/                   # SSH/SFTP、命令转义、远端脚本
 ├── operation/                # 操作调度、环境锁、事件中心
 ├── audit/                    # 审计事件、脱敏、查询与导出
-├── health/                   # 周期健康检查
-└── servicetype/              # image-forward 适配器
+└── health/                   # 周期健康检查
 migrations/                   # 内嵌 SQL
 api/
 └── openapi.yaml
@@ -360,7 +359,7 @@ data/                         # 运行时生成，不提交 Git
 - `start.sh` 和 `stop.sh` 必须存在。
 - `install.sh` 可选，存在时安装优先使用它。
 - JSON/YAML 中的顶层 `port` 或 `server.port` 必须能解析为 `1–65535` 的端口号，顶层 `port` 优先。
-- 健康地址为 `http://<IP>:<port>/health`。
+- 健康地址为 `http://<IP>:<port>/healthz`。
 
 如果未来某类服务需要不同的脚本或健康协议，再针对该差异引入策略接口；当前不预先建立空适配器层。
 
@@ -398,7 +397,7 @@ data/                         # 运行时生成，不提交 Git
 
 浏览器 Cookie 中保存 32 字节随机 Token，SQLite 只保存摘要；API 只返回独立会话 ID，不返回 Token 摘要。Cookie 使用 `HttpOnly`、`SameSite=Strict` 和 `/` 路径；HTTPS 请求附加 `Secure`。会话默认有效期 24 小时。登录时清理过期会话；退出、改密、重置密码或禁用账号时删除相应会话。认证上下文同时携带用户和会话 ID，用于识别当前会话及精确撤销。
 
-### 6.2.1 `login_throttles`
+#### 6.2.1 `login_throttles`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -460,7 +459,7 @@ UNIQUE(owner_id, ip, service_type)
 
 主键为 `(owner_id, service_type)`。该表是服务类型和当前版本的快速读取投影，完整历史保存在 `package_versions`。
 
-### 6.4.1 `package_versions`
+#### 6.4.1 `package_versions`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -497,7 +496,7 @@ UNIQUE(owner_id, ip, service_type)
 
 配置以 `environment_id` 隔离，归属从环境继承，而环境由 `UNIQUE(owner_id, ip, service_type)` 唯一确定。没有独立记录时读取同一账号的安装包配置作为模板；首次保存或安装时固化为实例配置。
 
-### 6.5.1 `service_config_revisions`
+#### 6.5.1 `service_config_revisions`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -722,8 +721,8 @@ HTTP 层提供单一 `GET /events` SSE。连接建立时先发送 `sync` 事件�
       "ssh_user": "aaron",
       "ssh_port": 22,
       "ssh_password_encrypted": "enc:v1:BASE64_DATA",
-      "install_dir": "/opt/image-forward",
-      "service_type": "image-forward",
+      "install_dir": "/opt/dp-demo",
+      "service_type": "dp-demo",
       "installed": true,
       "installed_at": "2026-07-28T09:00:00Z",
       "installed_package_sha256": "…",
@@ -806,7 +805,7 @@ data/
 ├── dp.db
 ├── packages/
 │   └── <owner-id>/
-│       └── image-forward/
+│       └── dp-demo/
 │           └── versions/
 │               └── <version-id>.tar.gz
 ├── operations/
@@ -835,7 +834,7 @@ data/
 - JSON/YAML 必须合法，`port` 必须为有效端口。
 - 检查 `start.sh` 中显式配置路径与实际配置格式是否一致，防止安装后才暴露启动失败。
 - 保留普通文件权限，脚本必须是普通文件。
-- 安装包结构固定从包根开始，不兼容额外的顶层目录。
+- 只兼容零层或一层公共根目录，不接受两层及以上的额外目录包装。
 
 ### 8.3 服务实例配置
 
@@ -968,29 +967,45 @@ cd '<install_dir>' && ./start.sh
 
 ## 10. 健康检查
 
-健康检查在后端执行，浏览器不直接请求目标服务器：
+### 10.1 DP 自身健康检查
+
+DP 只提供一个无需登录的 `GET /healthz`。处理器执行一次轻量 SQLite 查询和数据目录写入探测；两者都成功时返回 HTTP 200，否则返回 HTTP 503。响应使用普通 JSON，不套业务 API 的 `data` envelope，也不暴露内部错误：
+
+```json
+{"status":"ok"}
+```
+
+失败时：
+
+```json
+{"status":"error"}
+```
+
+### 10.2 目标服务探测
+
+目标服务健康检查在 DP 后端执行，浏览器不直接请求目标服务器：
 
 1. 读取环境安装时保存的 `health_port`。
-2. 构建 `http://<IP>:<port>/health`，不允许任意 URL。
-3. 3 秒超时，限制响应体大小，不跟随重定向。
-4. 收到可解析的 JSON，且顶层字段 `status` 严格等于字符串 `"health"` 或 `"healthy"` 时为运行中；匹配区分大小写，HTTP 状态码不替代该业务字段判断。
-5. 网络错误、超时、JSON 无法解析或字段值不匹配时，内部记录为非运行中，并保存不含敏感信息的原因。
+2. 构建 `http://<IP>:<port>/healthz`，不允许任意 URL 或代理，也不跟随重定向。
+3. 使用 HTTP `GET`、3 秒整体超时和 4 KiB 严格响应上限。
+4. 目标必须返回 HTTP 200 和 JSON `{"status":"ok"}`；其他状态码、字段值或响应格式统一判定为失败。
 
-后台每 10 秒对已安装环境进行一次检查，使用有上限的 worker pool，防止环境数量增长后瞬间建立大量连接。结果缓存在内存并记录最近检查时间；服务重启后立即执行首轮检查。
+后台默认每 10 秒检查一次，固定 8 个 worker 防止瞬间建立过多连接。结果只包含 `ok`、`error`、`unknown` 三种状态并缓存在内存；服务重启后立即执行首轮检查，超过“3 个检查周期”和“9 秒”中的较大值仍未刷新时为 `unknown`。连续三次失败创建去重告警，恢复成功时自动解决该健康告警。
 
 对外状态：
 
 ```json
 {
-  "state": "running",
-  "checked_at": "2026-07-28T10:00:00Z",
-  "reason": null
+  "status": "ok",
+  "checked_at": "2026-07-28T10:00:00Z"
 }
 ```
 
-内部可区分 `stopped`、`unreachable`、`invalid_response` 和 `not_configured`，前端主列仍按 PRD 只展示“运行中”或 `-`，详细原因放在提示中。
+前后端统一使用 `ok`、`error`、`unknown`；状态列分别展示“运行正常”“运行异常”“状态未知”，提示中只展示最近检查时间。
 
-## 11. 实时操作日志
+## 11. 实时操作日志与审计
+
+### 11.1 实时操作日志
 
 选择 SSE 而不是 WebSocket，原因是数据方向主要为后端到浏览器，且 SSE 原生支持事件 ID 和断线重连。
 
@@ -1015,7 +1030,7 @@ data: {"status":"failed","stage":"script","exit_code":1}
 - 浏览器断开不取消操作。
 - Go 服务启动时把数据库中 `queued/running` 的旧操作标记为 `interrupted`，并写入解释事件。
 
-### 11.1 审计事件采集
+### 11.2 审计事件采集
 
 审计由应用用例显式写入，不以“记录所有 HTTP 请求”的通用中间件代替。通用中间件只补充 request ID、来源 IP 和 User-Agent；动作、目标、所属账号、风险级别和脱敏变更必须由理解业务语义的应用层提供。
 
@@ -1129,6 +1144,7 @@ data: {"status":"failed","stage":"script","exit_code":1}
 | `POST` | `/services/{environmentId}/stop` | 创建停止操作 |
 | `POST` | `/services/{environmentId}/reset` | 必要时停止服务并重置为可编辑、可重装状态 |
 | `POST` | `/services/{environmentId}/health-check` | 手动立即检查 |
+| `GET` | `/services/{environmentId}/logs/stream` | 通过 SSE 读取目标服务的实时日志 |
 | `GET` | `/operations/{id}` | 操作快照 |
 | `GET` | `/operations/{id}/events` | SSE 日志和状态 |
 | `GET` | `/operations` | 管理员游标分页查询全局操作中心 |
@@ -1292,7 +1308,7 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 | `DP_DATA_DIR` | 否 | `./data` | SQLite、安装包和操作日志目录 |
 | `DP_LISTEN_ADDR` | 否 | `127.0.0.1:8080` | HTTP 监听地址 |
 | `DP_HEALTH_INTERVAL` | 否 | `10s` | 健康检查周期 |
-| `DP_UPLOAD_MAX_BYTES` | 否 | 实施时确定 | 压缩包上传上限 |
+| `DP_UPLOAD_MAX_BYTES` | 否 | `2147483648`（2 GiB） | 压缩包上传上限，单位为字节 |
 | `DP_UPLOAD_TIMEOUT` | 否 | `10m` | SFTP 上传超时 |
 | `DP_LOG_LEVEL` | 否 | `info` | 应用日志级别 |
 | `DP_AUDIT_RETENTION_DAYS` | 否 | `180` | 审计日志保留天数 |
@@ -1322,7 +1338,7 @@ Docker 部署约定：
 
 提供：
 
-- `GET /healthz`：进程、数据库和数据目录就绪检查。
+- `GET /healthz`：检查 DP 的 SQLite 与数据目录，返回最小 `ok/error` JSON。
 - 优雅关闭：停止接收新操作，等待短暂宽限期，未结束操作标记为中断。
 - 数据目录挂载持久卷；不得放在临时容器文件系统。
 
@@ -1355,7 +1371,7 @@ Docker 部署约定：
 - 操作状态机、同环境并发冲突、3 分钟超时。
 - 操作日志 SSE 重连、`Last-Event-ID` 回放和慢客户端。
 - 假 SSH/SFTP 服务器或容器化 SSH 集成测试。
-- 假 `/health` 服务覆盖 `health` 与 `healthy` 两个正常值、大小写不匹配、非字符串、超时、非法 JSON 和其他错误状态字段。
+- 假 `/healthz` 服务覆盖 HTTP 200 + `{"status":"ok"}`、非 200、响应超限、超时、非法 JSON、缓存过期和恢复告警闭环。
 - CI 执行 `go test ./...`、`go test -race ./...` 和静态检查。
 
 ### 16.2 前端
@@ -1371,7 +1387,7 @@ Docker 部署约定：
 - JSON/YAML 编辑器格式切换和错误反馈。
 - 按包状态、安装状态和操作状态启禁按钮。
 - SSE 日志追加、断线恢复和终态展示。
-- Playwright 覆盖“建环境 → 校验 → 上传包 → 配置 → 安装 → 健康运行 → 停止”主链路。
+- Vitest 与 React Testing Library 覆盖关键页面交互和客户端契约；完整浏览器端到端链路后续按实际回归成本引入。
 
 ## 17. 实施顺序
 

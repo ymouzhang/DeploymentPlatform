@@ -84,7 +84,7 @@ func TestEnvironmentUniqueIPAndServiceType(t *testing.T) {
 	base := domain.Environment{
 		Name: "first", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/service",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	}
 	if _, err := db.CreateEnvironment(ctx, base); err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestListPackagesReturnsEveryServiceType(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, serviceType := range []string{"image-forward", "video-forward"} {
+	for _, serviceType := range []string{"dp-demo", "video-forward"} {
 		now := time.Now().UTC()
 		if err := db.UpsertPackage(ctx, domain.Package{
 			ServiceType: serviceType, OriginalFilename: serviceType + ".tar.gz",
@@ -149,7 +149,7 @@ func TestListPackagesReturnsEveryServiceType(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(packages) != 2 ||
-		packages[0].ServiceType != "image-forward" ||
+		packages[0].ServiceType != "dp-demo" ||
 		packages[1].ServiceType != "video-forward" {
 		t.Fatalf("unexpected packages: %+v", packages)
 	}
@@ -165,7 +165,7 @@ func TestEnvironmentNoteRoundTrip(t *testing.T) {
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "noted", IP: "127.0.0.10", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/noted",
-		ServiceType: "image-forward", Note: "机房 A 机架 3",
+		ServiceType: "dp-demo", Note: "机房 A 机架 3",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestResetStateAndLastSuccessfulAction(t *testing.T) {
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "reset", IP: "127.0.0.9", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/reset",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -243,8 +243,8 @@ func TestDeletePackage(t *testing.T) {
 	defer db.Close()
 	now := time.Now().UTC()
 	if err := db.UpsertPackage(ctx, domain.Package{
-		ServiceType: "image-forward", OriginalFilename: "image-forward.tar.gz",
-		StoragePath: "packages/image-forward/current.tar.gz",
+		ServiceType: "dp-demo", OriginalFilename: "dp-demo.tar.gz",
+		StoragePath: "packages/dp-demo/current.tar.gz",
 		SHA256:      "sha", SizeBytes: 10, ConfigPort: 8080,
 		UploadedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -253,7 +253,7 @@ func TestDeletePackage(t *testing.T) {
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "installed", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/service",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -261,24 +261,24 @@ func TestDeletePackage(t *testing.T) {
 	if err := db.MarkInstalled(ctx, env.ID, "sha", 8080); err != nil {
 		t.Fatal(err)
 	}
-	count, err := db.CountInstalledEnvironments(ctx, "image-forward")
+	count, err := db.CountInstalledEnvironments(ctx, "dp-demo")
 	if err != nil || count != 1 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
 	if err := db.MarkUninstalled(ctx, env.ID); err != nil {
 		t.Fatal(err)
 	}
-	count, err = db.CountInstalledEnvironments(ctx, "image-forward")
+	count, err = db.CountInstalledEnvironments(ctx, "dp-demo")
 	if err != nil || count != 0 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
-	if err := db.DeletePackage(ctx, "image-forward"); err != nil {
+	if err := db.DeletePackage(ctx, "dp-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.GetPackage(ctx, "image-forward"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := db.GetPackage(ctx, "dp-demo"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
-	if err := db.DeletePackage(ctx, "image-forward"); !errors.Is(err, domain.ErrNotFound) {
+	if err := db.DeletePackage(ctx, "dp-demo"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
 }
@@ -293,7 +293,7 @@ func TestDeleteEnvironmentCascades(t *testing.T) {
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "delete", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/service",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +352,7 @@ func TestServiceConfigIsIndependentPerEnvironment(t *testing.T) {
 		env, createErr := db.CreateEnvironment(ctx, domain.Environment{
 			Name: name, IP: ip, SSHUser: "user", SSHPort: 22,
 			SSHPasswordEnc: "encrypted", InstallDir: "/opt/service",
-			ServiceType: "image-forward",
+			ServiceType: "dp-demo",
 		})
 		if createErr != nil {
 			t.Fatal(createErr)
@@ -404,8 +404,8 @@ func TestListServicePortsPrefersInstanceConfig(t *testing.T) {
 
 	now := time.Now().UTC()
 	if err := db.UpsertPackage(ctx, domain.Package{
-		ServiceType: "image-forward", OriginalFilename: "image-forward.tar.gz",
-		StoragePath: "packages/image-forward/current.tar.gz",
+		ServiceType: "dp-demo", OriginalFilename: "dp-demo.tar.gz",
+		StoragePath: "packages/dp-demo/current.tar.gz",
 		SHA256:      "sha", SizeBytes: 10, ConfigPort: 8080,
 		UploadedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -414,7 +414,7 @@ func TestListServicePortsPrefersInstanceConfig(t *testing.T) {
 	inherited, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "inherited", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/inherited",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -422,7 +422,7 @@ func TestListServicePortsPrefersInstanceConfig(t *testing.T) {
 	customized, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "customized", IP: "127.0.0.2", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/customized",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -453,7 +453,7 @@ func TestEnvironmentArchLifecycle(t *testing.T) {
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "arch", IP: "127.0.0.10", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/arch",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -502,7 +502,7 @@ func TestLatestOperationsReturnsNewestPerEnvironment(t *testing.T) {
 	first, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "first", IP: "127.0.0.10", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/first",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)

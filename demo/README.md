@@ -5,7 +5,7 @@
 ## 接口
 
 - `GET /`：服务信息；
-- `GET /health`：返回 `{"status":"health"}`，供 DP 判断运行状态。
+- `GET /healthz`：返回 `{"status":"ok"}`，供 DP 判断运行状态。
 
 监听端口来自 `config/config.json` 顶层的 `port` 字段，默认 `38081`。
 
@@ -14,7 +14,7 @@
 ```bash
 cd demo
 ./start.sh
-curl http://127.0.0.1:38081/health
+curl http://127.0.0.1:38081/healthz
 ./stop.sh
 ```
 
@@ -53,6 +53,6 @@ DP 会解压安装包并执行 `start.sh`，脚本通过 Docker Compose 启动 D
 
 ```bash
 ./start.sh
-curl http://127.0.0.1:38081/health
+curl http://127.0.0.1:38081/healthz
 ./stop.sh
 ```

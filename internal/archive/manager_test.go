@@ -60,14 +60,14 @@ func TestDeletePackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer src.Close()
-	if _, err := manager.Upload(ctx, "image-forward", "image-forward.tar.gz", src, nil); err != nil {
+	if _, err := manager.Upload(ctx, "dp-demo", "dp-demo.tar.gz", src, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
 		Name: "installed", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/service",
-		ServiceType: "image-forward",
+		ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,22 +76,22 @@ func TestDeletePackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var appErr *domain.AppError
-	if err := manager.Delete(ctx, "image-forward"); !errors.As(err, &appErr) || appErr.Code != "PACKAGE_IN_USE" {
+	if err := manager.Delete(ctx, "dp-demo"); !errors.As(err, &appErr) || appErr.Code != "PACKAGE_IN_USE" {
 		t.Fatalf("expected PACKAGE_IN_USE, got %v", err)
 	}
 	if err := db.MarkUninstalled(ctx, env.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Delete(ctx, "image-forward"); err != nil {
+	if err := manager.Delete(ctx, "dp-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.GetPackage(ctx, "image-forward"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := db.GetPackage(ctx, "dp-demo"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "packages", "image-forward")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(dataDir, "packages", "dp-demo")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected package directory removed, got %v", err)
 	}
-	if err := manager.Delete(ctx, "image-forward"); !errors.Is(err, domain.ErrNotFound) {
+	if err := manager.Delete(ctx, "dp-demo"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
 }
@@ -178,14 +178,14 @@ func TestPackageNote(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer src.Close()
-		if _, err := manager.Upload(ctx, "image-forward", "image-forward.tar.gz", src, note); err != nil {
+		if _, err := manager.Upload(ctx, "dp-demo", "dp-demo.tar.gz", src, note); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	note := "首个版本"
 	upload(&note)
-	pkg, err := manager.Get(ctx, "image-forward")
+	pkg, err := manager.Get(ctx, "dp-demo")
 	if err != nil || pkg.Note != "首个版本" {
 		t.Fatalf("expected note saved, got %+v, err=%v", pkg, err)
 	}
@@ -200,22 +200,22 @@ func TestPackageNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.Upload(ctx, "image-forward", "image-forward-v2.tar.gz", src, nil); err != nil {
+	if _, err := manager.Upload(ctx, "dp-demo", "dp-demo-v2.tar.gz", src, nil); err != nil {
 		t.Fatal(err)
 	}
 	_ = src.Close()
-	pkg, err = manager.Get(ctx, "image-forward")
+	pkg, err = manager.Get(ctx, "dp-demo")
 	if err != nil || pkg.Note != "首个版本" {
 		t.Fatalf("expected note preserved, got %+v, err=%v", pkg, err)
 	}
 
-	pkg, err = manager.UpdateNote(ctx, "image-forward", "")
+	pkg, err = manager.UpdateNote(ctx, "dp-demo", "")
 	if err != nil || pkg.Note != "" {
 		t.Fatalf("expected note cleared, got %+v, err=%v", pkg, err)
 	}
 
 	tooLong := strings.Repeat("备", domain.MaxNoteLength+1)
-	if _, err := manager.UpdateNote(ctx, "image-forward", tooLong); err == nil {
+	if _, err := manager.UpdateNote(ctx, "dp-demo", tooLong); err == nil {
 		t.Fatal("expected note length error")
 	}
 	if _, err := manager.UpdateNote(ctx, "missing", "note"); !errors.Is(err, domain.ErrNotFound) {
@@ -377,7 +377,7 @@ func TestInspectWrappedYAMLPackageAndNestedPort(t *testing.T) {
 		"dist/config/config.yaml": "server:\n  port: 33182\n",
 		"dist/start.sh":           "#!/bin/sh\n",
 		"dist/stop.sh":            "#!/bin/sh\n",
-		"dist/image-forward":      "binary",
+		"dist/dp-demo":      "binary",
 	})
 	result, err := inspect(file, 1<<20, true)
 	if err != nil {
@@ -405,7 +405,7 @@ func TestInspectRejectsMixedWrappedAndRootFiles(t *testing.T) {
 func TestInspectRejectsConfigAndStartScriptMismatch(t *testing.T) {
 	file := buildArchive(t, map[string]string{
 		"dist/config/config.yaml": "port: 8080\n",
-		"dist/start.sh":           "./image-forward --config=config/config.json\n",
+		"dist/start.sh":           "./dp-demo --config=config/config.json\n",
 		"dist/stop.sh":            "#!/bin/sh\n",
 	})
 	if _, err := inspect(file, 1<<20, false); err == nil {

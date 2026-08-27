@@ -1,13 +1,30 @@
 openapi: 3.1.0
 info:
   title: DP API
-  version: 1.8.1
-  description: Image Forward Manager HTTP API with local-account authentication and owner isolation
+  version: 1.9.0
+  description: Deployment Platform HTTP API with local-account authentication and owner isolation
 servers:
   - url: /api/v1
 security:
   - cookieAuth: []
 paths:
+  /healthz:
+    get:
+      security: []
+      servers: [{ url: / }]
+      operationId: getHealth
+      description: Checks SQLite access and data-directory writability.
+      responses:
+        "200":
+          description: DP is ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProbeResponse" }
+        "503":
+          description: A required local dependency is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProbeResponse" }
   /auth/login:
     post:
       security: []
@@ -761,7 +778,7 @@ paths:
   /services/{id}/health-check:
     post:
       operationId: checkServiceHealth
-      description: Requests `http://<environment-ip>:<health-port>/health`. A top-level, case-sensitive string status of `health` or `healthy` is normalized to the `running` state.
+      description: Requests `http://<environment-ip>:<health-port>/healthz`. Only HTTP 200 with `{"status":"ok"}` is healthy.
       parameters:
         - $ref: "#/components/parameters/EnvironmentId"
       responses:
@@ -1642,16 +1659,20 @@ components:
             finished_at: { type: [string, "null"], format: date-time }
     HealthResult:
       type: object
-      required: [state]
+      required: [status]
       properties:
-        state: { type: string, enum: [running, stopped, unreachable, invalid_response, not_configured] }
+        status: { type: string, enum: [ok, error, unknown] }
         checked_at: { type: [string, "null"], format: date-time }
-        reason: { type: string }
     HealthResultResponse:
       type: object
       required: [data]
       properties:
         data: { $ref: "#/components/schemas/HealthResult" }
+    ProbeResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, error] }
     ServiceConfig:
       type: object
       required: [environment_id, content, format, path, port, inherited]

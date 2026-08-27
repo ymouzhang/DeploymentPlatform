@@ -279,7 +279,7 @@ export function ServicesPage() {
         width: 150,
         render: (_, record) => (
           <Space size={4}>
-            <Tooltip title={record.health.reason ?? formatTime(record.health.checked_at)}>
+            <Tooltip title={healthTooltip(record.health)}>
               {healthTag(record)}
             </Tooltip>
             {record.environment.installed && (
@@ -345,13 +345,13 @@ export function ServicesPage() {
                   >
                     停止
                   </Button>
-                  <Tooltip title={record.health.state === 'running' ? undefined : '服务未运行'}>
+                  <Tooltip title={record.health.status === 'ok' ? undefined : '服务未运行'}>
                     <span>
                       <Button
                         size="small"
                         type="text"
                         icon={<FileTextOutlined />}
-                        disabled={busy || record.health.state !== 'running'}
+                        disabled={busy || record.health.status !== 'ok'}
                         onClick={() => setLogService(record)}
                       >
                         日志
@@ -435,7 +435,7 @@ export function ServicesPage() {
     : allServices
   const installedCount = services.filter((item) => item.environment.installed).length
   const runningCount = services.filter(
-    (item) => item.environment.installed && item.health.state === 'running',
+    (item) => item.environment.installed && item.health.status === 'ok',
   ).length
   const busyCount = services.filter((item) => item.busy).length
 
@@ -613,21 +613,21 @@ function healthTag(record: Service) {
   if (!record.environment.installed) {
     return <Tag>未安装</Tag>
   }
-  switch (record.health.state) {
-    case 'running':
+  switch (record.health.status) {
+    case 'ok':
       return <Tag color="success">运行正常</Tag>
-    case 'stopped':
-      return <Tag color="default">已停止</Tag>
-    case 'unreachable':
-      return <Tag color="error">无法访问</Tag>
-    case 'invalid_response':
-      return <Tag color="warning">响应异常</Tag>
+    case 'error':
+      return <Tag color="error">运行异常</Tag>
     default:
-      return <Tag>未检查</Tag>
+      return <Tag>状态未知</Tag>
   }
 }
 
-function formatTime(value?: string) {
+function healthTooltip(health: Service['health']) {
+  return formatTime(health.checked_at)
+}
+
+function formatTime(value?: string | null) {
   if (!value) return '-'
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',

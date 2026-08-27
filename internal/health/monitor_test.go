@@ -6,8 +6,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,90 +17,175 @@ import (
 	"DP/internal/store"
 )
 
-func TestCheckAcceptsSupportedHealthyStatusValues(t *testing.T) {
+func TestCheckRequiresHTTP200AndOK(t *testing.T) {
 	tests := []struct {
-		name      string
-		status    any
-		wantState string
+		name       string
+		status     any
+		httpStatus int
+		want       string
 	}{
-		{name: "health", status: "health", wantState: "running"},
-		{name: "healthy", status: "healthy", wantState: "running"},
-		{name: "unhealthy", status: "unhealthy", wantState: "stopped"},
-		{name: "case sensitive", status: "HEALTHY", wantState: "stopped"},
-		{name: "non string", status: true, wantState: "stopped"},
+		{name: "healthy", status: "ok", want: "ok"},
+		{name: "error", status: "error", want: "error"},
+		{name: "strict value", status: "OK", want: "error"},
+		{name: "non string", status: true, want: "error"},
+		{name: "non 200", status: "ok", httpStatus: http.StatusServiceUnavailable, want: "error"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/healthz" {
+					t.Errorf("path = %q", r.URL.Path)
+				}
+				if test.httpStatus != 0 {
+					w.WriteHeader(test.httpStatus)
+				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"status": test.status})
 			}))
 			defer server.Close()
-			host, rawPort, err := net.SplitHostPort(server.Listener.Addr().String())
-			if err != nil {
-				t.Fatal(err)
-			}
-			port, err := strconv.Atoi(rawPort)
-			if err != nil {
-				t.Fatal(err)
-			}
-			monitor := NewMonitor(nil, time.Minute)
-			result := monitor.check(context.Background(), domain.Environment{IP: host, HealthPort: &port, Installed: true})
-			if result.State != test.wantState {
-				t.Fatalf("status=%v state=%q reason=%q", test.status, result.State, result.Reason)
-			}
-			if test.wantState == "running" && result.Reason != "" {
-				t.Fatalf("running status has reason %q", result.Reason)
+			result := NewMonitor(nil, "", time.Minute).check(context.Background(), testEnvironment(t, server))
+			if result.Status != test.want {
+				t.Fatalf("status = %q, want %q", result.Status, test.want)
 			}
 		})
 	}
 }
 
-func TestCheckAllClearsHealthForUninstalledEnvironment(t *testing.T) {
+func TestCheckRejectsInvalidResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid JSON", body: "{"},
+		{name: "oversized", body: `{"status":"ok","padding":"` + strings.Repeat("x", maxResponseBytes) + `"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			result := NewMonitor(nil, "", time.Minute).check(context.Background(), testEnvironment(t, server))
+			if result.Status != "error" {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestCheckTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	monitor := NewMonitor(nil, "", time.Minute)
+	monitor.client.Timeout = 20 * time.Millisecond
+	if result := monitor.check(context.Background(), testEnvironment(t, server)); result.Status != "error" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestSnapshotMarksStaleResultUnknown(t *testing.T) {
+	monitor := NewMonitor(nil, "", time.Second)
+	checkedAt := time.Now().Add(-time.Minute)
+	monitor.results["environment"] = domain.HealthResult{Status: "ok", CheckedAt: &checkedAt}
+	if result := monitor.Snapshot("environment"); result.Status != "unknown" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestHealthChecksDatabaseAndStorage(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
+	dataDir := t.TempDir()
+	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	monitor := NewMonitor(db, dataDir, time.Minute)
+	if result := monitor.Health(ctx); result.Status != "ok" {
+		t.Fatalf("health result = %#v", result)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if result := monitor.Health(ctx); result.Status != "error" {
+		t.Fatalf("closed database result = %#v", result)
+	}
+
+	filePath := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(filePath, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if result := NewMonitor(nil, filePath, time.Minute).Health(ctx); result.Status != "error" {
+		t.Fatalf("storage result = %#v", result)
+	}
+}
+
+func TestHealthNotificationResolvesAfterRecovery(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	monitor := NewMonitor(db, dataDir, time.Minute)
+	env := domain.Environment{ID: "environment", Name: "service", Installed: true}
+	for range 3 {
+		monitor.recordResult(ctx, env, domain.HealthResult{Status: "error"})
+	}
+	summary, err := db.NotificationSummary(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Unresolved != 1 {
+		t.Fatalf("unresolved notifications = %d", summary.Unresolved)
+	}
+	monitor.recordResult(ctx, env, domain.HealthResult{Status: "ok"})
+	summary, err = db.NotificationSummary(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Unresolved != 0 {
+		t.Fatalf("unresolved notifications after recovery = %d", summary.Unresolved)
+	}
+}
 
+func TestCheckAllClearsAndRemovesResults(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		Name:           "reset",
-		IP:             "127.0.0.1",
-		SSHUser:        "user",
-		SSHPort:        22,
-		SSHPasswordEnc: "encrypted",
-		InstallDir:     "/opt/reset",
-		ServiceType:    "image-forward",
+		Name: "reset", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
+		SSHPasswordEnc: "encrypted", InstallDir: "/opt/reset", ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	monitor := NewMonitor(db, time.Minute)
-	monitor.results[env.ID] = domain.HealthResult{State: "running"}
-
+	monitor := NewMonitor(db, dataDir, time.Minute)
+	monitor.results[env.ID] = domain.HealthResult{Status: "ok"}
+	monitor.results["deleted"] = domain.HealthResult{Status: "ok"}
 	monitor.checkAll(ctx)
-
-	result := monitor.Snapshot(env.ID)
-	if result.State != "not_configured" {
-		t.Fatalf("health state = %q, want not_configured", result.State)
+	if result := monitor.Snapshot(env.ID); result.Status != "unknown" {
+		t.Fatalf("uninstalled result = %#v", result)
+	}
+	if _, exists := monitor.results["deleted"]; exists {
+		t.Fatal("deleted environment result was retained")
 	}
 }
 
-func TestCheckAllRemovesHealthForDeletedEnvironment(t *testing.T) {
-	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
+func testEnvironment(t *testing.T, server *httptest.Server) domain.Environment {
+	t.Helper()
+	host, rawPort, err := net.SplitHostPort(server.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-
-	monitor := NewMonitor(db, time.Minute)
-	monitor.results["deleted-environment"] = domain.HealthResult{State: "running"}
-
-	monitor.checkAll(ctx)
-
-	if _, exists := monitor.results["deleted-environment"]; exists {
-		t.Fatal("health result for deleted environment was not removed")
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return domain.Environment{IP: host, HealthPort: &port, Installed: true}
 }

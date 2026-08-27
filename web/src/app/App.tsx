@@ -125,7 +125,7 @@ function Shell() {
       >
         <div className="brand">
           <div className="brand-mark">
-            <span>IF</span>
+            <span>DP</span>
           </div>
           <div className="brand-copy">
             <div className="brand-name">DP Console</div>

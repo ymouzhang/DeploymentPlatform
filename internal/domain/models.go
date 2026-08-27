@@ -584,9 +584,8 @@ type AuditSummary struct {
 }
 
 type HealthResult struct {
-	State     string     `json:"state"`
+	Status    string     `json:"status"`
 	CheckedAt *time.Time `json:"checked_at"`
-	Reason    string     `json:"reason,omitempty"`
 }
 
 type ServiceView struct {

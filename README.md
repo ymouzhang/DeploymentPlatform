@@ -1,6 +1,6 @@
 # DP
 
-DP（Image Forward Manager）是一个内部 Web 管理后台，用于按服务类型维护安装包和目标服务器环境，并通过 SSH 完成安装、启动、停止和健康检查。
+DP（Deployment Platform，部署管理平台）是面向内部环境的 Web 管理平台，用于按账号和服务类型管理安装包、目标服务器与服务配置，通过 SSH/SFTP 完成远程部署和生命周期操作，并通过目标服务的 HTTP `/healthz` 接口持续观测运行状态。
 
 安装包配置支持 `config/config.json`、`config/config.yaml`、`config/application.yml` 和 `config/application.yaml`，每个安装包必须且只能使用其中一种。
 安装包可以带一个公共顶层目录（例如 `dist/`）；配置端口支持顶层 `port` 或 `server.port`。

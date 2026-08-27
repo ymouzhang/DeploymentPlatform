@@ -131,9 +131,8 @@ export interface PackageVersion {
 }
 
 export interface HealthResult {
-  state: 'running' | 'stopped' | 'unreachable' | 'invalid_response' | 'not_configured'
-  checked_at?: string
-  reason?: string
+  status: 'ok' | 'error' | 'unknown'
+  checked_at?: string | null
 }
 
 export interface OperationSummary {

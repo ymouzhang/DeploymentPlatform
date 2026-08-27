@@ -75,7 +75,7 @@ func run() error {
 	operationManager := operation.NewManager(
 		rootCtx, cfg.DataDir, db, passwordCipher, packageManager, remoteExecutor, auditService, log,
 	)
-	healthMonitor := health.NewMonitor(db, cfg.HealthInterval)
+	healthMonitor := health.NewMonitor(db, cfg.DataDir, cfg.HealthInterval)
 	var background sync.WaitGroup
 	background.Add(2)
 	go func() {

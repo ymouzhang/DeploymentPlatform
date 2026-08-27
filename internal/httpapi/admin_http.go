@@ -222,7 +222,7 @@ func (a *API) adminDashboard(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		health := a.health.Snapshot(env.ID)
-		if health.State == "running" {
+		if health.Status == "ok" {
 			metrics.RunningServices++
 		} else {
 			metrics.UnhealthyInstalledServices++

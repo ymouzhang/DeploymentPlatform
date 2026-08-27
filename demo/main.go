@@ -50,9 +50,9 @@ func run(configPath string) error {
 			"message": "DP demo service is running",
 		})
 	})
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{
-			"status":  "health",
+			"status":  "ok",
 			"service": cfg.ServiceName,
 		})
 	})
@@ -111,7 +111,7 @@ func checkHealth(configPath string) error {
 		return err
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
-	endpoint := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)) + "/health"
+	endpoint := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)) + "/healthz"
 	response, err := client.Get(endpoint)
 	if err != nil {
 		return fmt.Errorf("请求健康接口: %w", err)
@@ -126,7 +126,7 @@ func checkHealth(configPath string) error {
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		return fmt.Errorf("解析健康响应: %w", err)
 	}
-	if body.Status != "health" {
+	if body.Status != "ok" {
 		return fmt.Errorf("健康状态异常: %q", body.Status)
 	}
 	return nil

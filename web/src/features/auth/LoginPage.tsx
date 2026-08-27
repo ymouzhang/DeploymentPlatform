@@ -25,7 +25,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
           <div className="login-orbit login-orbit-one" />
           <div className="login-orbit login-orbit-two" />
           <div className="login-brand">
-            <div className="brand-mark login-brand-mark"><span>IF</span></div>
+            <div className="brand-mark login-brand-mark"><span>DP</span></div>
             <div>
               <div className="login-brand-name">DP Console</div>
               <div className="login-brand-subtitle">DEPLOYMENT HUB</div>
@@ -33,7 +33,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
           </div>
 
           <div className="login-hero-copy">
-            <div className="login-eyebrow"><span /> IMAGE FORWARD MANAGER</div>
+            <div className="login-eyebrow"><span /> DEPLOYMENT PLATFORM</div>
             <h1>让每一次部署<br />都清晰、可靠、可追踪。</h1>
             <p>在一个安全的工作台中管理交付物、服务器环境与远程服务生命周期。</p>
           </div>

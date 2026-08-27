@@ -163,8 +163,15 @@ func (a *API) Handler(frontend fs.FS) http.Handler {
 	return a.recoverMiddleware(a.requestMiddleware(a.originMiddleware(a.authMiddleware(a.auditMiddleware(mux)))))
 }
 
-func (a *API) healthz(w http.ResponseWriter, _ *http.Request) {
-	writeData(w, http.StatusOK, map[string]string{"status": "ok"})
+func (a *API) healthz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	result := a.health.Health(ctx)
+	status := http.StatusOK
+	if result.Status != "ok" {
+		status = http.StatusServiceUnavailable
+	}
+	writeProbe(w, status, result)
 }
 
 func (a *API) serviceTypes(w http.ResponseWriter, r *http.Request) {
@@ -583,7 +590,7 @@ func (a *API) listServices(w http.ResponseWriter, r *http.Request) {
 		if port, ok := ports[env.ID]; ok {
 			servicePort = &port
 		}
-		healthResult := domain.HealthResult{State: "not_configured"}
+		healthResult := domain.HealthResult{Status: "unknown"}
 		if env.Installed {
 			healthResult = a.health.Snapshot(env.ID)
 		}
@@ -911,6 +918,13 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeProbe(w http.ResponseWriter, status int, result health.ProbeResult) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 type contextKey string

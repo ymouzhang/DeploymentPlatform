@@ -11,8 +11,8 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestBuildExtractCommandStripsWrapperDirectory(t *testing.T) {
-	got := buildExtractCommand("/tmp/package.tar.gz", "/opt/image forward", true)
-	want := "tar -xzf '/tmp/package.tar.gz' -C '/opt/image forward' --strip-components=1"
+	got := buildExtractCommand("/tmp/package.tar.gz", "/opt/demo service", true)
+	want := "tar -xzf '/tmp/package.tar.gz' -C '/opt/demo service' --strip-components=1"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

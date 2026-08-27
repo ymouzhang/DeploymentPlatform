@@ -61,6 +61,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+func (s *Store) Ping(ctx context.Context) error {
+	var value int
+	return s.db.QueryRowContext(ctx, `SELECT 1`).Scan(&value)
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	entries, err := fs.ReadDir(migrationFS, "migrations")
 	if err != nil {
