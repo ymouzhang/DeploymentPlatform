@@ -177,9 +177,10 @@ function Shell() {
           </div>
           <Space>
             {user.role === 'admin' && ['/packages', '/environments', '/services'].includes(location.pathname) && <Space size={6}><Typography.Text type="secondary">数据范围</Typography.Text><Select allowClear placeholder="全部账号" value={ownerId} style={{ width: 180 }} options={users.map((item) => ({ value: item.id, label: item.username }))} onChange={(value) => setOwnerId(value)} /></Space>}
+            <div className="system-state" aria-label="系统连接正常"><span className="system-state-dot" />系统在线</div>
             <HeaderMessageEntry key={`message-${communicationUnread}`} unread={communicationUnread} onClick={() => navigate('/communications')} />
             <Dropdown menu={{ items: [{ key: 'sessions', icon: <LaptopOutlined />, label: '登录会话' }, { key: 'password', icon: <KeyOutlined />, label: '修改密码' }, { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }], onClick: async ({ key }) => { if (key === 'sessions') setSessionsOpen(true); else if (key === 'password') setPasswordOpen(true); else { await api.logout(); finishLogout() } } }}>
-              <Button>{user.username} · {user.role === 'admin' ? '管理员' : '普通账号'}</Button>
+              <Button className="account-button"><span className="account-avatar">{user.username.slice(0, 1).toUpperCase()}</span><span>{user.username}</span><span className="account-role">{user.role === 'admin' ? '管理员' : '成员'}</span></Button>
             </Dropdown>
           </Space>
         </Header>

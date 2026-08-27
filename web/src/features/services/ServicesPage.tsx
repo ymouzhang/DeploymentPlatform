@@ -13,6 +13,7 @@ import {
   RollbackOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { mainTablePagination, modalTablePagination } from '../../components/ListPagination'
 import {
   App,
   Button,
@@ -228,15 +229,16 @@ export function ServicesPage() {
       {
         title: '服务器与安装目录',
         key: 'server',
+        width: 280,
         render: (_, record) => (
-          <Space direction="vertical" size={2}>
+          <div className="table-stacked-cell">
             <Typography.Text className="server-address">
               {record.environment.ip}
             </Typography.Text>
-            <Typography.Text type="secondary" className="cell-caption path-caption">
+            <Typography.Text type="secondary" className="cell-caption table-ellipsis-line" ellipsis={{ tooltip: record.environment.install_dir }}>
               {record.environment.install_dir}
             </Typography.Text>
-          </Space>
+          </div>
         ),
       },
       {
@@ -298,6 +300,7 @@ export function ServicesPage() {
         title: '操作',
         key: 'actions',
         width: 390,
+        fixed: 'right',
         render: (_, record) => {
           const { environment, busy } = record
           const pending = actionMutation.isPending && actionMutation.variables?.id === environment.id
@@ -490,7 +493,9 @@ export function ServicesPage() {
           columns={columns}
           dataSource={services}
           loading={servicesQuery.isLoading}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          tableLayout="fixed"
+          scroll={{ x: 1640 }}
+          pagination={mainTablePagination}
           locale={{
             emptyText: (
               <Empty
@@ -516,28 +521,21 @@ export function ServicesPage() {
       />
 
       <Modal
+        rootClassName="config-editor-modal"
         title={
-          <Space>
-            <span>编辑服务配置</span>
-            {configEnvironment && <Tag>{configEnvironment.ip}</Tag>}
-          </Space>
+          <div className="config-modal-title">
+            <span className="config-modal-title-icon"><CodeOutlined /></span>
+            <span><strong>服务配置</strong><small>{configEnvironment ? `${configEnvironment.name} · ${configEnvironment.ip}` : '实例配置'}</small></span>
+          </div>
         }
         width={960}
         open={configOpen}
         onCancel={() => setConfigOpen(false)}
         footer={
-          <Space>
-            <Button icon={<HistoryOutlined />} disabled={!configEnvironment || configInherited} onClick={() => setHistoryOpen(true)}>配置历史</Button>
-            <Button onClick={() => setConfigOpen(false)}>取消</Button>
-            <Button
-              type="primary"
-              loading={previewConfigMutation.isPending}
-              disabled={configLoading}
-              onClick={saveConfig}
-            >
-              预览差异
-            </Button>
-          </Space>
+          <div className="config-modal-footer">
+            <Button type="text" icon={<HistoryOutlined />} disabled={!configEnvironment || configInherited} onClick={() => setHistoryOpen(true)}>配置历史</Button>
+            <Space><Button onClick={() => setConfigOpen(false)}>取消</Button><Button type="primary" loading={previewConfigMutation.isPending} disabled={configLoading} onClick={saveConfig}>检查并预览</Button></Space>
+          </div>
         }
       >
         <div className="config-modal-meta">
@@ -570,7 +568,7 @@ export function ServicesPage() {
       </Modal>
 
       <Modal title={`配置历史 · ${configEnvironment?.name ?? ''}`} width={940} open={historyOpen} footer={null} onCancel={() => setHistoryOpen(false)} destroyOnHidden>
-        <Table<ServiceConfigRevision> rowKey="id" loading={revisionsQuery.isLoading} dataSource={revisionsQuery.data ?? []} pagination={{ pageSize: 8 }} columns={[
+        <Table<ServiceConfigRevision> rowKey="id" loading={revisionsQuery.isLoading} dataSource={revisionsQuery.data ?? []} pagination={modalTablePagination} columns={[
           { title: '修订', width: 150, render: (_, item) => <Space><Typography.Text code>{item.id.slice(0, 8)}</Typography.Text>{item.current && <Tag color="success">当前</Tag>}</Space> },
           { title: '来源', dataIndex: 'source', width: 100, render: (value: string) => value === 'rollback' ? <Tag color="gold">回滚</Tag> : <Tag>保存</Tag> },
           { title: '操作者', dataIndex: 'created_by_username', width: 130, render: (value: string) => value || '升级迁移' },

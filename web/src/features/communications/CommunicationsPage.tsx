@@ -1,5 +1,5 @@
 import { CheckCircleOutlined, CloseCircleOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined, SendOutlined } from '@ant-design/icons'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Badge, Button, Card, Drawer, Empty, Form, Input, List, Modal, Select, Space, Tag, Timeline, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { api } from '../../api/client'
 import { useAuth } from '../../app/AuthContext'
 import type { CommunicationFilter, CommunicationMessage, CommunicationResourceInput } from '../../types'
 import { communicationKeys } from './queryKeys'
+import { LoadMoreFooter } from '../../components/ListPagination'
 
 export function CommunicationsPage() {
   const { message, modal } = App.useApp()
@@ -23,7 +24,13 @@ export function CommunicationsPage() {
   const [createForm] = Form.useForm()
   const [replyForm] = Form.useForm()
   const targetUserID = Form.useWatch('target_user_id', createForm)
-  const listQuery = useQuery({ queryKey: communicationKeys.list(filter), queryFn: () => api.listCommunications(filter), refetchInterval: 30_000 })
+  const listQuery = useInfiniteQuery({
+    queryKey: communicationKeys.list(filter),
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => api.listCommunications({ ...filter, cursor: pageParam || undefined }),
+    getNextPageParam: (last) => last.next_cursor || undefined,
+    refetchInterval: 30_000,
+  })
   const detailQuery = useQuery({ queryKey: communicationKeys.detail(selectedID), queryFn: () => api.getCommunication(selectedID!), enabled: Boolean(selectedID), refetchInterval: 30_000 })
   const packagesQuery = useQuery({ queryKey: ['communication-packages', targetUserID], queryFn: () => api.listPackages(targetUserID), enabled: auth.user.role === 'admin' && Boolean(targetUserID) })
   const environmentsQuery = useQuery({ queryKey: ['communication-environments', targetUserID], queryFn: () => api.listEnvironments(targetUserID), enabled: auth.user.role === 'admin' && Boolean(targetUserID) })
@@ -58,11 +65,12 @@ export function CommunicationsPage() {
   ], [environmentsQuery.data, packagesQuery.data])
   const adminUsers = auth.users.filter((user) => user.role === 'user' && user.enabled)
   const detail = detailQuery.data
+  const rows = listQuery.data?.pages.flatMap((page) => page.items) ?? []
 
   return <div className="page communication-page">
     <div className="page-heading"><div><div className="page-eyebrow">Collaboration</div><Typography.Title level={2}>消息中心</Typography.Title><Typography.Paragraph type="secondary">{auth.user.role === 'admin' ? '向用户发送资源相关事项，并跟踪已读、回执和处理状态。' : '查看管理员发送的事项，并在事项开启期间提交回执。'}</Typography.Paragraph></div>{auth.user.role === 'admin' && <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建事项</Button>}</div>
     <Card className="content-card communication-filter-card"><Space wrap><Input.Search allowClear placeholder="搜索标题或目标账号" style={{ width: 260 }} onSearch={(keyword) => setFilter((value) => ({ ...value, keyword, cursor: undefined }))} /><Select allowClear placeholder="全部状态" style={{ width: 150 }} options={[{ value: 'open', label: '处理中' }, { value: 'closed', label: '已关闭' }]} onChange={(status) => setFilter((value) => ({ ...value, status, cursor: undefined }))} /><Select allowClear value={filter.unread} placeholder="全部消息" style={{ width: 150 }} options={[{ value: true, label: '有未读消息' }, { value: false, label: '已读' }]} onChange={(unread) => setFilter((value) => ({ ...value, unread, cursor: undefined }))} />{auth.user.role === 'admin' && <Select allowClear showSearch optionFilterProp="label" placeholder="全部用户" style={{ width: 180 }} options={adminUsers.map((user) => ({ value: user.id, label: user.username }))} onChange={(target_user_id) => setFilter((value) => ({ ...value, target_user_id, cursor: undefined }))} />}</Space></Card>
-    <Card className="content-card communication-list-card" styles={{ body: { padding: 0 } }}><List loading={listQuery.isLoading} locale={{ emptyText: <Empty description="暂无通讯事项" /> }} dataSource={listQuery.data?.items ?? []} renderItem={(item) => <List.Item className={`communication-row${item.unread_count ? ' is-unread' : ''}`} onClick={() => setSelectedID(item.id)} extra={<Space direction="vertical" align="end"><Tag color={item.status === 'open' ? 'green' : 'default'}>{item.status === 'open' ? '处理中' : '已关闭'}</Tag>{item.reopen_count > 0 && <Tag color="blue" icon={<ReloadOutlined />}>重新打开过 {item.reopen_count} 次</Tag>}</Space>}><List.Item.Meta avatar={<Badge count={item.unread_count} overflowCount={99}><div className="communication-avatar"><MessageOutlined /></div></Badge>} title={<Space><Typography.Text strong>{item.title}</Typography.Text>{auth.user.role === 'admin' && <Tag>{item.target_username}</Tag>}</Space>} description={<div className="communication-row-copy"><span>{item.last_message || '暂无消息'}</span><small>{item.resources.length ? `关联 ${item.resources.length} 个资源 · ` : ''}{new Date(item.updated_at).toLocaleString('zh-CN')}</small></div>} /></List.Item>} />{listQuery.data?.next_cursor && <div className="audit-load-more"><Button onClick={() => setFilter((value) => ({ ...value, cursor: listQuery.data?.next_cursor }))}>下一页</Button></div>}</Card>
+    <Card className="content-card communication-list-card" styles={{ body: { padding: 0 } }}><List loading={listQuery.isLoading} locale={{ emptyText: <Empty description="暂无通讯事项" /> }} dataSource={rows} renderItem={(item) => <List.Item className={`communication-row${item.unread_count ? ' is-unread' : ''}`} onClick={() => setSelectedID(item.id)} extra={<Space direction="vertical" align="end"><Tag color={item.status === 'open' ? 'green' : 'default'}>{item.status === 'open' ? '处理中' : '已关闭'}</Tag>{item.reopen_count > 0 && <Tag color="blue" icon={<ReloadOutlined />}>重新打开过 {item.reopen_count} 次</Tag>}</Space>}><List.Item.Meta avatar={<Badge count={item.unread_count} overflowCount={99}><div className="communication-avatar"><MessageOutlined /></div></Badge>} title={<Space><Typography.Text strong>{item.title}</Typography.Text>{auth.user.role === 'admin' && <Tag>{item.target_username}</Tag>}</Space>} description={<div className="communication-row-copy"><span>{item.last_message || '暂无消息'}</span><small>{item.resources.length ? `关联 ${item.resources.length} 个资源 · ` : ''}{new Date(item.updated_at).toLocaleString('zh-CN')}</small></div>} /></List.Item>} /><LoadMoreFooter hasMore={Boolean(listQuery.hasNextPage)} loading={listQuery.isFetchingNextPage} onLoadMore={() => void listQuery.fetchNextPage()} /></Card>
 
     <Drawer width={820} title={detail?.title ?? '事项详情'} open={Boolean(selectedID)} onClose={() => setSelectedID(undefined)} loading={detailQuery.isLoading} extra={detail && auth.user.role === 'admin' && (detail.status === 'open' ? <Button danger icon={<CloseCircleOutlined />} onClick={() => stateConfirm(modal, '关闭事项', '关闭后用户将无法继续回复，并会收到关闭通知。', (content) => close.mutate({ id: detail.id, content }))}>关闭事项</Button> : <Button type="primary" icon={<ReloadOutlined />} onClick={() => stateConfirm(modal, '重新打开事项', '重新打开会被明确记录，并通知用户可以继续回复。', (content) => reopen.mutate({ id: detail.id, content }))}>重新打开</Button>)}>
       {detail && <div className="communication-detail"><div className="communication-detail-summary"><Space wrap><Tag color={detail.status === 'open' ? 'green' : 'default'}>{detail.status === 'open' ? '处理中' : '已关闭'}</Tag>{detail.reopen_count > 0 && <Tag color="blue">已重新打开 {detail.reopen_count} 次</Tag>}<Typography.Text type="secondary">目标账号：{detail.target_username}</Typography.Text><Typography.Text type="secondary">创建人：{detail.created_by_username}</Typography.Text></Space>{detail.status === 'closed' && <div className="communication-closed-note"><CloseCircleOutlined /> 事项已关闭，无法继续回复</div>}</div>

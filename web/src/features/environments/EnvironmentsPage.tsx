@@ -10,6 +10,7 @@ import {
   TagsOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { mainTablePagination, modalTablePagination } from '../../components/ListPagination'
 import {
   App,
   Button,
@@ -234,13 +235,14 @@ export function EnvironmentsPage() {
         title: '环境',
         dataIndex: 'name',
         key: 'name',
+        width: 180,
         render: (name: string, record) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text strong>{name}</Typography.Text>
-            <Typography.Text type="secondary" className="cell-caption">
+          <div className="table-stacked-cell">
+            <Typography.Text strong ellipsis={{ tooltip: name }}>{name}</Typography.Text>
+            <Typography.Text type="secondary" className="cell-caption" ellipsis={{ tooltip: record.service_type }}>
               {record.service_type}
             </Typography.Text>
-          </Space>
+          </div>
         ),
       },
       {
@@ -254,13 +256,14 @@ export function EnvironmentsPage() {
       {
         title: '服务器',
         key: 'server',
+        width: 180,
         render: (_, record) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text code>{record.ip}</Typography.Text>
+          <div className="table-stacked-cell">
+            <Typography.Text code className="table-mono-line">{record.ip}</Typography.Text>
             <Typography.Text type="secondary" className="cell-caption">
               {record.ssh_user}@{record.ssh_port}
             </Typography.Text>
-          </Space>
+          </div>
         ),
       },
       {
@@ -290,8 +293,8 @@ export function EnvironmentsPage() {
         title: '安装目录',
         dataIndex: 'install_dir',
         key: 'install_dir',
-        ellipsis: true,
-        render: (value: string) => <Typography.Text code>{value}</Typography.Text>,
+        width: 260,
+        render: (value: string) => <Typography.Text code className="table-ellipsis-line" ellipsis={{ tooltip: value }}>{value}</Typography.Text>,
       },
       {
         title: 'SSH 校验',
@@ -320,6 +323,7 @@ export function EnvironmentsPage() {
         title: '操作',
         key: 'actions',
         width: 280,
+        fixed: 'right',
         render: (_, record) => (
           <Space>
             <Button
@@ -427,7 +431,9 @@ export function EnvironmentsPage() {
           columns={columns}
           dataSource={environments}
           loading={environmentsQuery.isLoading}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          tableLayout="fixed"
+          scroll={{ x: 1850 }}
+          pagination={mainTablePagination}
           locale={{ emptyText: '暂无环境，请先创建目标服务器环境' }}
         />
       </Card>
@@ -537,12 +543,12 @@ export function EnvironmentsPage() {
           <Form.Item name="value" rules={[{ required: true, message: '请输入标签值' }]}><Input maxLength={32} placeholder="值，如生产" /></Form.Item>
           <Form.Item><Space><Button type="primary" htmlType="submit" loading={saveTagMutation.isPending}>{editingTag ? '保存修改' : '新增标签'}</Button>{editingTag && <Button onClick={() => { setEditingTag(undefined); tagForm.resetFields() }}>取消编辑</Button>}</Space></Form.Item>
         </Form>
-        <Table<ResourceTag> rowKey="id" size="small" pagination={{ pageSize: 8 }} dataSource={tagCatalog.filter((tag) => user.role !== 'admin' || !ownerId || tag.owner_id === ownerId)} columns={[
+        <Table<ResourceTag> rowKey="id" size="small" pagination={modalTablePagination} scroll={{ x: 720 }} dataSource={tagCatalog.filter((tag) => user.role !== 'admin' || !ownerId || tag.owner_id === ownerId)} columns={[
           { title: '所属账号', dataIndex: 'owner_username', width: 130, render: (value, item) => value || users.find((userItem) => userItem.id === item.owner_id)?.username || item.owner_id },
-          { title: '分组', dataIndex: 'group_name' },
-          { title: '值', dataIndex: 'value' },
+          { title: '分组', dataIndex: 'group_name', width: 160, ellipsis: true },
+          { title: '值', dataIndex: 'value', width: 170, ellipsis: true },
           { title: '关联环境', dataIndex: 'environment_count', width: 100, render: (value) => `${value} 个` },
-          { title: '操作', width: 160, render: (_, item) => <Space><Button size="small" onClick={() => { setEditingTag(item); tagForm.setFieldsValue({ group_name: item.group_name, value: item.value }) }}>编辑</Button><Button size="small" danger loading={deleteTagMutation.isPending && deleteTagMutation.variables === item.id} onClick={() => modal.confirm({ title: `删除标签 ${item.group_name} / ${item.value}？`, content: `将解除 ${item.environment_count} 个环境的关联，不会删除资源。`, okButtonProps: { danger: true }, onOk: () => deleteTagMutation.mutate(item.id) })}>删除</Button></Space> },
+          { title: '操作', width: 160, fixed: 'right', render: (_, item) => <Space><Button size="small" onClick={() => { setEditingTag(item); tagForm.setFieldsValue({ group_name: item.group_name, value: item.value }) }}>编辑</Button><Button size="small" danger loading={deleteTagMutation.isPending && deleteTagMutation.variables === item.id} onClick={() => modal.confirm({ title: `删除标签 ${item.group_name} / ${item.value}？`, content: `将解除 ${item.environment_count} 个环境的关联，不会删除资源。`, okButtonProps: { danger: true }, onOk: () => deleteTagMutation.mutate(item.id) })}>删除</Button></Space> },
         ]} />
       </Modal>
 

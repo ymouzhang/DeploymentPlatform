@@ -13,6 +13,7 @@ import { App, Button, Card, Descriptions, Drawer, Input, Select, Space, Table, T
 import { api } from '../../api/client'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { AuditEvent, AuditFilter } from '../../types'
+import { LoadMoreFooter } from '../../components/ListPagination'
 
 type DraftFilter = {
   from: string
@@ -109,18 +110,20 @@ export function AuditPage() {
         dataSource={rows}
         loading={events.isLoading || events.isFetchingNextPage}
         pagination={false}
+        tableLayout="fixed"
+        scroll={{ x: 1260 }}
         columns={[
           { title: '时间', dataIndex: 'occurred_at', width: 168, render: (value: string) => <span className="audit-time">{formatTime(value)}</span> },
           { title: '操作账号', width: 138, render: (_, row) => <div><Typography.Text strong>{row.actor_username || '匿名'}</Typography.Text><div className="cell-caption">{row.actor_role ? roleLabel(row.actor_role) : '未认证'}</div></div> },
           { title: '事件', width: 210, render: (_, row) => <div><Typography.Text>{actionLabel(row.action)}</Typography.Text><div className="cell-caption">{categoryLabel(row.category)}</div></div> },
-          { title: '操作对象', render: (_, row) => <div><Typography.Text>{row.target_label || '-'}</Typography.Text><div className="cell-caption">{row.owner_username ? `所属：${row.owner_username}` : row.target_type || '-'}</div></div> },
+          { title: '操作对象', width: 300, render: (_, row) => <div className="table-stacked-cell"><Typography.Text ellipsis={{ tooltip: row.target_label || '-' }}>{row.target_label || '-'}</Typography.Text><Typography.Text type="secondary" className="cell-caption" ellipsis={{ tooltip: row.owner_username ? `所属：${row.owner_username}` : row.target_type || '-' }}>{row.owner_username ? `所属：${row.owner_username}` : row.target_type || '-'}</Typography.Text></div> },
           { title: '来源 IP', dataIndex: 'source_ip', width: 136, render: (value: string) => <span className="server-address">{value || '-'}</span> },
           { title: '请求 ID', dataIndex: 'request_id', width: 126, render: (value: string) => <Typography.Text code copyable={{ text: value }}>{value.slice(0, 8)}</Typography.Text> },
           { title: '结果', width: 92, render: (_, row) => <OutcomeTag event={row} /> },
-          { title: '操作', width: 78, render: (_, row) => <Button type="text" icon={<EyeOutlined />} onClick={() => setSelected(row.id)}>详情</Button> },
+          { title: '操作', width: 90, fixed: 'right', render: (_, row) => <Button type="text" icon={<EyeOutlined />} onClick={() => setSelected(row.id)}>详情</Button> },
         ]}
       />
-      {events.hasNextPage && <div className="audit-load-more"><Button loading={events.isFetchingNextPage} onClick={() => events.fetchNextPage()}>加载更多</Button></div>}
+      <LoadMoreFooter hasMore={Boolean(events.hasNextPage)} loading={events.isFetchingNextPage} onLoadMore={() => void events.fetchNextPage()} />
     </Card>
 
     <Drawer title="审计事件详情" width={620} open={Boolean(selected)} onClose={() => setSelected(null)}>
