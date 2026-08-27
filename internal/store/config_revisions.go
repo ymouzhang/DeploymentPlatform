@@ -8,7 +8,7 @@ import (
 	"DP/internal/domain"
 )
 
-func (s *Store) SaveServiceConfigRevision(ctx context.Context, config domain.ServiceConfig, revision domain.ServiceConfigRevision) (domain.ServiceConfigRevision, error) {
+func (s *Store) SaveServiceConfigRevision(ctx context.Context, config domain.ServiceConfig, revision domain.ServiceConfigRevision, updateHealthPort bool) (domain.ServiceConfigRevision, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.ServiceConfigRevision{}, err
@@ -33,6 +33,16 @@ func (s *Store) SaveServiceConfigRevision(ctx context.Context, config domain.Ser
 		config.Path, config.Port, revision.ID, formatTime(revision.CreatedAt))
 	if err != nil {
 		return domain.ServiceConfigRevision{}, err
+	}
+	if updateHealthPort {
+		result, err := tx.ExecContext(ctx, `UPDATE environments SET health_port = ?, updated_at = ? WHERE id = ?`,
+			config.Port, formatTime(revision.CreatedAt), config.EnvironmentID)
+		if err != nil {
+			return domain.ServiceConfigRevision{}, err
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			return domain.ServiceConfigRevision{}, domain.ErrNotFound
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.ServiceConfigRevision{}, err

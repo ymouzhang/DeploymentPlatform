@@ -668,6 +668,17 @@ func (s *Store) CreateOperation(ctx context.Context, op domain.Operation) error 
 		return err
 	}
 	defer tx.Rollback()
+	if op.OwnerID != "" {
+		var ownerID string
+		if err := tx.QueryRowContext(ctx, `SELECT owner_id FROM environments WHERE id = ?`, op.EnvironmentID).Scan(&ownerID); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if ownerID != op.OwnerID {
+			return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "资源归属已变化，请重新发起操作"}
+		}
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO operations (
 			id, environment_id, request_id, actor_user_id, actor_username, owner_id, owner_username,

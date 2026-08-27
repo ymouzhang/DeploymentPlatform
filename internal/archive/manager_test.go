@@ -96,7 +96,7 @@ func TestDeletePackage(t *testing.T) {
 	}
 }
 
-func TestTransferOwnerMovesPackageFileAndMetadata(t *testing.T) {
+func TestTransferOwnerPreservesImmutablePackageFile(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
@@ -140,9 +140,19 @@ func TestTransferOwnerMovesPackageFileAndMetadata(t *testing.T) {
 	if _, err := os.Stat(manager.AbsolutePath(pkg)); err != nil {
 		t.Fatalf("target package file: %v", err)
 	}
+	if !strings.Contains(pkg.StoragePath, source.ID) {
+		t.Fatalf("storage path was rewritten: %q", pkg.StoragePath)
+	}
 	versions, err := manager.ListVersions(ctx, target.ID, "demo")
 	if err != nil || len(versions) != 1 || versions[0].OwnerID != target.ID {
 		t.Fatalf("transferred versions=%+v err=%v", versions, err)
+	}
+	packagePath := manager.AbsolutePath(pkg)
+	if err := manager.DeleteForOwner(ctx, target.ID, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(packagePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("transferred package file still exists: %v", err)
 	}
 }
 

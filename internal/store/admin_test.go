@@ -35,7 +35,7 @@ func TestTransferResourcesPreservesOperationSnapshot(t *testing.T) {
 	if err != nil || len(packages) != 1 || environments != 1 {
 		t.Fatalf("preview packages=%+v environments=%d err=%v", packages, environments, err)
 	}
-	result, err := db.TransferResources(ctx, source.ID, target.ID, map[string]string{"demo": "packages/target/demo/current.tar.gz"})
+	result, err := db.TransferResources(ctx, source.ID, target.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +50,16 @@ func TestTransferResourcesPreservesOperationSnapshot(t *testing.T) {
 	if history.OwnerID != source.ID || history.OwnerUsername != source.Username {
 		t.Fatalf("operation snapshot changed: %+v", history)
 	}
+	stale := op
+	stale.ID = NewID()
+	stale.Status = domain.OperationQueued
+	if err := db.CreateOperation(ctx, stale); appErrorCode(err) != "TRANSFER_CONFLICT" {
+		t.Fatalf("stale owner operation error=%v", err)
+	}
+	transferredPackage, err := db.GetPackageByOwner(ctx, target.ID, "demo")
+	if err != nil || transferredPackage.StoragePath != "packages/source/demo/current.tar.gz" {
+		t.Fatalf("transferred package=%+v err=%v", transferredPackage, err)
+	}
 }
 
 func TestTransferPreviewRejectsConflictsAndActiveOperations(t *testing.T) {
@@ -61,8 +71,12 @@ func TestTransferPreviewRejectsConflictsAndActiveOperations(t *testing.T) {
 	defer db.Close()
 	source, _ := db.CreateUser(ctx, domain.User{Username: "source", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
 	target, _ := db.CreateUser(ctx, domain.User{Username: "target", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
+	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: source.ID, Name: "active", IP: "192.0.2.30", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
-	if err := db.CreateOperation(ctx, domain.Operation{ID: NewID(), OwnerID: source.ID, EnvironmentID: "gone", Action: domain.ActionStart, Status: domain.OperationRunning, Stage: "script", LogPath: "operations/active.jsonl", CreatedAt: now}); err != nil {
+	if err := db.CreateOperation(ctx, domain.Operation{ID: NewID(), OwnerID: source.ID, EnvironmentID: env.ID, Action: domain.ActionStart, Status: domain.OperationRunning, Stage: "script", LogPath: "operations/active.jsonl", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := db.TransferPreview(ctx, source.ID, target.ID); appErrorCode(err) != "TRANSFER_CONFLICT" {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -74,8 +76,16 @@ func run() error {
 		rootCtx, cfg.DataDir, db, passwordCipher, packageManager, remoteExecutor, auditService, log,
 	)
 	healthMonitor := health.NewMonitor(db, cfg.HealthInterval)
-	go healthMonitor.Run(rootCtx)
-	go auditService.Run(rootCtx)
+	var background sync.WaitGroup
+	background.Add(2)
+	go func() {
+		defer background.Done()
+		healthMonitor.Run(rootCtx)
+	}()
+	go func() {
+		defer background.Done()
+		auditService.Run(rootCtx)
+	}()
 
 	dist, err := fs.Sub(webui.Files, "dist")
 	if err == nil {
@@ -98,7 +108,7 @@ func run() error {
 		Addr:              cfg.ListenAddr,
 		Handler:           api.Handler(dist),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       0,
+		ReadTimeout:       30 * time.Minute,
 		WriteTimeout:      0,
 		IdleTimeout:       75 * time.Second,
 	}
@@ -107,18 +117,22 @@ func run() error {
 		log.Info("DP started", "address", cfg.ListenAddr, "data_dir", cfg.DataDir)
 		errCh <- server.ListenAndServe()
 	}()
+	var runErr error
 	select {
 	case <-rootCtx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown HTTP server: %w", err)
-		}
-		return nil
 	case err := <-errCh:
-		if err == http.ErrServerClosed {
-			return nil
+		if err != http.ErrServerClosed {
+			runErr = err
 		}
-		return err
+		stop()
 	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownErr := server.Shutdown(shutdownCtx)
+	cancel()
+	if shutdownErr != nil {
+		runErr = errors.Join(runErr, fmt.Errorf("shutdown HTTP server: %w", shutdownErr))
+	}
+	operationManager.Wait()
+	background.Wait()
+	return runErr
 }

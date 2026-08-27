@@ -230,14 +230,7 @@ func (a *API) sourceIP(r *http.Request) string {
 	if !direct.IsValid() {
 		return ""
 	}
-	trustedDirect := false
-	for _, prefix := range a.trustedProxies {
-		if prefix.Contains(direct) {
-			trustedDirect = true
-			break
-		}
-	}
-	if !trustedDirect {
+	if !a.isTrustedProxy(r.RemoteAddr) {
 		return direct.String()
 	}
 	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
@@ -258,6 +251,19 @@ func (a *API) sourceIP(r *http.Request) string {
 		}
 	}
 	return direct.String()
+}
+
+func (a *API) isTrustedProxy(remoteAddr string) bool {
+	direct := parseAddress(remoteAddr)
+	if !direct.IsValid() {
+		return false
+	}
+	for _, prefix := range a.trustedProxies {
+		if prefix.Contains(direct) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseAddress(value string) netip.Addr {

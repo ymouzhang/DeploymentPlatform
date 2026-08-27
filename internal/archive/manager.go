@@ -109,9 +109,6 @@ func (m *Manager) UploadVersionForOwner(
 		return domain.Package{}, domain.FieldError("file", "安装包仅支持 .tar.gz 格式")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	tempDir := filepath.Join(m.dataDir, "tmp")
 	if err := os.MkdirAll(tempDir, 0o750); err != nil {
 		return domain.Package{}, err
@@ -146,6 +143,10 @@ func (m *Manager) UploadVersionForOwner(
 	if !inspection.HasStart || !inspection.HasStop {
 		return domain.Package{}, domain.FieldError("file", "安装包根目录必须包含 start.sh 和 stop.sh")
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var existingNote string
 	if currentPackage, getErr := m.store.GetPackageByOwner(ctx, ownerID, serviceType); getErr == nil {
 		existingNote = currentPackage.Note
@@ -331,6 +332,10 @@ func (m *Manager) DeleteForOwner(ctx context.Context, ownerID, serviceType strin
 	if err != nil {
 		return err
 	}
+	versions, err := m.store.ListPackageVersions(ctx, ownerID, serviceType)
+	if err != nil {
+		return err
+	}
 	installed, err := m.store.CountInstalledEnvironmentsByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return err
@@ -344,58 +349,24 @@ func (m *Manager) DeleteForOwner(ctx context.Context, ownerID, serviceType strin
 	if err := m.store.DeletePackageByOwner(ctx, ownerID, serviceType); err != nil {
 		return err
 	}
-	// storage_path 来自后台生成且经过 Clean；兼容升级前不含 owner_id 的旧路径。
-	if err := os.RemoveAll(filepath.Join(m.dataDir, "packages", ownerID, serviceType)); err != nil {
-		return fmt.Errorf("删除安装包文件失败: %w", err)
+	var removeErr error
+	for _, version := range versions {
+		path := filepath.Join(m.dataDir, filepath.Clean(version.StoragePath))
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			removeErr = errors.Join(removeErr, err)
+		}
+	}
+	if removeErr != nil {
+		return fmt.Errorf("删除安装包文件失败: %w", removeErr)
 	}
 	return nil
 }
 
-// TransferOwner atomically changes business ownership and relocates package files.
-// Database failures trigger a best-effort file rollback; callers receive no partial success.
+// TransferOwner changes business ownership without moving immutable package files.
 func (m *Manager) TransferOwner(ctx context.Context, sourceID, targetID string) (domain.TransferResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	packages, _, err := m.store.TransferPreview(ctx, sourceID, targetID)
-	if err != nil {
-		return domain.TransferResult{}, err
-	}
-	type move struct{ from, to string }
-	moves := make([]move, 0, len(packages))
-	paths := make(map[string]string, len(packages))
-	rollback := func() {
-		for i := len(moves) - 1; i >= 0; i-- {
-			_ = os.Rename(moves[i].to, moves[i].from)
-		}
-	}
-	for _, pkg := range packages {
-		from := filepath.Join(m.dataDir, "packages", sourceID, pkg.ServiceType)
-		to := filepath.Join(m.dataDir, "packages", targetID, pkg.ServiceType)
-		relative := strings.Replace(filepath.Clean(pkg.StoragePath), filepath.Join("packages", sourceID)+string(filepath.Separator), filepath.Join("packages", targetID)+string(filepath.Separator), 1)
-		if _, statErr := os.Stat(to); statErr == nil {
-			rollback()
-			return domain.TransferResult{}, &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "目标账号安装包文件已存在"}
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			rollback()
-			return domain.TransferResult{}, statErr
-		}
-		if err := os.MkdirAll(filepath.Dir(to), 0o750); err != nil {
-			rollback()
-			return domain.TransferResult{}, err
-		}
-		if err := os.Rename(from, to); err != nil {
-			rollback()
-			return domain.TransferResult{}, fmt.Errorf("移动安装包失败: %w", err)
-		}
-		moves = append(moves, move{from: from, to: to})
-		paths[pkg.ServiceType] = relative
-	}
-	result, err := m.store.TransferResources(ctx, sourceID, targetID, paths)
-	if err != nil {
-		rollback()
-		return domain.TransferResult{}, err
-	}
-	return result, nil
+	return m.store.TransferResources(ctx, sourceID, targetID)
 }
 
 func (m *Manager) AbsolutePath(pkg domain.Package) string {

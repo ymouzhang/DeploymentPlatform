@@ -143,7 +143,7 @@ func TestResourceTransferRecreatesEquivalentTargetTags(t *testing.T) {
 	if err := db.ReplaceEnvironmentTags(ctx, env.ID, []string{tag.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.TransferResources(ctx, source.ID, target.ID, map[string]string{}); err != nil {
+	if _, err := db.TransferResources(ctx, source.ID, target.ID); err != nil {
 		t.Fatal(err)
 	}
 	transferred, err := db.GetEnvironment(ctx, env.ID)

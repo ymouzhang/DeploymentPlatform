@@ -3,30 +3,34 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"DP/internal/archive"
 	"DP/internal/domain"
-	"DP/internal/remote"
 	"DP/internal/security"
 	"DP/internal/store"
 )
+
+type configWriter interface {
+	WriteConfig(context.Context, domain.Environment, []byte, string, []byte) (string, error)
+}
 
 type ServiceConfigService struct {
 	store    *store.Store
 	packages *archive.Manager
 	cipher   *security.PasswordCipher
-	remote   *remote.Executor
+	remote   configWriter
 }
 
 func NewServiceConfigService(
 	store *store.Store,
 	packages *archive.Manager,
 	cipher *security.PasswordCipher,
-	remoteExecutor *remote.Executor,
+	remoteWriter configWriter,
 ) *ServiceConfigService {
 	return &ServiceConfigService{
-		store: store, packages: packages, cipher: cipher, remote: remoteExecutor,
+		store: store, packages: packages, cipher: cipher, remote: remoteWriter,
 	}
 }
 
@@ -69,7 +73,7 @@ func (s *ServiceConfigService) Update(
 	if !current.Inherited && current.Content == string(content) {
 		return current, nil
 	}
-	revision, err := s.save(ctx, environmentID, content, actor, "manual", "")
+	revision, err := s.save(ctx, environmentID, current, content, actor, "manual", "")
 	if err != nil {
 		return domain.ServiceConfig{}, err
 	}
@@ -108,6 +112,10 @@ func (s *ServiceConfigService) GetRevision(ctx context.Context, environmentID, r
 }
 
 func (s *ServiceConfigService) Rollback(ctx context.Context, environmentID, revisionID string, actor domain.User) (domain.ServiceConfigRevision, error) {
+	current, err := s.Get(ctx, environmentID)
+	if err != nil {
+		return domain.ServiceConfigRevision{}, err
+	}
 	target, err := s.GetRevision(ctx, environmentID, revisionID)
 	if err != nil {
 		return domain.ServiceConfigRevision{}, err
@@ -115,10 +123,10 @@ func (s *ServiceConfigService) Rollback(ctx context.Context, environmentID, revi
 	if target.Current {
 		return domain.ServiceConfigRevision{}, &domain.AppError{Code: "CONFIG_REVISION_CURRENT", Message: "该修订已经是当前配置，无需回滚"}
 	}
-	return s.save(ctx, environmentID, []byte(target.Content), actor, "rollback", target.ID)
+	return s.save(ctx, environmentID, current, []byte(target.Content), actor, "rollback", target.ID)
 }
 
-func (s *ServiceConfigService) save(ctx context.Context, environmentID string, content []byte, actor domain.User, source, restoredFrom string) (domain.ServiceConfigRevision, error) {
+func (s *ServiceConfigService) save(ctx context.Context, environmentID string, current domain.ServiceConfig, content []byte, actor domain.User, source, restoredFrom string) (domain.ServiceConfigRevision, error) {
 	env, err := s.store.GetEnvironment(ctx, environmentID)
 	if err != nil {
 		return domain.ServiceConfigRevision{}, err
@@ -138,8 +146,10 @@ func (s *ServiceConfigService) save(ctx context.Context, environmentID string, c
 		Path:          archive.RelativeConfigPath(inspection),
 		Port:          port,
 	}
+	var password []byte
 	if env.Installed {
-		password, decryptErr := s.cipher.Decrypt(env.SSHPasswordEnc)
+		var decryptErr error
+		password, decryptErr = s.cipher.Decrypt(env.SSHPasswordEnc)
 		if decryptErr != nil {
 			return domain.ServiceConfigRevision{}, decryptErr
 		}
@@ -156,14 +166,17 @@ func (s *ServiceConfigService) save(ctx context.Context, environmentID string, c
 		Content: config.Content, Format: config.Format, Path: config.Path, Port: config.Port,
 		Source: source, RestoredFromID: restoredFrom, CreatedBy: actor.ID,
 		CreatedByName: actor.Username, CreatedAt: time.Now().UTC()}
-	saved, err := s.store.SaveServiceConfigRevision(ctx, config, revision)
+	saved, err := s.store.SaveServiceConfigRevision(ctx, config, revision, env.Installed)
 	if err != nil {
-		return domain.ServiceConfigRevision{}, err
-	}
-	if env.Installed {
-		if err := s.store.UpdateHealthPort(ctx, env.ID, port); err != nil {
-			return domain.ServiceConfigRevision{}, err
+		if env.Installed {
+			restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			_, restoreErr := s.remote.WriteConfig(restoreCtx, env, password, current.Path, []byte(current.Content))
+			cancel()
+			if restoreErr != nil {
+				return domain.ServiceConfigRevision{}, errors.Join(err, fmt.Errorf("restore remote config: %w", restoreErr))
+			}
 		}
+		return domain.ServiceConfigRevision{}, err
 	}
 	return saved, nil
 }

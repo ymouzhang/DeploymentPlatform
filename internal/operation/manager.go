@@ -32,6 +32,7 @@ type Manager struct {
 
 	mu     sync.RWMutex
 	active map[string]string
+	wg     sync.WaitGroup
 }
 
 func NewManager(
@@ -139,8 +140,17 @@ func (m *Manager) start(
 		auditEvent.OperationID = op.ID
 		m.audit.Record(ctx, *auditEvent)
 	}
-	go m.run(op)
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		m.run(op)
+	}()
 	return op, nil
+}
+
+// Wait blocks until all accepted operations have persisted their terminal state.
+func (m *Manager) Wait() {
+	m.wg.Wait()
 }
 
 func (m *Manager) run(op domain.Operation) {

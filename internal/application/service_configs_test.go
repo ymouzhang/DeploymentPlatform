@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
 	"DP/internal/archive"
 	"DP/internal/domain"
+	"DP/internal/security"
 	"DP/internal/store"
 )
 
@@ -68,6 +70,59 @@ func TestServiceConfigPreviewHistoryAndRollback(t *testing.T) {
 	if err != nil || len(revisions) != 0 {
 		t.Fatalf("revision cascade=%+v err=%v", revisions, err)
 	}
+}
+
+func TestServiceConfigRestoresRemoteWhenLocalCommitFails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dataDir := t.TempDir()
+	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	manager := archive.NewManager(dataDir, 10<<20, db)
+	if _, err := manager.Upload(ctx, "demo", "demo.tar.gz", bytes.NewReader(configArchive(t, `{"port":8080}`)), nil); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := security.NewPasswordCipher(bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := cipher.Encrypt("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := 8080
+	env, err := db.CreateEnvironment(ctx, domain.Environment{
+		OwnerID: store.InitialAdminID, Name: "test", IP: "192.0.2.21", SSHUser: "u", SSHPort: 22,
+		SSHPasswordEnc: encrypted, InstallDir: "/opt/demo", ServiceType: "demo", Installed: true, HealthPort: &port,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &cancelingConfigWriter{cancel: cancel}
+	service := NewServiceConfigService(db, manager, cipher, writer)
+	actor := domain.User{ID: store.InitialAdminID, Username: "admin", Role: domain.RoleAdmin}
+	_, err = service.Update(ctx, env.ID, []byte(`{"port":9090}`), actor)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Update() error = %v, want context cancellation", err)
+	}
+	if len(writer.contents) != 2 || string(writer.contents[0]) != `{"port":9090}` || string(writer.contents[1]) != `{"port":8080}` {
+		t.Fatalf("remote writes = %q", writer.contents)
+	}
+}
+
+type cancelingConfigWriter struct {
+	cancel   context.CancelFunc
+	contents [][]byte
+}
+
+func (w *cancelingConfigWriter) WriteConfig(_ context.Context, _ domain.Environment, _ []byte, _ string, content []byte) (string, error) {
+	w.contents = append(w.contents, bytes.Clone(content))
+	if len(w.contents) == 1 {
+		w.cancel()
+	}
+	return "", nil
 }
 
 func configArchive(t *testing.T, config string) []byte {

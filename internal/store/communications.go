@@ -428,26 +428,34 @@ func (s *Store) communicationMessageRecipients(ctx context.Context, actor domain
 }
 
 func (s *Store) populateCommunicationResources(ctx context.Context, communications []domain.Communication) error {
+	if len(communications) == 0 {
+		return nil
+	}
+	indexes := make(map[string]int, len(communications))
+	marks := make([]string, 0, len(communications))
+	args := make([]any, 0, len(communications))
 	for i := range communications {
-		rows, err := s.db.QueryContext(ctx, communicationResourceSelect+` WHERE r.thread_id = ? ORDER BY r.created_at, r.id`, communications[i].ID)
+		indexes[communications[i].ID] = i
+		marks = append(marks, "?")
+		args = append(args, communications[i].ID)
+		communications[i].Resources = []domain.CommunicationResource{}
+	}
+	query := communicationResourceSelect + ` WHERE r.thread_id IN (` + strings.Join(marks, ",") + `)
+		ORDER BY r.thread_id, r.created_at, r.id`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, err := scanCommunicationResource(rows)
 		if err != nil {
 			return err
 		}
-		resources := []domain.CommunicationResource{}
-		for rows.Next() {
-			item, err := scanCommunicationResource(rows)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			resources = append(resources, item)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		communications[i].Resources = resources
+		index := indexes[item.ThreadID]
+		communications[index].Resources = append(communications[index].Resources, item)
 	}
-	return nil
+	return rows.Err()
 }
 
 func scanCommunication(row scanner) (domain.Communication, error) {

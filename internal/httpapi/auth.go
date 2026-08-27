@@ -85,7 +85,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	setAuditActor(r, user, user.Username)
 	setAuditTarget(r, user, "session", user.ID, user.Username, nil)
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: token, Path: "/", Expires: expires,
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: requestIsHTTPS(r)})
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: a.requestIsHTTPS(r)})
 	writeData(w, http.StatusOK, user)
 }
 
@@ -94,7 +94,7 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 		_ = a.auth.Logout(r.Context(), cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: requestIsHTTPS(r)})
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: a.requestIsHTTPS(r)})
 	writeData(w, http.StatusOK, map[string]bool{"logged_out": true})
 }
 
@@ -118,7 +118,7 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 	setAuditTarget(r, currentUser(r), "session", sessionID, currentUser(r).Username, map[string]any{"current": sessionID == currentSession(r).ID})
 	current := sessionID == currentSession(r).ID
 	if current {
-		http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: requestIsHTTPS(r)})
+		http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: a.requestIsHTTPS(r)})
 	}
 	writeData(w, http.StatusOK, map[string]bool{"session_revoked": true, "current": current})
 }
@@ -137,7 +137,7 @@ func (a *API) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setAuditTarget(r, currentUser(r), "user", currentUser(r).ID, currentUser(r).Username, map[string]any{"password_changed": true})
-	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: requestIsHTTPS(r)})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: a.requestIsHTTPS(r)})
 	writeData(w, http.StatusOK, map[string]bool{"password_changed": true})
 }
 
@@ -337,9 +337,9 @@ func (a *API) authorizeOperation(r *http.Request, id string) (domain.Operation, 
 	return domain.Operation{}, domain.ErrNotFound
 }
 
-func requestIsHTTPS(r *http.Request) bool {
+func (a *API) requestIsHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https")
+	return a.isTrustedProxy(r.RemoteAddr) && strings.EqualFold(firstForwardedValue(r.Header.Get("X-Forwarded-Proto")), "https")
 }

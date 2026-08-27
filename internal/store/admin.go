@@ -154,35 +154,8 @@ func (s *Store) UserDetail(ctx context.Context, id string, now time.Time) (domai
 type TransferPackage struct{ ServiceType, StoragePath string }
 
 func (s *Store) TransferPreview(ctx context.Context, sourceID, targetID string) ([]TransferPackage, int, error) {
-	if sourceID == targetID {
-		return nil, 0, domain.FieldError("target_user_id", "目标账号不能是源账号")
-	}
-	if _, err := s.GetUser(ctx, sourceID); err != nil {
+	if err := validateTransfer(ctx, s.db, sourceID, targetID); err != nil {
 		return nil, 0, err
-	}
-	target, err := s.GetUser(ctx, targetID)
-	if err != nil {
-		return nil, 0, err
-	}
-	if !target.Enabled {
-		return nil, 0, &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "目标账号已被禁用"}
-	}
-	var active int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM operations WHERE owner_id = ? AND status IN (?, ?)`, sourceID, domain.OperationQueued, domain.OperationRunning).Scan(&active); err != nil {
-		return nil, 0, err
-	}
-	if active > 0 {
-		return nil, 0, &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "源账号仍有执行中的操作"}
-	}
-	var conflicts int
-	err = s.db.QueryRowContext(ctx, `SELECT
-		(SELECT COUNT(*) FROM packages s JOIN packages t ON t.owner_id = ? AND t.service_type = s.service_type WHERE s.owner_id = ?) +
-		(SELECT COUNT(*) FROM environments s JOIN environments t ON t.owner_id = ? AND t.ip = s.ip AND t.service_type = s.service_type WHERE s.owner_id = ?)`, targetID, sourceID, targetID, sourceID).Scan(&conflicts)
-	if err != nil {
-		return nil, 0, err
-	}
-	if conflicts > 0 {
-		return nil, 0, &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "目标账号存在同名安装包或相同服务器服务"}
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT service_type, storage_path FROM packages WHERE owner_id = ? ORDER BY service_type`, sourceID)
 	if err != nil {
@@ -202,12 +175,15 @@ func (s *Store) TransferPreview(ctx context.Context, sourceID, targetID string) 
 	return packages, environments, err
 }
 
-func (s *Store) TransferResources(ctx context.Context, sourceID, targetID string, paths map[string]string) (domain.TransferResult, error) {
+func (s *Store) TransferResources(ctx context.Context, sourceID, targetID string) (domain.TransferResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.TransferResult{}, err
 	}
 	defer tx.Rollback()
+	if err := validateTransfer(ctx, tx, sourceID, targetID); err != nil {
+		return domain.TransferResult{}, err
+	}
 	type tagTransfer struct{ environmentID, sourceTagID, groupName, value string }
 	rows, err := tx.QueryContext(ctx, `SELECT et.environment_id, t.id, t.group_name, t.value
 		FROM environment_tags et JOIN resource_tags t ON t.id = et.tag_id
@@ -227,14 +203,12 @@ func (s *Store) TransferResources(ctx context.Context, sourceID, targetID string
 	if err := rows.Close(); err != nil {
 		return domain.TransferResult{}, err
 	}
-	for serviceType, storagePath := range paths {
-		if _, err = tx.ExecContext(ctx, `UPDATE packages SET owner_id = ?, storage_path = ? WHERE owner_id = ? AND service_type = ?`, targetID, storagePath, sourceID, serviceType); err != nil {
-			return domain.TransferResult{}, err
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE package_versions SET owner_id = ?, storage_path = REPLACE(storage_path, ?, ?) WHERE owner_id = ? AND service_type = ?`,
-			targetID, "packages/"+sourceID+"/", "packages/"+targetID+"/", sourceID, serviceType); err != nil {
-			return domain.TransferResult{}, err
-		}
+	packageResult, err := tx.ExecContext(ctx, `UPDATE packages SET owner_id = ? WHERE owner_id = ?`, targetID, sourceID)
+	if err != nil {
+		return domain.TransferResult{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE package_versions SET owner_id = ? WHERE owner_id = ?`, targetID, sourceID); err != nil {
+		return domain.TransferResult{}, err
 	}
 	envResult, err := tx.ExecContext(ctx, `UPDATE environments SET owner_id = ?, updated_at = ? WHERE owner_id = ?`, targetID, formatTime(time.Now().UTC()), sourceID)
 	if err != nil {
@@ -265,8 +239,48 @@ func (s *Store) TransferResources(ctx context.Context, sourceID, targetID string
 	if err = tx.Commit(); err != nil {
 		return domain.TransferResult{}, err
 	}
-	envs, _ := envResult.RowsAffected()
-	return domain.TransferResult{SourceUserID: sourceID, TargetUserID: targetID, Packages: len(paths), Environments: int(envs)}, nil
+	packages, _ := packageResult.RowsAffected()
+	environments, _ := envResult.RowsAffected()
+	return domain.TransferResult{SourceUserID: sourceID, TargetUserID: targetID, Packages: int(packages), Environments: int(environments)}, nil
+}
+
+type transferQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func validateTransfer(ctx context.Context, query transferQuerier, sourceID, targetID string) error {
+	if sourceID == targetID {
+		return domain.FieldError("target_user_id", "目标账号不能是源账号")
+	}
+	if _, err := scanUser(query.QueryRowContext(ctx, userSelect+` WHERE id = ?`, sourceID)); err != nil {
+		return err
+	}
+	target, err := scanUser(query.QueryRowContext(ctx, userSelect+` WHERE id = ?`, targetID))
+	if err != nil {
+		return err
+	}
+	if !target.Enabled {
+		return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "目标账号已被禁用"}
+	}
+	var active int
+	if err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM operations WHERE owner_id = ? AND status IN (?, ?)`,
+		sourceID, domain.OperationQueued, domain.OperationRunning).Scan(&active); err != nil {
+		return err
+	}
+	if active > 0 {
+		return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "源账号仍有执行中的操作"}
+	}
+	var conflicts int
+	if err := query.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM packages s JOIN packages t ON t.owner_id = ? AND t.service_type = s.service_type WHERE s.owner_id = ?) +
+		(SELECT COUNT(*) FROM environments s JOIN environments t ON t.owner_id = ? AND t.ip = s.ip AND t.service_type = s.service_type WHERE s.owner_id = ?)`,
+		targetID, sourceID, targetID, sourceID).Scan(&conflicts); err != nil {
+		return err
+	}
+	if conflicts > 0 {
+		return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "目标账号存在同名安装包或相同服务器服务"}
+	}
+	return nil
 }
 
 func (s *Store) DashboardMetrics(ctx context.Context, since, staleBefore time.Time) (domain.DashboardMetrics, error) {

@@ -938,7 +938,7 @@ func (a *API) requestMiddleware(next http.Handler) http.Handler {
 func (a *API) originMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			if !sameOriginRequest(r) {
+			if !a.sameOriginRequest(r) {
 				a.writeError(w, r, domain.FieldError("origin", "拒绝跨站变更请求"))
 				return
 			}
@@ -947,7 +947,7 @@ func (a *API) originMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func sameOriginRequest(r *http.Request) bool {
+func (a *API) sameOriginRequest(r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
 		return true
@@ -956,11 +956,24 @@ func sameOriginRequest(r *http.Request) bool {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return false
 	}
-	publicHost := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0])
-	if publicHost == "" {
-		publicHost = r.Host
+	publicScheme := "http"
+	if r.TLS != nil {
+		publicScheme = "https"
 	}
-	return strings.EqualFold(parsed.Host, publicHost)
+	publicHost := r.Host
+	if a.isTrustedProxy(r.RemoteAddr) {
+		if forwardedHost := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
+			publicHost = forwardedHost
+		}
+		if forwardedProto := firstForwardedValue(r.Header.Get("X-Forwarded-Proto")); forwardedProto == "http" || forwardedProto == "https" {
+			publicScheme = forwardedProto
+		}
+	}
+	return strings.EqualFold(parsed.Scheme, publicScheme) && strings.EqualFold(parsed.Host, publicHost)
+}
+
+func firstForwardedValue(value string) string {
+	return strings.TrimSpace(strings.Split(value, ",")[0])
 }
 
 func (a *API) recoverMiddleware(next http.Handler) http.Handler {
