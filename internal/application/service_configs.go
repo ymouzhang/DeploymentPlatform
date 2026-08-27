@@ -1,0 +1,169 @@
+package application
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"DP/internal/archive"
+	"DP/internal/domain"
+	"DP/internal/remote"
+	"DP/internal/security"
+	"DP/internal/store"
+)
+
+type ServiceConfigService struct {
+	store    *store.Store
+	packages *archive.Manager
+	cipher   *security.PasswordCipher
+	remote   *remote.Executor
+}
+
+func NewServiceConfigService(
+	store *store.Store,
+	packages *archive.Manager,
+	cipher *security.PasswordCipher,
+	remoteExecutor *remote.Executor,
+) *ServiceConfigService {
+	return &ServiceConfigService{
+		store: store, packages: packages, cipher: cipher, remote: remoteExecutor,
+	}
+}
+
+func (s *ServiceConfigService) Get(ctx context.Context, environmentID string) (domain.ServiceConfig, error) {
+	env, err := s.store.GetEnvironment(ctx, environmentID)
+	if err != nil {
+		return domain.ServiceConfig{}, err
+	}
+	config, err := s.store.GetServiceConfig(ctx, environmentID)
+	if err == nil {
+		return config, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return domain.ServiceConfig{}, err
+	}
+	content, _, inspection, err := s.packages.ReadConfigForOwner(ctx, env.OwnerID, env.ServiceType)
+	if err != nil {
+		return domain.ServiceConfig{}, err
+	}
+	return domain.ServiceConfig{
+		EnvironmentID: environmentID,
+		Content:       string(content),
+		Format:        inspection.ConfigType,
+		Path:          archive.RelativeConfigPath(inspection),
+		Port:          inspection.Port,
+		Inherited:     true,
+	}, nil
+}
+
+func (s *ServiceConfigService) Update(
+	ctx context.Context,
+	environmentID string,
+	content []byte,
+	actor domain.User,
+) (domain.ServiceConfig, error) {
+	current, err := s.Get(ctx, environmentID)
+	if err != nil {
+		return domain.ServiceConfig{}, err
+	}
+	if !current.Inherited && current.Content == string(content) {
+		return current, nil
+	}
+	revision, err := s.save(ctx, environmentID, content, actor, "manual", "")
+	if err != nil {
+		return domain.ServiceConfig{}, err
+	}
+	config, err := s.store.GetServiceConfig(ctx, environmentID)
+	if err == nil {
+		config.CurrentRevisionID = revision.ID
+	}
+	return config, err
+}
+
+func (s *ServiceConfigService) Preview(ctx context.Context, environmentID string, content []byte) (domain.ServiceConfigPreview, error) {
+	current, err := s.Get(ctx, environmentID)
+	if err != nil {
+		return domain.ServiceConfigPreview{}, err
+	}
+	port, err := archive.ValidateConfig(content, current.Format)
+	if err != nil {
+		return domain.ServiceConfigPreview{}, err
+	}
+	return domain.ServiceConfigPreview{CurrentContent: current.Content, ProposedContent: string(content),
+		Changed: current.Content != string(content), Format: current.Format, Path: current.Path, Port: port}, nil
+}
+
+func (s *ServiceConfigService) ListRevisions(ctx context.Context, environmentID string) ([]domain.ServiceConfigRevision, error) {
+	if _, err := s.store.GetEnvironment(ctx, environmentID); err != nil {
+		return nil, err
+	}
+	return s.store.ListServiceConfigRevisions(ctx, environmentID)
+}
+
+func (s *ServiceConfigService) GetRevision(ctx context.Context, environmentID, revisionID string) (domain.ServiceConfigRevision, error) {
+	if _, err := s.store.GetEnvironment(ctx, environmentID); err != nil {
+		return domain.ServiceConfigRevision{}, err
+	}
+	return s.store.GetServiceConfigRevision(ctx, environmentID, revisionID)
+}
+
+func (s *ServiceConfigService) Rollback(ctx context.Context, environmentID, revisionID string, actor domain.User) (domain.ServiceConfigRevision, error) {
+	target, err := s.GetRevision(ctx, environmentID, revisionID)
+	if err != nil {
+		return domain.ServiceConfigRevision{}, err
+	}
+	if target.Current {
+		return domain.ServiceConfigRevision{}, &domain.AppError{Code: "CONFIG_REVISION_CURRENT", Message: "该修订已经是当前配置，无需回滚"}
+	}
+	return s.save(ctx, environmentID, []byte(target.Content), actor, "rollback", target.ID)
+}
+
+func (s *ServiceConfigService) save(ctx context.Context, environmentID string, content []byte, actor domain.User, source, restoredFrom string) (domain.ServiceConfigRevision, error) {
+	env, err := s.store.GetEnvironment(ctx, environmentID)
+	if err != nil {
+		return domain.ServiceConfigRevision{}, err
+	}
+	_, _, inspection, err := s.packages.ReadConfigForOwner(ctx, env.OwnerID, env.ServiceType)
+	if err != nil {
+		return domain.ServiceConfigRevision{}, err
+	}
+	port, err := archive.ValidateConfig(content, inspection.ConfigType)
+	if err != nil {
+		return domain.ServiceConfigRevision{}, err
+	}
+	config := domain.ServiceConfig{
+		EnvironmentID: environmentID,
+		Content:       string(content),
+		Format:        inspection.ConfigType,
+		Path:          archive.RelativeConfigPath(inspection),
+		Port:          port,
+	}
+	if env.Installed {
+		password, decryptErr := s.cipher.Decrypt(env.SSHPasswordEnc)
+		if decryptErr != nil {
+			return domain.ServiceConfigRevision{}, decryptErr
+		}
+		defer clear(password)
+		fingerprint, writeErr := s.remote.WriteConfig(ctx, env, password, config.Path, content)
+		if writeErr != nil {
+			return domain.ServiceConfigRevision{}, writeErr
+		}
+		if fingerprint != "" {
+			_ = s.store.RecordValidation(ctx, env.ID, fingerprint, env.Arch)
+		}
+	}
+	revision := domain.ServiceConfigRevision{ID: store.NewID(), EnvironmentID: environmentID,
+		Content: config.Content, Format: config.Format, Path: config.Path, Port: config.Port,
+		Source: source, RestoredFromID: restoredFrom, CreatedBy: actor.ID,
+		CreatedByName: actor.Username, CreatedAt: time.Now().UTC()}
+	saved, err := s.store.SaveServiceConfigRevision(ctx, config, revision)
+	if err != nil {
+		return domain.ServiceConfigRevision{}, err
+	}
+	if env.Installed {
+		if err := s.store.UpdateHealthPort(ctx, env.ID, port); err != nil {
+			return domain.ServiceConfigRevision{}, err
+		}
+	}
+	return saved, nil
+}

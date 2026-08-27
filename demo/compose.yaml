@@ -1,0 +1,28 @@
+name: dp-demo
+
+services:
+  demo:
+    image: dp-demo:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: host
+    restart: unless-stopped
+    init: true
+    read_only: true
+    volumes:
+      - type: bind
+        source: ./config/config.json
+        target: /app/config/config.json
+        read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/app/demo-service", "-healthcheck", "/app/config/config.json"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
+    stop_grace_period: 10s

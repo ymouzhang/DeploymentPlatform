@@ -1,0 +1,1937 @@
+openapi: 3.1.0
+info:
+  title: DP API
+  version: 1.8.1
+  description: Image Forward Manager HTTP API with local-account authentication and owner isolation
+servers:
+  - url: /api/v1
+security:
+  - cookieAuth: []
+paths:
+  /auth/login:
+    post:
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Logged in; sets the HttpOnly session cookie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Credentials are correct but the account is disabled (`ACCOUNT_DISABLED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Username or source IP is temporarily throttled (`LOGIN_THROTTLED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/logout:
+    post:
+      operationId: logout
+      responses:
+        "200": { description: Logged out }
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+  /auth/password:
+    put:
+      operationId: changeOwnPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        "200": { description: Password changed; other sessions revoked }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /auth/sessions:
+    get:
+      operationId: listOwnSessions
+      responses:
+        "200":
+          description: Active sessions owned by the current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionListResponse" }
+  /auth/sessions/{sessionId}:
+    delete:
+      operationId: revokeOwnSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200": { description: Session revoked; the cookie is cleared when revoking the current session }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        "200":
+          description: User list; admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListResponse"
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createUser
+      description: Creates an enabled account whose administrator-assigned password must be changed by the account owner at first login. This policy cannot be disabled in the create request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserInput"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /users/{id}/password:
+    put:
+      operationId: resetUserPassword
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [new_password, require_password_change]
+              properties:
+                new_password: { type: string, minLength: 8, maxLength: 128 }
+                require_password_change: { type: boolean, default: true }
+      responses:
+        "200": { description: Password reset, forced-change policy updated and sessions revoked }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /users/{id}/status:
+    put:
+      operationId: updateUserStatus
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Status updated; disabling revokes sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /users/{id}:
+    get:
+      operationId: getUserDetail
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: User detail and resource/activity summary; admin only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserDetailResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteUser
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200": { description: User deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /users/{id}/sessions/revoke:
+    post:
+      operationId: revokeUserSessions
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200": { description: All target-user sessions revoked }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /users/{id}/sessions:
+    get:
+      operationId: listUserSessions
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Active sessions for the target user; admin only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionListResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /users/{id}/sessions/{sessionId}:
+    delete:
+      operationId: revokeUserSession
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200": { description: Target session revoked; admin only }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /users/{id}/transfer:
+    post:
+      operationId: transferUserResources
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [target_user_id]
+              properties:
+                target_user_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: All resources transferred atomically and source sessions revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferResultResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /environments:
+    get:
+      operationId: listEnvironments
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+        - $ref: "#/components/parameters/TagIds"
+      responses:
+        "200":
+          description: Environment list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentListResponse"
+    post:
+      operationId: createEnvironment
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnvironmentInput"
+      responses:
+        "201":
+          description: Environment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /environments/{id}:
+    put:
+      operationId: updateEnvironment
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnvironmentInput"
+      responses:
+        "200":
+          description: Environment updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteEnvironment
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "200":
+          description: Environment deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            环境已安装服务（ENVIRONMENT_INSTALLED，需先重置）
+            或存在正在执行的操作（OPERATION_IN_PROGRESS），禁止删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /environments/{id}/tags:
+    put:
+      operationId: replaceEnvironmentTags
+      description: Atomically replaces all tags; every tag must belong to the environment owner.
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tag_ids]
+              properties:
+                tag_ids:
+                  type: array
+                  uniqueItems: true
+                  maxItems: 20
+                  items: { type: string, format: uuid }
+      responses:
+        "200": { description: Updated environment, including tags, content: { application/json: { schema: { $ref: "#/components/schemas/EnvironmentResponse" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /tags:
+    get:
+      operationId: listResourceTags
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      responses:
+        "200": { description: Visible account-scoped tag catalog, content: { application/json: { schema: { $ref: "#/components/schemas/ResourceTagListResponse" } } } }
+    post:
+      operationId: createResourceTag
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResourceTagInput" }
+      responses:
+        "201": { description: Tag created, content: { application/json: { schema: { $ref: "#/components/schemas/ResourceTagResponse" } } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /tags/{id}:
+    put:
+      operationId: updateResourceTag
+      parameters:
+        - $ref: "#/components/parameters/TagId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResourceTagInput" }
+      responses:
+        "200": { description: Tag renamed, content: { application/json: { schema: { $ref: "#/components/schemas/ResourceTagResponse" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: deleteResourceTag
+      parameters:
+        - $ref: "#/components/parameters/TagId"
+      responses:
+        "200": { description: Tag deleted and environment associations removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /environments/validate:
+    post:
+      operationId: validateDraftEnvironment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnvironmentInput"
+      responses:
+        "200":
+          description: SSH validation result, including expected remote failures
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResponse"
+  /environments/{id}/validate:
+    post:
+      operationId: validateSavedEnvironment
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "200":
+          description: SSH validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /environments/export:
+    get:
+      operationId: exportEnvironments
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      responses:
+        "200":
+          description: Versioned environment JSON document
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentTransferDocument"
+  /environments/import:
+    post:
+      operationId: importEnvironments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnvironmentTransferDocument"
+      responses:
+        "200":
+          description: Atomic import result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [created, overwritten, total]
+                    properties:
+                      created: { type: integer }
+                      overwritten: { type: integer }
+                      total: { type: integer }
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /service-types:
+    get:
+      operationId: listServiceTypes
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      responses:
+        "200":
+          description: Supported service types
+  /packages:
+    get:
+      operationId: listPackages
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      responses:
+        "200":
+          description: Latest package for every service type
+  /service-types/{type}/package:
+    parameters:
+      - $ref: "#/components/parameters/ServiceType"
+      - $ref: "#/components/parameters/OwnerId"
+    get:
+      operationId: getPackage
+      responses:
+        "200":
+          description: Current package metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: uploadPackage
+      description: >
+        上传文件时创建不可变版本并设为当前版本；仅传 note 时修改当前版本备注。
+        file 与 note 均为可选，但至少提供其一；未传 note 时新版本继承当前版本备注。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                note:
+                  type: string
+                  maxLength: 200
+                  description: 安装包备注（可选）
+      responses:
+        "200":
+          description: Package version accepted and selected as current
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageResponse"
+        "413":
+          description: Package too large
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deletePackage
+      responses:
+        "200":
+          description: Package deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            该服务类型存在已安装的环境（PACKAGE_IN_USE），
+            需先重置相关环境后才允许删除安装包
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /service-types/{type}/package/versions:
+    parameters:
+      - $ref: "#/components/parameters/ServiceType"
+      - $ref: "#/components/parameters/OwnerId"
+    get:
+      operationId: listPackageVersions
+      responses:
+        "200":
+          description: Immutable package versions ordered newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageVersionListResponse"
+        "404": { $ref: "#/components/responses/NotFound" }
+  /service-types/{type}/package/versions/{versionId}/current:
+    parameters:
+      - $ref: "#/components/parameters/ServiceType"
+      - $ref: "#/components/parameters/OwnerId"
+      - name: versionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: activatePackageVersion
+      responses:
+        "200":
+          description: Historical compatible version selected as current
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PackageResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /service-types/{type}/package/versions/{versionId}:
+    parameters:
+      - $ref: "#/components/parameters/ServiceType"
+      - $ref: "#/components/parameters/OwnerId"
+      - name: versionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: deletePackageVersion
+      responses:
+        "200": { description: Unreferenced non-current version deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /services:
+    get:
+      operationId: listServices
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+        - $ref: "#/components/parameters/TagIds"
+        - name: service_type
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Service list with cached health state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Service"
+  /services/{id}/config:
+    parameters:
+      - $ref: "#/components/parameters/EnvironmentId"
+    get:
+      operationId: getServiceConfig
+      responses:
+        "200":
+          description: Environment-specific config, or the package template when not customized
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ServiceConfig" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: updateServiceConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: Raw JSON or YAML matching the package template format
+      responses:
+        "200":
+          description: Saved environment-specific config
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ServiceConfig" }
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /services/{id}/config/preview:
+    post:
+      operationId: previewServiceConfig
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        "200":
+          description: Validated current and proposed content for a side-by-side diff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceConfigPreviewResponse" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /services/{id}/config/revisions:
+    get:
+      operationId: listServiceConfigRevisions
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "200":
+          description: Configuration revision metadata ordered newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceConfigRevisionListResponse" }
+  /services/{id}/config/revisions/{revisionId}:
+    get:
+      operationId: getServiceConfigRevision
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+        - name: revisionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Configuration revision including content
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceConfigRevisionResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /services/{id}/config/revisions/{revisionId}/rollback:
+    post:
+      operationId: rollbackServiceConfigRevision
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+        - name: revisionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: New rollback revision and current configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceConfigRevisionResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /services/{id}/install:
+    post:
+      operationId: installService
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "202":
+          $ref: "#/components/responses/OperationAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /services/{id}/start:
+    post:
+      operationId: startService
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "202":
+          $ref: "#/components/responses/OperationAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /services/{id}/stop:
+    post:
+      operationId: stopService
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "202":
+          $ref: "#/components/responses/OperationAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /services/{id}/reset:
+    post:
+      operationId: resetService
+      description: Stops the service when needed, resets remote markers, and marks it uninstalled without deleting remote files.
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "202":
+          $ref: "#/components/responses/OperationAccepted"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /services/{id}/health-check:
+    post:
+      operationId: checkServiceHealth
+      description: Requests `http://<environment-ip>:<health-port>/health`. A top-level, case-sensitive string status of `health` or `healthy` is normalized to the `running` state.
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "200":
+          description: Health result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResultResponse" }
+  /services/{id}/logs/stream:
+    get:
+      operationId: streamServiceLogs
+      description: Streams colored Docker Compose logs over Server-Sent Events.
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+        - name: tail
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 2000, default: 300 }
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /operations/{id}:
+    get:
+      operationId: getOperation
+      parameters:
+        - $ref: "#/components/parameters/OperationId"
+      responses:
+        "200":
+          description: Operation snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /operations:
+    get:
+      operationId: listOperations
+      description: Cursor-paginated global operation center; admin only.
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+        - $ref: "#/components/parameters/TagIds"
+        - { name: actor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: action, in: query, schema: { type: string, enum: [install, start, stop, reset] } }
+        - { name: status, in: query, schema: { type: string, enum: [queued, running, succeeded, failed, timed_out, interrupted] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: keyword, in: query, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Operation page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperationListResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /operations/{id}/events:
+    get:
+      operationId: streamOperationEvents
+      parameters:
+        - $ref: "#/components/parameters/OperationId"
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /admin/dashboard:
+    get:
+      operationId: getAdminDashboard
+      description: Tag filters affect only environment, service, SSH-validation and operation metrics. Account, package, security, notification and communication data remain global; communication unread state is scoped to the current administrator.
+      parameters:
+        - $ref: "#/components/parameters/TagIds"
+      responses:
+        "200":
+          description: Administrator overview metrics, the current administrator's recent unread communications, and recent actionable risk notifications
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminDashboardResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /notifications/summary:
+    get:
+      operationId: getNotificationSummary
+      responses:
+        "200":
+          description: Shared administrator notification counters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationSummaryResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /notifications:
+    get:
+      operationId: listNotifications
+      parameters:
+        - { name: unread, in: query, schema: { type: boolean } }
+        - { name: risk_level, in: query, schema: { type: string, enum: [normal, high] } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200":
+          description: Notification page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationListResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /notifications/{id}/read:
+    put:
+      operationId: markNotificationRead
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Notification marked read }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /notifications/{id}/resolve:
+    put:
+      operationId: resolveNotification
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Notification marked read and resolved }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /communications/summary:
+    get:
+      operationId: getCommunicationSummary
+      responses:
+        "200":
+          description: Per-current-user unread communication message count
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationSummaryResponse" }
+  /events:
+    get:
+      operationId: streamRealtimeEvents
+      description: One account-scoped SSE connection. Sends `sync` after connect and `communication.changed` invalidation hints after committed communication changes. Event payloads never contain message content. The browser reconnects automatically and authoritative data is fetched from regular APIs.
+      responses:
+        "200":
+          description: Authenticated account event stream with 15-second heartbeats
+          headers:
+            Cache-Control: { schema: { type: string }, description: Always `no-cache, no-transform` }
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                communicationChanged:
+                  value: |-
+                    id: 2f79efdf-f764-4d40-9222-f00bba885a1d
+                    event: communication.changed
+                    data: {"id":"2f79efdf-f764-4d40-9222-f00bba885a1d","type":"communication.changed","resource_id":"e8648ce1-5537-497c-8164-e7a5683b703d","change":"message","occurred_at":"2026-08-14T10:00:00Z"}
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /communications:
+    get:
+      operationId: listCommunications
+      parameters:
+        - { name: target_user_id, in: query, description: Admin-only target-user filter, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [open, closed] } }
+        - { name: unread, in: query, schema: { type: boolean } }
+        - { name: keyword, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+      responses:
+        "200":
+          description: Cursor-paginated communications visible to the current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationListResponse" }
+    post:
+      operationId: createCommunication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommunicationCreateInput" }
+      responses:
+        "201":
+          description: Communication created atomically; admin only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /communications/{id}:
+    get:
+      operationId: getCommunication
+      parameters:
+        - $ref: "#/components/parameters/CommunicationId"
+      responses:
+        "200":
+          description: Communication detail, immutable timeline, recipient reads and resource snapshots
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /communications/{id}/read:
+    put:
+      operationId: markCommunicationRead
+      parameters:
+        - $ref: "#/components/parameters/CommunicationId"
+      responses:
+        "200":
+          description: Current user's inbound messages in this communication marked read idempotently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /communications/{id}/messages:
+    post:
+      operationId: sendCommunicationMessage
+      parameters:
+        - $ref: "#/components/parameters/CommunicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 5000 }
+      responses:
+        "201":
+          description: Admin message or target-user receipt appended to an open communication
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationMessageResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /communications/{id}/close:
+    post:
+      operationId: closeCommunication
+      parameters:
+        - $ref: "#/components/parameters/CommunicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommunicationStateInput" }
+      responses:
+        "200":
+          description: Communication closed and target user notified; admin only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /communications/{id}/reopen:
+    post:
+      operationId: reopenCommunication
+      parameters:
+        - $ref: "#/components/parameters/CommunicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommunicationStateInput" }
+      responses:
+        "200":
+          description: Communication reopened with an immutable marker and target-user notification; admin only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /audit-events:
+    get:
+      operationId: listAuditEvents
+      description: Cursor-paginated audit events; admin only.
+      parameters:
+        - $ref: "#/components/parameters/AuditFrom"
+        - $ref: "#/components/parameters/AuditTo"
+        - { name: actor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: owner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: category, in: query, schema: { type: string, enum: [authentication, account, package, environment, service, communication, audit] } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string, enum: [success, failure, denied] } }
+        - { name: source_ip, in: query, schema: { type: string } }
+        - { name: keyword, in: query, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Audit event page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEventListResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /audit-events/summary:
+    get:
+      operationId: getAuditSummary
+      description: Audit totals for the selected filter; admin only.
+      parameters:
+        - $ref: "#/components/parameters/AuditFrom"
+        - $ref: "#/components/parameters/AuditTo"
+        - { name: actor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: owner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string, enum: [success, failure, denied] } }
+      responses:
+        "200":
+          description: Audit summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditSummaryResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /audit-events/export:
+    get:
+      operationId: exportAuditEvents
+      description: Exports at most 31 days and the configured row limit as UTF-8 CSV; admin only.
+      parameters:
+        - $ref: "#/components/parameters/AuditFrom"
+        - $ref: "#/components/parameters/AuditTo"
+        - { name: actor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: owner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string, enum: [success, failure, denied] } }
+        - { name: source_ip, in: query, schema: { type: string } }
+        - { name: keyword, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: UTF-8 CSV with BOM
+          content:
+            text/csv: { schema: { type: string } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /audit-events/{id}:
+    get:
+      operationId: getAuditEvent
+      description: Gets a sanitized audit event and records the detail view; admin only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Audit event detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEventResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: dp_session
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CommunicationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OwnerId:
+      name: owner_id
+      in: query
+      required: false
+      description: Admin-only owner filter/target. Ordinary users are always scoped to themselves.
+      schema: { type: string, format: uuid }
+    TagIds:
+      name: tag_id
+      in: query
+      required: false
+      description: Repeat to require all selected tags. Tag visibility is checked against the authenticated owner scope.
+      schema:
+        type: array
+        maxItems: 20
+        items: { type: string, format: uuid }
+      style: form
+      explode: true
+    TagId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EnvironmentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OperationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ServiceType:
+      name: type
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{0,62}$"
+    AuditFrom:
+      name: from
+      in: query
+      required: false
+      description: RFC 3339 start time; defaults to 24 hours ago.
+      schema: { type: string, format: date-time }
+    AuditTo:
+      name: to
+      in: query
+      required: false
+      description: RFC 3339 end time; defaults to now.
+      schema: { type: string, format: date-time }
+  schemas:
+    LoginInput:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 1, maxLength: 128 }
+    CreateUserInput:
+      type: object
+      additionalProperties: false
+      required: [username, password, role]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[a-z0-9][a-z0-9._-]{2,31}$"
+        password: { type: string, minLength: 8, maxLength: 128 }
+        role: { type: string, enum: [admin, user] }
+    User:
+      type: object
+      required: [id, username, role, enabled, must_change_password, is_initial_admin, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        role: { type: string, enum: [admin, user] }
+        enabled: { type: boolean }
+        must_change_password: { type: boolean, description: When true, only self lookup, self password change, and logout are permitted until the account owner changes the temporary password. Always true for a newly initialized admin or newly created account. }
+        is_initial_admin: { type: boolean }
+        created_by: { type: string, format: uuid }
+        created_by_username: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UserResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/User"
+    Session:
+      type: object
+      required: [id, source_ip, user_agent, created_at, last_seen_at, expires_at, current]
+      properties:
+        id: { type: string, format: uuid }
+        source_ip: { type: string }
+        user_agent: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        current: { type: boolean }
+    SessionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+    CommunicationResourceInput:
+      type: object
+      additionalProperties: false
+      required: [resource_type]
+      properties:
+        resource_type: { type: string, enum: [package, environment, service] }
+        resource_id: { type: string, format: uuid, description: Required for environment and service }
+        resource_key: { type: string, maxLength: 63, description: Service type; required for package }
+    CommunicationCreateInput:
+      type: object
+      additionalProperties: false
+      required: [target_user_id, title, content, resources]
+      properties:
+        target_user_id: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 100 }
+        content: { type: string, minLength: 1, maxLength: 5000 }
+        resources:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/CommunicationResourceInput" }
+    CommunicationStateInput:
+      type: object
+      additionalProperties: false
+      properties:
+        content: { type: string, maxLength: 5000, description: Optional close/reopen explanation }
+    CommunicationRecipient:
+      type: object
+      required: [user_id, username, role]
+      properties:
+        user_id: { type: string, format: uuid }
+        username: { type: string }
+        role: { type: string, enum: [admin, user] }
+        read_at: { type: [string, "null"], format: date-time }
+    CommunicationMessage:
+      type: object
+      required: [id, type, sender_username, sender_role, content, created_at, recipients]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [admin_message, user_receipt, system_closed, system_reopened] }
+        sender_user_id: { type: [string, "null"], format: uuid }
+        sender_username: { type: string }
+        sender_role: { type: string, enum: [admin, user] }
+        content: { type: string }
+        created_at: { type: string, format: date-time }
+        recipients:
+          type: array
+          items: { $ref: "#/components/schemas/CommunicationRecipient" }
+    CommunicationResource:
+      type: object
+      required: [id, resource_type, owner_username, resource_label, service_type, environment_name, environment_ip, available]
+      properties:
+        id: { type: string, format: uuid }
+        resource_type: { type: string, enum: [package, environment, service] }
+        resource_id: { type: [string, "null"], format: uuid }
+        resource_key: { type: string }
+        owner_id: { type: [string, "null"], format: uuid }
+        owner_username: { type: string }
+        resource_label: { type: string }
+        service_type: { type: string }
+        environment_name: { type: string }
+        environment_ip: { type: string }
+        available: { type: boolean }
+        link: { type: string }
+    Communication:
+      type: object
+      required: [id, target_username, title, status, reopen_count, created_by_username, created_at, updated_at, unread_count, resources]
+      properties:
+        id: { type: string, format: uuid }
+        target_user_id: { type: [string, "null"], format: uuid }
+        target_username: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [open, closed] }
+        reopen_count: { type: integer, minimum: 0 }
+        created_by: { type: [string, "null"], format: uuid }
+        created_by_username: { type: string }
+        closed_by_username: { type: string }
+        closed_at: { type: [string, "null"], format: date-time }
+        last_reopened_by_username: { type: string }
+        last_reopened_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        unread_count: { type: integer, minimum: 0 }
+        last_message: { type: [string, "null"] }
+        user_read_at: { type: [string, "null"], format: date-time }
+        resources:
+          type: array
+          items: { $ref: "#/components/schemas/CommunicationResource" }
+    CommunicationDetail:
+      allOf:
+        - $ref: "#/components/schemas/Communication"
+        - type: object
+          required: [messages]
+          properties:
+            messages:
+              type: array
+              items: { $ref: "#/components/schemas/CommunicationMessage" }
+    CommunicationSummaryResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [unread]
+          properties:
+            unread: { type: integer, minimum: 0 }
+    CommunicationListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, next_cursor]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Communication" } }
+            next_cursor: { type: string }
+    CommunicationDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/CommunicationDetail" }
+    CommunicationMessageResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/CommunicationMessage" }
+    UserListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+    UserDetail:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [package_count, environment_count, installed_service_count, recent_operation_count, active_session_count, login_failure_count, high_risk_count]
+          properties:
+            package_count: { type: integer }
+            environment_count: { type: integer }
+            installed_service_count: { type: integer }
+            recent_operation_count: { type: integer, description: Operations owned by this account during the last 30 days }
+            active_session_count: { type: integer }
+            login_failure_count: { type: integer }
+            high_risk_count: { type: integer }
+            last_login_at: { type: [string, "null"], format: date-time }
+            last_activity_at: { type: [string, "null"], format: date-time }
+            last_source_ip: { type: string }
+    UserDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/UserDetail" }
+    TransferResultResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [source_user_id, target_user_id, packages, environments]
+          properties:
+            source_user_id: { type: string, format: uuid }
+            target_user_id: { type: string, format: uuid }
+            packages: { type: integer }
+            environments: { type: integer }
+    EnvironmentInput:
+      type: object
+      additionalProperties: false
+      required: [name, ip, ssh_user, ssh_port, install_dir, service_type]
+      properties:
+        name: { type: string, minLength: 1 }
+        ip: { type: string }
+        ssh_user: { type: string, default: aaron }
+        ssh_port: { type: integer, minimum: 1, maximum: 65535, default: 22 }
+        ssh_password:
+          type: string
+          description: Required on create; omit or leave empty on update to preserve the current password.
+        install_dir: { type: string }
+        service_type:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,62}$"
+        note:
+          type: string
+          maxLength: 200
+          description: 环境备注（可选）
+        tag_ids:
+          type: array
+          uniqueItems: true
+          maxItems: 20
+          items: { type: string, format: uuid }
+          description: Complete environment tag set; all IDs must belong to the resource owner.
+    Environment:
+      type: object
+      required:
+        [id, name, ip, ssh_user, ssh_port, install_dir, service_type, installed, has_password]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        owner_username: { type: string }
+        name: { type: string }
+        ip: { type: string }
+        ssh_user: { type: string }
+        ssh_port: { type: integer }
+        install_dir: { type: string }
+        service_type: { type: string }
+        note: { type: string }
+        installed: { type: boolean }
+        installed_at: { type: [string, "null"], format: date-time }
+        health_port: { type: integer }
+        arch:
+          type: string
+          description: CPU architecture collected via SSH `uname -m`; empty string when not yet collected.
+        last_validation_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        has_password: { type: boolean }
+        tags:
+          type: array
+          items: { $ref: "#/components/schemas/ResourceTagRef" }
+    EnvironmentResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Environment"
+    EnvironmentListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Environment"
+    ValidationResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            fingerprint: { type: string }
+            stages:
+              type: array
+              items:
+                type: object
+                required: [name, success, message]
+                properties:
+                  name: { type: string }
+                  success: { type: boolean }
+                  message: { type: string }
+        validation_error: { type: string }
+    EnvironmentTransferDocument:
+      type: object
+      required: [schema_version, environments]
+      properties:
+        schema_version: { type: integer, enum: [1, 2], description: Exports use 2; imports retain v1 compatibility. }
+        exported_at: { type: string, format: date-time }
+        environments:
+          type: array
+          items:
+            type: object
+            required:
+              [name, ip, ssh_user, ssh_port, ssh_password_encrypted, install_dir, service_type, installed]
+            properties:
+              name: { type: string }
+              ip: { type: string }
+              ssh_user: { type: string }
+              ssh_port: { type: integer }
+              ssh_password_encrypted: { type: string, pattern: "^enc:v1:" }
+              install_dir: { type: string }
+              service_type: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+              installed: { type: boolean }
+              installed_at: { type: string, format: date-time }
+              installed_package_sha256: { type: string }
+              health_port: { type: integer }
+              host_key_fingerprint: { type: string }
+              tags:
+                type: array
+                items: { $ref: "#/components/schemas/ResourceTagInput" }
+    ResourceTagInput:
+      type: object
+      additionalProperties: false
+      required: [group_name, value]
+      properties:
+        group_name: { type: string, minLength: 1, maxLength: 32 }
+        value: { type: string, minLength: 1, maxLength: 32 }
+    ResourceTagRef:
+      type: object
+      required: [id, group_name, value]
+      properties:
+        id: { type: string, format: uuid }
+        group_name: { type: string }
+        value: { type: string }
+    ResourceTag:
+      allOf:
+        - $ref: "#/components/schemas/ResourceTagRef"
+        - type: object
+          required: [owner_id, environment_count, created_at, updated_at]
+          properties:
+            owner_id: { type: string, format: uuid }
+            owner_username: { type: string }
+            environment_count: { type: integer }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    ResourceTagResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/ResourceTag" }
+    ResourceTagListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ResourceTag" }
+    Package:
+      type: object
+      properties:
+        owner_id: { type: string, format: uuid }
+        owner_username: { type: string }
+        service_type: { type: string }
+        current_version_id: { type: string, format: uuid }
+        version_count: { type: integer }
+        referenced_environment_count: { type: integer }
+        original_filename: { type: string }
+        sha256: { type: string }
+        size_bytes: { type: integer }
+        config_port: { type: integer }
+        note: { type: string }
+        uploaded_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PackageResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Package"
+    PackageVersion:
+      type: object
+      required: [id, owner_id, service_type, original_filename, sha256, size_bytes, config_port, config_format, config_path, validation_status, note, uploaded_by_username, uploaded_at, current, referenced_environment_count]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        service_type: { type: string }
+        original_filename: { type: string }
+        sha256: { type: string }
+        size_bytes: { type: integer }
+        config_port: { type: integer }
+        config_format: { type: string, enum: [json, yaml] }
+        config_path: { type: string }
+        validation_status: { type: string, const: passed }
+        note: { type: string }
+        uploaded_by: { type: string, format: uuid }
+        uploaded_by_username: { type: string }
+        uploaded_at: { type: string, format: date-time }
+        current: { type: boolean }
+        referenced_environment_count: { type: integer }
+    PackageVersionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/PackageVersion" }
+    DeletedResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            deleted: { type: string }
+    Service:
+      type: object
+      required: [environment, health, busy]
+      properties:
+        environment:
+          $ref: "#/components/schemas/Environment"
+        health:
+          $ref: "#/components/schemas/HealthResult"
+        service_port:
+          type: integer
+          description: Instance config port; falls back to the package default before customization.
+        busy: { type: boolean }
+        last_operation:
+          type: object
+          description: Latest lifecycle operation of the environment; lets clients distinguish "never installed" from a failed install.
+          properties:
+            action: { type: string, enum: [install, start, stop, reset] }
+            status: { type: string, enum: [queued, running, succeeded, failed, timed_out, interrupted] }
+            error_message: { type: string }
+            finished_at: { type: [string, "null"], format: date-time }
+    HealthResult:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [running, stopped, unreachable, invalid_response, not_configured] }
+        checked_at: { type: [string, "null"], format: date-time }
+        reason: { type: string }
+    HealthResultResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/HealthResult" }
+    ServiceConfig:
+      type: object
+      required: [environment_id, content, format, path, port, inherited]
+      properties:
+        environment_id: { type: string, format: uuid }
+        content: { type: string }
+        format: { type: string, enum: [json, yaml] }
+        path: { type: string }
+        port: { type: integer }
+        inherited: { type: boolean }
+        current_revision_id: { type: string, format: uuid }
+        updated_at: { type: string, format: date-time }
+    ServiceConfigPreviewResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [current_content, proposed_content, changed, format, path, port]
+          properties:
+            current_content: { type: string }
+            proposed_content: { type: string }
+            changed: { type: boolean }
+            format: { type: string, enum: [json, yaml] }
+            path: { type: string }
+            port: { type: integer }
+    ServiceConfigRevision:
+      type: object
+      required: [id, environment_id, format, path, port, source, created_by_username, created_at, current]
+      properties:
+        id: { type: string, format: uuid }
+        environment_id: { type: string, format: uuid }
+        content: { type: string, description: Returned only by revision detail and rollback responses }
+        format: { type: string, enum: [json, yaml] }
+        path: { type: string }
+        port: { type: integer }
+        source: { type: string, enum: [manual, rollback] }
+        restored_from_id: { type: string, format: uuid }
+        created_by: { type: string, format: uuid }
+        created_by_username: { type: string }
+        created_at: { type: string, format: date-time }
+        current: { type: boolean }
+    ServiceConfigRevisionResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/ServiceConfigRevision" }
+    ServiceConfigRevisionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ServiceConfigRevision" }
+    Operation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        environment_id: { type: string, format: uuid }
+        request_id: { type: string, format: uuid }
+        actor_user_id: { type: string, format: uuid }
+        actor_username: { type: string }
+        owner_id: { type: string, format: uuid }
+        owner_username: { type: string }
+        environment_name: { type: string }
+        environment_ip: { type: string }
+        service_type: { type: string }
+        action: { type: string, enum: [install, start, stop, reset] }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, timed_out, interrupted]
+        stage: { type: string }
+        exit_code: { type: integer }
+        error_code: { type: string }
+        error_message: { type: string }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        tags:
+          type: array
+          description: Immutable labels captured when the operation was created.
+          items: { $ref: "#/components/schemas/ResourceTagRef" }
+    OperationResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Operation"
+    OperationListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, next_cursor]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Operation" } }
+            next_cursor: { type: string }
+    Notification:
+      type: object
+      required: [id, created_at, risk_level, category, title, message, read, resolved, link]
+      properties:
+        id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        risk_level: { type: string, enum: [normal, high] }
+        category: { type: string, enum: [security, account, resource, operation, system] }
+        title: { type: string }
+        message: { type: string }
+        target_type: { type: string }
+        target_id: { type: string }
+        target_label: { type: string }
+        owner_id: { type: string, format: uuid }
+        owner_username: { type: string }
+        operation_id: { type: string, format: uuid }
+        link: { type: string }
+        read: { type: boolean }
+        resolved: { type: boolean }
+        read_at: { type: [string, "null"], format: date-time }
+        resolved_at: { type: [string, "null"], format: date-time }
+    NotificationListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, next_cursor]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Notification" } }
+            next_cursor: { type: string }
+    NotificationSummaryResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [unread, unresolved]
+          properties:
+            unread: { type: integer }
+            unresolved: { type: integer }
+    AdminDashboardResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [metrics, communications, notifications]
+          properties:
+            metrics:
+              type: object
+              required: [users, enabled_users, disabled_users, packages, environments, installed_services, running_services, active_operations, failed_operations_24h, login_failures_24h, unvalidated_environments, stale_validation_environments, unhealthy_installed_services, high_risk_audits_24h, unread_notifications, unread_communications]
+              properties:
+                users: { type: integer }
+                enabled_users: { type: integer }
+                disabled_users: { type: integer }
+                packages: { type: integer }
+                environments: { type: integer }
+                installed_services: { type: integer }
+                running_services: { type: integer }
+                active_operations: { type: integer }
+                failed_operations_24h: { type: integer }
+                login_failures_24h: { type: integer }
+                unvalidated_environments: { type: integer }
+                stale_validation_environments: { type: integer }
+                unhealthy_installed_services: { type: integer }
+                high_risk_audits_24h: { type: integer }
+                unread_notifications: { type: integer }
+                unread_communications: { type: integer, description: Unread communication messages for the current administrator }
+            communications:
+              type: array
+              maxItems: 5
+              description: Most recently updated communication threads containing unread messages for the current administrator
+              items: { $ref: "#/components/schemas/Communication" }
+            notifications:
+              type: array
+              items: { $ref: "#/components/schemas/Notification" }
+    AuditEvent:
+      type: object
+      required: [id, occurred_at, category, action, outcome, risk_level, actor_username, request_id]
+      properties:
+        id: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+        category: { type: string, enum: [authentication, account, package, environment, service, communication, audit] }
+        action: { type: string }
+        outcome: { type: string, enum: [success, failure, denied] }
+        risk_level: { type: string, enum: [normal, high] }
+        actor_user_id: { type: string, format: uuid }
+        actor_username: { type: string }
+        actor_role: { type: string, enum: [admin, user] }
+        owner_id: { type: string, format: uuid }
+        owner_username: { type: string }
+        target_type: { type: string }
+        target_id: { type: string }
+        target_label: { type: string }
+        request_id: { type: string, format: uuid }
+        operation_id: { type: string, format: uuid }
+        source_ip: { type: string }
+        user_agent: { type: string, maxLength: 512 }
+        error_code: { type: string }
+        changes:
+          type: object
+          additionalProperties: true
+          description: Allowlisted and sanitized change summary; never contains credentials or configuration content.
+    AuditEventResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/AuditEvent" }
+    AuditEventListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, next_cursor]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+            next_cursor: { type: string }
+    AuditSummaryResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [total, failures, login_failures, high_risk]
+          properties:
+            total: { type: integer }
+            failures: { type: integer }
+            login_failures: { type: integer }
+            high_risk: { type: integer }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+        request_id: { type: string, format: uuid }
+  responses:
+    Unauthorized:
+      description: Authentication required or session expired
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Administrator role required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: State or uniqueness conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ValidationError:
+      description: Request data is invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    OperationAccepted:
+      description: Asynchronous operation accepted
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  operation_id: { type: string, format: uuid }
+                  status: { type: string, const: queued }

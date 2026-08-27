@@ -1,0 +1,27 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { api } from './client'
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('changePassword', () => {
+  it('does not send the client-only password confirmation field', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { password_changed: true } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.changePassword({
+      current_password: 'temporary-password',
+      new_password: 'new-password',
+      confirm_password: 'new-password',
+    } as Parameters<typeof api.changePassword>[0] & { confirm_password: string })
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init.body as string)).toEqual({
+      current_password: 'temporary-password',
+      new_password: 'new-password',
+    })
+  })
+})

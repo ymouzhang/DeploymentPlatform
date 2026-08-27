@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+bin
+data
+dist
+case
+test
+web/node_modules
+webui/dist
+*.db
+*.db-shm
+*.db-wal
+*.tar.gz
