@@ -1,12 +1,4 @@
-/data/
-/bin/
-/dist/
-/web/node_modules/
-/web/dist/
-/webui/dist/*
-*.db
-*.db-shm
-*.db-wal
 .env
-case/
-/test/
+/inference/dist/
+__pycache__/
+*.pyc
