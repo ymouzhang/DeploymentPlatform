@@ -1,0 +1,61 @@
+services:
+  engine:
+    image: ${ENGINE_IMAGE:-vllm/vllm-openai:v0.27.1}
+    restart: unless-stopped
+    ipc: host
+    ports:
+      - "0.0.0.0:${API_PORT:-8000}:8000"
+    volumes:
+      - type: bind
+        source: ${MODEL_PATH:-/nonexistent}
+        target: /models
+        read_only: true
+      - type: bind
+        source: ./config/config.json
+        target: /opt/dp/config/config.json
+        read_only: true
+      - type: bind
+        source: ./engine_launcher.py
+        target: /opt/dp/engine_launcher.py
+        read_only: true
+      - vllm-cache:/root/.cache/huggingface
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    entrypoint: ["python3", "/opt/dp/engine_launcher.py", "vllm", "/opt/dp/config/config.json"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  health:
+    image: ${ENGINE_IMAGE:-vllm/vllm-openai:v0.27.1}
+    restart: unless-stopped
+    depends_on:
+      - engine
+    ports:
+      - "0.0.0.0:${SERVICE_PORT:-18000}:8000"
+    volumes:
+      - type: bind
+        source: ./health_server.py
+        target: /opt/dp/health_server.py
+        read_only: true
+    entrypoint: ["python3", "/opt/dp/health_server.py", "--upstream", "engine:8000", "--listen", "0.0.0.0:8000"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+volumes:
+  vllm-cache:
