@@ -1,0 +1,26 @@
+{
+  "port": 18400,
+  "api_port": 4000,
+  "litellm_image": "ghcr.io/berriai/litellm:v1.98.0",
+  "postgres_image": "postgres:16.15-trixie",
+  "master_key": "sk-change-me-before-production",
+  "salt_key": "change-me-to-an-immutable-random-salt",
+  "database": {
+    "name": "litellm",
+    "user": "litellm",
+    "password": "change-me-to-a-random-db-password"
+  },
+  "store_model_in_db": true,
+  "num_workers": 1,
+  "request_timeout_seconds": 600,
+  "database_pool_limit": 10,
+  "proxy_batch_write_seconds": 60,
+  "models": [
+    {
+      "model_name": "Qwen3-4B-Instruct-2507",
+      "model": "openai/Qwen3-4B-Instruct-2507",
+      "api_base": "http://host.docker.internal:8000/v1",
+      "api_key": "change-me-to-the-inference-api-key"
+    }
+  ]
+}

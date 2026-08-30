@@ -1,0 +1,77 @@
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16.15-trixie}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  litellm:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.98.0}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:${API_PORT:-4000}:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ./.dp-litellm-config.json
+        target: /app/dp-litellm-config.json
+        read_only: true
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://litellm:change-me@db:5432/litellm}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-change-me}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-change-me}
+      STORE_MODEL_IN_DB: ${STORE_MODEL_IN_DB:-true}
+      LITELLM_MODE: PRODUCTION
+    command:
+      - "--port"
+      - "4000"
+      - "--config"
+      - "/app/dp-litellm-config.json"
+      - "--num_workers"
+      - "${NUM_WORKERS:-1}"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    stop_grace_period: 30s
+
+  health:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.98.0}
+    restart: unless-stopped
+    depends_on:
+      litellm:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:${SERVICE_PORT:-18400}:8000"
+    volumes:
+      - type: bind
+        source: ./health_server.py
+        target: /opt/dp/health_server.py
+        read_only: true
+    entrypoint: ["python3", "/opt/dp/health_server.py", "--upstream", "litellm:4000", "--listen", "0.0.0.0:8000"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres-data:

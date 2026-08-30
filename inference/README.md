@@ -4,6 +4,10 @@
 推理 API 由 Docker 直接映射到引擎容器，LiteLLM 不经过任何 Python 代理；独立健康容器只补充
 DP 要求的 `GET /healthz`，上游引擎健康时固定返回 `{"status":"ok"}`。
 
+`configctl/` 是 vLLM 与 SGLang 共用的独立 Go 项目：`cmd/configctl` 负责命令行入口，
+`internal/config` 负责读取、校验 DP 配置并生成 Compose 环境。打包后只携带静态编译的
+`dp-inference-config` 二进制，目标服务器不需要 Go。
+
 ## 打包
 
 打包机需要 Go、Docker、Docker Compose v2、`gzip`、`tar` 和 `sha256sum`。默认安装包会包含配置中
@@ -36,6 +40,7 @@ INFERENCE_BUNDLE_IMAGES=0 ./package.sh
 `INFERENCE_GZIP_LEVEL` 可设置为 1–9，默认 6。两张推理镜像体积很大，打包需要足够的磁盘空间
 和时间。交叉架构打包时，本地镜像平台必须与 `INFERENCE_ARCH` 一致；否则应使用
 `INFERENCE_PULL_IMAGES=always` 拉取目标平台镜像。
+`INFERENCE_OUTPUT_DIR` 可将产物写到指定目录，默认仍为 `inference/dist/`。
 
 产物位于 `inference/dist/`：
 

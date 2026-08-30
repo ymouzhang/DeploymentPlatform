@@ -21,12 +21,13 @@ case "${target_arch}" in
     ;;
 esac
 
-output_dir="${script_dir}/dist"
+output_dir="${INFERENCE_OUTPUT_DIR:-${script_dir}/dist}"
 mkdir -p "${output_dir}"
 # 推理镜像通常为数 GB，不能依赖容量较小的 /tmp tmpfs。
 stage_dir="$(mktemp -d "${output_dir}/.package-stage.XXXXXX")"
 host_configctl="${stage_dir}/dp-inference-config-host"
 target_configctl="${stage_dir}/dp-inference-config"
+configctl_dir="${script_dir}/configctl"
 
 bundle_images="${INFERENCE_BUNDLE_IMAGES:-1}"
 pull_policy="${INFERENCE_PULL_IMAGES:-missing}"
@@ -43,12 +44,12 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> 测试配置转换工具"
-go test ./cmd/configenv
+(cd "${configctl_dir}" && go test ./...)
 
 echo "==> 编译 linux/${target_arch} 配置转换工具"
-go build -trimpath -o "${host_configctl}" ./cmd/configenv
-CGO_ENABLED=0 GOOS=linux GOARCH="${target_arch}" \
-  go build -trimpath -ldflags="-s -w" -o "${target_configctl}" ./cmd/configenv
+(cd "${configctl_dir}" && go build -trimpath -o "${host_configctl}" ./cmd/configctl)
+(cd "${configctl_dir}" && CGO_ENABLED=0 GOOS=linux GOARCH="${target_arch}" \
+  go build -trimpath -ldflags="-s -w" -o "${target_configctl}" ./cmd/configctl)
 
 for engine in vllm sglang; do
   package_name="dp-${engine}"
@@ -81,7 +82,9 @@ for engine in vllm sglang; do
   cp "${engine}/start.sh" "${engine}/stop.sh" "${package_root}/"
   cp "${script_dir}/runtime/engine_launcher.py" "${script_dir}/runtime/health_server.py" \
     "${script_dir}/runtime/load_offline_image.sh" "${package_root}/"
-  chmod +x "${package_root}/dp-inference-config" "${package_root}/start.sh" \
+  chmod 755 "${package_root}" "${package_root}/config"
+  chmod 644 "${package_root}/docker-compose.yaml" "${package_root}/config/config.json"
+  chmod 755 "${package_root}/dp-inference-config" "${package_root}/start.sh" \
     "${package_root}/stop.sh" "${package_root}/engine_launcher.py" "${package_root}/health_server.py" \
     "${package_root}/load_offline_image.sh"
 
@@ -92,11 +95,15 @@ for engine in vllm sglang; do
     printf '%s\n' "${image_id}" > "${package_root}/offline-image.id"
     echo "==> 导出 ${engine} 离线镜像（压缩级别 ${gzip_level}）：${image_ref}"
     docker image save "${image_ref}" | gzip "-${gzip_level}" > "${package_root}/inference-image.tar.gz"
+    chmod 644 "${package_root}/offline-image.ref" "${package_root}/offline-image.id" \
+      "${package_root}/inference-image.tar.gz"
   else
     echo "==> ${engine} 跳过镜像导出（该包不能保证离线部署）"
   fi
   tar -C "${stage_dir}" -czf "${archive_path}" "${package_name}"
-  sha256sum "${archive_path}" > "${archive_path}.sha256"
+  archive_name="$(basename -- "${archive_path}")"
+  (cd "${output_dir}" && sha256sum "${archive_name}") > "${archive_path}.sha256"
+  chmod 644 "${archive_path}" "${archive_path}.sha256"
   rm -rf -- "${package_root}"
 
   echo "安装包：${archive_path}（服务类型建议填写：${engine}）"
