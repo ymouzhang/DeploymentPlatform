@@ -28,8 +28,9 @@ case "${bundle_images}" in 0|1) ;; *) echo "LITELLM_BUNDLE_IMAGES 只能为 0 �
 case "${pull_policy}" in always|missing|never) ;; *) echo "LITELLM_PULL_IMAGES 只能为 always、missing 或 never" >&2; exit 2 ;; esac
 case "${gzip_level}" in 1|2|3|4|5|6|7|8|9) ;; *) echo "LITELLM_GZIP_LEVEL 必须为 1 到 9" >&2; exit 2 ;; esac
 
-output_dir="${script_dir}/dist"
+output_dir="${LITELLM_OUTPUT_DIR:-${script_dir}/dist}"
 mkdir -p "${output_dir}"
+output_dir="$(cd -- "${output_dir}" && pwd)"
 stage_dir="$(mktemp -d "${output_dir}/.package-stage.XXXXXX")"
 host_configctl="${stage_dir}/dp-litellm-config-host"
 target_configctl="${stage_dir}/dp-litellm-config"

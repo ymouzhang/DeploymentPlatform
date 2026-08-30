@@ -1,0 +1,4 @@
+[submodule "agents/dify"]
+	path = agents/dify
+	url = git@github.com:ymouzhang/dify.git
+	branch = feature/1.16.1

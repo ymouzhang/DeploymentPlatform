@@ -21,6 +21,28 @@ case "${target_arch}" in
     ;;
 esac
 
+engines_value="${INFERENCE_ENGINES:-vllm sglang}"
+read -r -a engines <<<"${engines_value//,/ }"
+if [[ "${#engines[@]}" -eq 0 ]]; then
+  echo "INFERENCE_ENGINES 至少要包含 vllm 或 sglang" >&2
+  exit 2
+fi
+declare -A seen_engines=()
+for engine in "${engines[@]}"; do
+  case "${engine}" in
+    vllm|sglang) ;;
+    *)
+      echo "INFERENCE_ENGINES 只能包含 vllm 和 sglang：${engine}" >&2
+      exit 2
+      ;;
+  esac
+  if [[ -n "${seen_engines[${engine}]:-}" ]]; then
+    echo "INFERENCE_ENGINES 包含重复引擎：${engine}" >&2
+    exit 2
+  fi
+  seen_engines["${engine}"]=1
+done
+
 output_dir="${INFERENCE_OUTPUT_DIR:-${script_dir}/dist}"
 mkdir -p "${output_dir}"
 # 推理镜像通常为数 GB，不能依赖容量较小的 /tmp tmpfs。
@@ -51,7 +73,7 @@ echo "==> 编译 linux/${target_arch} 配置转换工具"
 (cd "${configctl_dir}" && CGO_ENABLED=0 GOOS=linux GOARCH="${target_arch}" \
   go build -trimpath -ldflags="-s -w" -o "${target_configctl}" ./cmd/configctl)
 
-for engine in vllm sglang; do
+for engine in "${engines[@]}"; do
   package_name="dp-${engine}"
   package_root="${stage_dir}/${package_name}"
   archive_path="${output_dir}/${package_name}-linux-${target_arch}.tar.gz"

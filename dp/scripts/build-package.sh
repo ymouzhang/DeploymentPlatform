@@ -33,7 +33,9 @@ case "${platform}" in
 esac
 architecture="${platform#linux/}"
 image_tag="dp:${version,,}"
-output_dir="${project_dir}/dist"
+output_dir="${DP_OUTPUT_DIR:-${project_dir}/dist}"
+mkdir -p "${output_dir}"
+output_dir="$(cd -- "${output_dir}" && pwd)"
 package_name="dp-${version}-linux-${architecture}"
 archive_path="${output_dir}/${package_name}.tar.gz"
 stage_dir="$(mktemp -d)"
@@ -54,7 +56,7 @@ DP_ADMIN_PASSWORD="build-only-password" \
   docker compose build --pull
 
 bundle_dir="${stage_dir}/${package_name}"
-mkdir -p "${bundle_dir}/data" "${output_dir}"
+mkdir -p "${bundle_dir}/data"
 
 echo "==> 导出离线镜像"
 docker image save "${image_tag}" | gzip -9 > "${bundle_dir}/dp-image.tar.gz"
@@ -70,7 +72,8 @@ chmod +x "${bundle_dir}/dp.sh"
 
 echo "==> 生成部署包"
 tar -C "${stage_dir}" -czf "${archive_path}" "${package_name}"
-sha256sum "${archive_path}" > "${archive_path}.sha256"
+archive_name="$(basename -- "${archive_path}")"
+(cd "${output_dir}" && sha256sum "${archive_name}") > "${archive_path}.sha256"
 
 echo "部署包：${archive_path}"
 echo "校验文件：${archive_path}.sha256"

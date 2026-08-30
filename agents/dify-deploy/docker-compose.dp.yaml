@@ -1,0 +1,97 @@
+services:
+  init_permissions:
+    image: ${BUSYBOX_IMAGE:-busybox:1.37.0}
+
+  api:
+    image: ${DIFY_API_IMAGE:-langgenius/dify-api:1.16.1}
+
+  api_websocket:
+    image: ${DIFY_API_IMAGE:-langgenius/dify-api:1.16.1}
+
+  worker:
+    image: ${DIFY_BUNDLED_API_IMAGE:-ymouzhang/dify-api:1.16.1-bundled}
+
+  plugin_initializer:
+    image: ${DIFY_BUNDLED_API_IMAGE:-ymouzhang/dify-api:1.16.1-bundled}
+
+  worker_beat:
+    image: ${DIFY_API_IMAGE:-langgenius/dify-api:1.16.1}
+
+  web:
+    image: ${DIFY_WEB_IMAGE:-langgenius/dify-web:1.16.1}
+
+  db_postgres:
+    image: ${POSTGRES_IMAGE:-postgres:15.14-alpine}
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:6.2.20-alpine}
+
+  sandbox:
+    image: ${SANDBOX_IMAGE:-langgenius/dify-sandbox:0.2.15}
+
+  local_sandbox:
+    image: ${LOCAL_SANDBOX_IMAGE:-langgenius/dify-agent-local-sandbox:1.16.1}
+
+  plugin_daemon:
+    image: ${PLUGIN_DAEMON_IMAGE:-langgenius/dify-plugin-daemon:0.6.3-local}
+    ports: !reset []
+
+  agent_backend:
+    image: ${AGENT_BACKEND_IMAGE:-langgenius/dify-agent-backend:1.16.1}
+
+  agent_ssrf_proxy:
+    image: ${SQUID_IMAGE:-ubuntu/squid:6.6-24.04_beta}
+
+  ssrf_proxy:
+    image: ${SQUID_IMAGE:-ubuntu/squid:6.6-24.04_beta}
+
+  nginx:
+    image: ${NGINX_IMAGE:-nginx:1.28.0}
+    ports: !override
+      - "0.0.0.0:${API_PORT:-30080}:80"
+
+  weaviate:
+    image: ${WEAVIATE_IMAGE:-semitechnologies/weaviate:1.27.0}
+
+  health:
+    image: ${DIFY_API_IMAGE:-langgenius/dify-api:1.16.1}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      nginx:
+        condition: service_started
+      local_sandbox:
+        condition: service_healthy
+      plugin_initializer:
+        condition: service_completed_successfully
+    ports:
+      - "0.0.0.0:${SERVICE_PORT:-18500}:8000"
+    volumes:
+      - type: bind
+        source: ./health_server.py
+        target: /opt/dp/health_server.py
+        read_only: true
+    entrypoint:
+      - python3
+      - /opt/dp/health_server.py
+      - --listen
+      - 0.0.0.0:8000
+      - --http
+      - http://api:5001/health
+      - --http
+      - http://nginx:80/
+      - --http
+      - http://local_sandbox:5004/healthz
+      - --tcp
+      - agent_backend:5050
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - default
+      - agent_sandbox_network
+

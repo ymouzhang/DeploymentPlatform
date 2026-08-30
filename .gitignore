@@ -1,5 +1,7 @@
 .env
+/dist/
 /inference/dist/
 /llm-gateway/lite-llm/dist/
+/agents/dify-deploy/dist/
 __pycache__/
 *.pyc

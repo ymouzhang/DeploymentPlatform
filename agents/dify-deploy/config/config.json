@@ -1,0 +1,42 @@
+{
+  "port": 18500,
+  "api_port": 30080,
+  "public_url": "http://192.168.1.100:30080",
+  "images": {
+    "api": "langgenius/dify-api:1.16.1",
+    "web": "langgenius/dify-web:1.16.1",
+    "bundled_api": "ymouzhang/dify-api:1.16.1-bundled",
+    "nginx": "nginx:1.28.0",
+    "busybox": "busybox:1.37.0",
+    "sandbox": "langgenius/dify-sandbox:0.2.15",
+    "weaviate": "semitechnologies/weaviate:1.27.0",
+    "local_sandbox": "langgenius/dify-agent-local-sandbox:1.16.1",
+    "redis": "redis:6.2.20-alpine",
+    "plugin_daemon": "langgenius/dify-plugin-daemon:0.6.3-local",
+    "postgres": "postgres:15.14-alpine",
+    "agent_backend": "langgenius/dify-agent-backend:1.16.1",
+    "squid": "ubuntu/squid:6.6-24.04_beta"
+  },
+  "database": {
+    "name": "dify",
+    "user": "postgres",
+    "password": "change-me-database-password"
+  },
+  "redis_password": "change-me-redis-password",
+  "secret_key": "change-me-dify-secret-key",
+  "sandbox_api_key": "change-me-sandbox-api-key",
+  "plugin_daemon_key": "change-me-plugin-daemon-key",
+  "plugin_inner_api_key": "change-me-plugin-inner-api-key",
+  "agent_api_token": "change-me-agent-api-token",
+  "agent_server_secret_key": "change-me-agent-server-secret-key",
+  "agent_shell_auth_token": "change-me-agent-shell-auth-token",
+  "weaviate_api_key": "change-me-weaviate-api-key",
+  "weaviate_admin_user": "dify-admin",
+  "server_workers": 1,
+  "celery_workers": 4,
+  "private_network_allowlist": [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16"
+  ]
+}

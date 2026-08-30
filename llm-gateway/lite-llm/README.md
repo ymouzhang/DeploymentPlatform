@@ -45,6 +45,9 @@ LITELLM_BUNDLE_IMAGES=0 ./package.sh
 LITELLM_GZIP_LEVEL=6 ./package.sh
 ```
 
+`LITELLM_OUTPUT_DIR` 可覆盖产物目录，默认仍为当前模块的 `dist/`；根目录统一打包脚本会用它把
+LiteLLM 包直接写入项目根目录 `dist/`。
+
 产物位于 `dist/`：
 
 ```text

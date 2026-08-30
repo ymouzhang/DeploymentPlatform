@@ -24,6 +24,15 @@ cd inference
 INFERENCE_ARCH=arm64 ./package.sh
 ```
 
+也可以只生成其中一个引擎的安装包：
+
+```bash
+INFERENCE_ENGINES=vllm ./package.sh
+INFERENCE_ENGINES=sglang ./package.sh
+```
+
+`INFERENCE_ENGINES` 也接受以空格或逗号分隔的 `vllm`、`sglang` 列表，默认打包两者。
+
 镜像处理选项：
 
 ```bash
