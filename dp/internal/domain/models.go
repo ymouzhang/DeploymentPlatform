@@ -349,6 +349,117 @@ type OperationFilter struct {
 	Limit                                     int
 }
 
+type ModelStatus string
+type ModelTaskAction string
+
+const (
+	ModelUploading ModelStatus = "uploading"
+	ModelDeploying ModelStatus = "deploying"
+	ModelReady     ModelStatus = "ready"
+	ModelFailed    ModelStatus = "failed"
+	ModelDeleting  ModelStatus = "deleting"
+	ModelDeleted   ModelStatus = "deleted"
+
+	ModelTaskDeploy ModelTaskAction = "deploy"
+	ModelTaskDelete ModelTaskAction = "delete"
+)
+
+type Model struct {
+	ID                string      `json:"id"`
+	OwnerID           string      `json:"owner_id"`
+	MarkerOwnerID     string      `json:"-"`
+	OwnerUsername     string      `json:"owner_username,omitempty"`
+	EnvironmentID     string      `json:"environment_id"`
+	EnvironmentName   string      `json:"environment_name"`
+	EnvironmentIP     string      `json:"environment_ip"`
+	Name              string      `json:"name"`
+	Source            string      `json:"source"`
+	TargetDir         string      `json:"target_dir"`
+	OriginalFilename  string      `json:"original_filename"`
+	SizeBytes         int64       `json:"size_bytes"`
+	ExpandedSizeBytes int64       `json:"expanded_size_bytes"`
+	FileCount         int64       `json:"file_count"`
+	SHA256            string      `json:"sha256,omitempty"`
+	Status            ModelStatus `json:"status"`
+	ErrorMessage      string      `json:"error_message,omitempty"`
+	CreatedBy         string      `json:"created_by,omitempty"`
+	CreatedByUsername string      `json:"created_by_username,omitempty"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+	ReadyAt           *time.Time  `json:"ready_at,omitempty"`
+	DeletedAt         *time.Time  `json:"deleted_at,omitempty"`
+	LatestTask        *ModelTask  `json:"latest_task,omitempty"`
+}
+
+type ModelUpload struct {
+	ID         string    `json:"id"`
+	ModelID    string    `json:"model_id"`
+	OwnerID    string    `json:"owner_id"`
+	RemotePath string    `json:"-"`
+	Offset     int64     `json:"offset"`
+	TotalBytes int64     `json:"total_bytes"`
+	Status     string    `json:"status"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type ModelTask struct {
+	ID            string          `json:"id"`
+	ModelID       string          `json:"model_id"`
+	OwnerID       string          `json:"owner_id"`
+	ActorUserID   string          `json:"actor_user_id,omitempty"`
+	ActorUsername string          `json:"actor_username,omitempty"`
+	Action        ModelTaskAction `json:"action"`
+	Status        OperationStatus `json:"status"`
+	Stage         string          `json:"stage"`
+	Progress      int             `json:"progress"`
+	ErrorCode     string          `json:"error_code,omitempty"`
+	ErrorMessage  string          `json:"error_message,omitempty"`
+	LogPath       string          `json:"-"`
+	CreatedAt     time.Time       `json:"created_at"`
+	StartedAt     *time.Time      `json:"started_at,omitempty"`
+	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
+}
+
+type ModelUploadCreateInput struct {
+	Name             string `json:"name"`
+	EnvironmentID    string `json:"environment_id"`
+	TargetDir        string `json:"target_dir"`
+	OriginalFilename string `json:"original_filename"`
+	TotalBytes       int64  `json:"total_bytes"`
+}
+
+func (in *ModelUploadCreateInput) Normalize() {
+	in.Name = strings.TrimSpace(in.Name)
+	in.EnvironmentID = strings.TrimSpace(in.EnvironmentID)
+	in.TargetDir = strings.TrimSpace(in.TargetDir)
+	in.OriginalFilename = strings.TrimSpace(in.OriginalFilename)
+}
+
+func (in ModelUploadCreateInput) Validate(maxBytes int64) error {
+	if utf8.RuneCountInString(in.Name) < 1 || utf8.RuneCountInString(in.Name) > 128 || strings.ContainsAny(in.Name, "\x00\r\n") {
+		return FieldError("name", "模型名称长度必须为 1 到 128 个字符且不能包含换行")
+	}
+	if in.EnvironmentID == "" {
+		return FieldError("environment_id", "请选择目标环境")
+	}
+	if !strings.HasSuffix(strings.ToLower(in.OriginalFilename), ".tar.gz") {
+		return FieldError("original_filename", "模型文件必须是 .tar.gz 压缩包")
+	}
+	if in.TotalBytes <= 0 || in.TotalBytes > maxBytes {
+		return FieldError("total_bytes", fmt.Sprintf("模型压缩包大小必须大于 0 且不超过 %d 字节", maxBytes))
+	}
+	if !strings.HasPrefix(in.TargetDir, "/") || path.Clean(in.TargetDir) != in.TargetDir || strings.ContainsAny(in.TargetDir, "\x00\r\n") {
+		return FieldError("target_dir", "目标目录必须是规范的绝对路径")
+	}
+	switch in.TargetDir {
+	case "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/root", "/run", "/sbin", "/sys", "/tmp", "/usr", "/var":
+		return FieldError("target_dir", "目标目录不能是系统关键目录")
+	}
+	return nil
+}
+
 type Notification struct {
 	ID            string     `json:"id"`
 	DedupeKey     string     `json:"-"`
@@ -486,6 +597,7 @@ type UserDetail struct {
 	User
 	PackageCount          int        `json:"package_count"`
 	EnvironmentCount      int        `json:"environment_count"`
+	ModelCount            int        `json:"model_count"`
 	InstalledServiceCount int        `json:"installed_service_count"`
 	RecentOperationCount  int        `json:"recent_operation_count"`
 	ActiveSessionCount    int        `json:"active_session_count"`
@@ -501,6 +613,7 @@ type TransferResult struct {
 	TargetUserID string `json:"target_user_id"`
 	Packages     int    `json:"packages"`
 	Environments int    `json:"environments"`
+	Models       int    `json:"models"`
 }
 
 type DashboardMetrics struct {

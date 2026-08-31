@@ -13,6 +13,7 @@ import {
   BellOutlined,
   HistoryOutlined,
   LaptopOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Alert, App as AntApp, Badge, Button, Dropdown, Form, Input, Layout, Menu, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
@@ -36,6 +37,7 @@ const ServicesPage = lazy(() =>
     default: module.ServicesPage,
   })),
 )
+const ModelsPage = lazy(() => import('../features/models/ModelsPage').then((module) => ({ default: module.ModelsPage })))
 const PackagesPage = lazy(() =>
   import('../features/packages/PackagesPage').then((module) => ({
     default: module.PackagesPage,
@@ -67,7 +69,7 @@ function Shell() {
     () => window.localStorage.getItem('dp:sider-collapsed') === 'true',
   )
   useEffect(() => {
-    if (meQuery.data?.role !== 'admin' || !['/packages', '/environments', '/services'].includes(location.pathname)) return
+    if (meQuery.data?.role !== 'admin' || !['/packages', '/environments', '/models', '/services'].includes(location.pathname)) return
     const requested = new URLSearchParams(location.search).get('owner_id') ?? undefined
     if (!requested || usersQuery.data?.some((item) => item.id === requested)) setOwnerId(requested)
   }, [location.pathname, location.search, meQuery.data?.role, usersQuery.data])
@@ -94,8 +96,10 @@ function Shell() {
       ? '管理总览'
       : location.pathname === '/packages'
       ? '安装包管理'
-      : location.pathname === '/services'
-        ? '服务管理'
+        : location.pathname === '/services'
+          ? '服务管理'
+          : location.pathname === '/models'
+            ? '模型管理'
         : location.pathname === '/users'
           ? '账号管理'
           : location.pathname === '/operations'
@@ -142,6 +146,7 @@ function Shell() {
             ...(user.role === 'admin' ? [{ key: '/dashboard', icon: <DashboardOutlined />, label: '管理总览' }] : []),
             { key: '/packages', icon: <FileZipOutlined />, label: '安装包管理' },
             { key: '/environments', icon: <CloudServerOutlined />, label: '环境管理' },
+            { key: '/models', icon: <DatabaseOutlined />, label: '模型管理' },
             { key: '/services', icon: <DeploymentUnitOutlined />, label: '服务管理' },
             { key: '/communications', icon: <SidebarMessageIcon unread={communicationUnread} />, label: <SidebarMessageLabel unread={communicationUnread} /> },
             ...(user.role === 'admin' ? [{ key: '/users', icon: <TeamOutlined />, label: '账号管理' }] : []),
@@ -176,7 +181,7 @@ function Shell() {
             </div>
           </div>
           <Space>
-            {user.role === 'admin' && ['/packages', '/environments', '/services'].includes(location.pathname) && <Space size={6}><Typography.Text type="secondary">数据范围</Typography.Text><Select allowClear placeholder="全部账号" value={ownerId} style={{ width: 180 }} options={users.map((item) => ({ value: item.id, label: item.username }))} onChange={(value) => setOwnerId(value)} /></Space>}
+            {user.role === 'admin' && ['/packages', '/environments', '/models', '/services'].includes(location.pathname) && <Space size={6}><Typography.Text type="secondary">数据范围</Typography.Text><Select allowClear placeholder="全部账号" value={ownerId} style={{ width: 180 }} options={users.map((item) => ({ value: item.id, label: item.username }))} onChange={(value) => setOwnerId(value)} /></Space>}
             <div className="system-state" aria-label="系统连接正常"><span className="system-state-dot" />系统在线</div>
             <HeaderMessageEntry key={`message-${communicationUnread}`} unread={communicationUnread} onClick={() => navigate('/communications')} />
             <Dropdown menu={{ items: [{ key: 'sessions', icon: <LaptopOutlined />, label: '登录会话' }, { key: 'password', icon: <KeyOutlined />, label: '修改密码' }, { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }], onClick: async ({ key }) => { if (key === 'sessions') setSessionsOpen(true); else if (key === 'password') setPasswordOpen(true); else { await api.logout(); finishLogout() } } }}>
@@ -192,6 +197,7 @@ function Shell() {
                 {user.role === 'admin' && <Route path="/dashboard" element={<DashboardPage />} />}
                 <Route path="/packages" element={<PackagesPage />} />
                 <Route path="/environments" element={<EnvironmentsPage />} />
+                <Route path="/models" element={<ModelsPage />} />
                 <Route path="/services" element={<ServicesPage />} />
                 <Route path="/communications" element={<CommunicationsPage />} />
                 {user.role === 'admin' && <Route path="/users" element={<UsersPage />} />}

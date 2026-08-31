@@ -22,6 +22,7 @@ import (
 	"DP/internal/audit"
 	"DP/internal/domain"
 	"DP/internal/health"
+	modelmanager "DP/internal/model"
 	"DP/internal/operation"
 	"DP/internal/realtime"
 	"DP/internal/store"
@@ -37,6 +38,7 @@ type API struct {
 	serviceLogs    *application.ServiceLogService
 	packages       *archive.Manager
 	operations     *operation.Manager
+	models         *modelmanager.Manager
 	health         *health.Monitor
 	store          *store.Store
 	audit          *audit.Service
@@ -55,6 +57,7 @@ func New(
 	serviceLogs *application.ServiceLogService,
 	packages *archive.Manager,
 	operations *operation.Manager,
+	models *modelmanager.Manager,
 	healthMonitor *health.Monitor,
 	store *store.Store,
 	auditService *audit.Service,
@@ -79,7 +82,7 @@ func New(
 	return &API{
 		auth: authService, communications: communicationService, realtime: realtimeHub, realtimeBeat: 15 * time.Second,
 		environments: environments, configs: configs, serviceLogs: serviceLogs,
-		packages: packages, operations: operations,
+		packages: packages, operations: operations, models: models,
 		health: healthMonitor, store: store, audit: auditService, uploadMax: uploadMax,
 		auditExportMax: auditExportMax, trustedProxies: trustedProxies, log: log,
 	}
@@ -138,6 +141,17 @@ func (a *API) Handler(frontend fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/v1/services/{id}/reset", a.startAction(domain.ActionReset))
 	mux.HandleFunc("POST /api/v1/services/{id}/health-check", a.checkHealth)
 	mux.HandleFunc("GET /api/v1/services/{id}/logs/stream", a.streamServiceLogs)
+	mux.HandleFunc("GET /api/v1/models", a.listModels)
+	mux.HandleFunc("GET /api/v1/models/{id}", a.getModel)
+	mux.HandleFunc("POST /api/v1/model-uploads", a.createModelUpload)
+	mux.HandleFunc("HEAD /api/v1/model-uploads/{id}", a.headModelUpload)
+	mux.HandleFunc("PATCH /api/v1/model-uploads/{id}", a.patchModelUpload)
+	mux.HandleFunc("POST /api/v1/model-uploads/{id}/complete", a.completeModelUpload)
+	mux.HandleFunc("DELETE /api/v1/model-uploads/{id}", a.cancelModelUpload)
+	mux.HandleFunc("POST /api/v1/models/{id}/retry", a.retryModel)
+	mux.HandleFunc("DELETE /api/v1/models/{id}", a.deleteModel)
+	mux.HandleFunc("GET /api/v1/model-tasks/{id}", a.getModelTask)
+	mux.HandleFunc("GET /api/v1/model-tasks/{id}/events", a.modelTaskEvents)
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.getOperation)
 	mux.HandleFunc("GET /api/v1/operations/{id}/events", a.operationEvents)
 	mux.HandleFunc("GET /api/v1/operations", a.listOperations)
@@ -272,6 +286,13 @@ func (a *API) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, domain.ErrOperationInProgress)
 		return
 	}
+	if used, checkErr := a.store.EnvironmentHasModels(r.Context(), id); checkErr != nil {
+		a.writeError(w, r, checkErr)
+		return
+	} else if used {
+		a.writeError(w, r, &domain.AppError{Code: "ENVIRONMENT_HAS_MODELS", Message: "该环境仍有关联模型，请先删除模型"})
+		return
+	}
 	_, err = a.store.DeleteEnvironment(r.Context(), id)
 	if err != nil {
 		a.writeError(w, r, err)
@@ -292,6 +313,16 @@ func (a *API) updateEnvironment(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &input); err != nil {
 		a.writeError(w, r, err)
 		return
+	}
+	input.Normalize()
+	if input.IP != original.IP || input.SSHUser != original.SSHUser || input.SSHPort != original.SSHPort {
+		if used, checkErr := a.store.EnvironmentHasModels(r.Context(), original.ID); checkErr != nil {
+			a.writeError(w, r, checkErr)
+			return
+		} else if used {
+			a.writeError(w, r, &domain.AppError{Code: "ENVIRONMENT_HAS_MODELS", Message: "该环境仍有关联模型，不能修改 IP、SSH 用户或 SSH 端口"})
+			return
+		}
 	}
 	result, err := a.environments.Update(r.Context(), r.PathValue("id"), input)
 	if err != nil {
@@ -885,7 +916,7 @@ func classifyHTTPError(err error) (int, string, string, any) {
 			status = http.StatusTooManyRequests
 		case "COMMUNICATION_CLOSED", "COMMUNICATION_ALREADY_OPEN", "COMMUNICATION_ALREADY_CLOSED", "COMMUNICATION_TARGET_DISABLED":
 			status = http.StatusConflict
-		case "PACKAGE_NOT_FOUND", "PACKAGE_IN_USE", "PACKAGE_VERSION_EXISTS", "PACKAGE_VERSION_CURRENT", "PACKAGE_VERSION_IN_USE", "PACKAGE_VERSION_INCOMPATIBLE", "CONFIG_REVISION_CURRENT", "ENVIRONMENT_INSTALLED", "USER_IN_USE", "USER_PROTECTED", "USERNAME_CONFLICT", "TRANSFER_CONFLICT", "TAG_EXISTS":
+		case "PACKAGE_NOT_FOUND", "PACKAGE_IN_USE", "PACKAGE_VERSION_EXISTS", "PACKAGE_VERSION_CURRENT", "PACKAGE_VERSION_IN_USE", "PACKAGE_VERSION_INCOMPATIBLE", "CONFIG_REVISION_CURRENT", "ENVIRONMENT_INSTALLED", "ENVIRONMENT_HAS_MODELS", "USER_IN_USE", "USER_PROTECTED", "USERNAME_CONFLICT", "TRANSFER_CONFLICT", "TAG_EXISTS", "MODEL_TARGET_EXISTS", "MODEL_UPLOAD_EXISTS", "UPLOAD_OFFSET_MISMATCH", "MODEL_UPLOAD_INCOMPLETE", "MODEL_UPLOAD_CLOSED", "MODEL_UPLOAD_EXPIRED", "MODEL_OPERATION_IN_PROGRESS", "MODEL_NOT_RETRYABLE", "MODEL_UPLOAD_NOT_AVAILABLE":
 			status = http.StatusConflict
 		}
 		return status, appErr.Code, appErr.Message, nil

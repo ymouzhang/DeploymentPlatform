@@ -3,11 +3,13 @@
 > 文档状态：初版
 > 依据：[PRD](./prd.md)
 > 路线图：[管理员产品优化路线图](./admin-product-optimization.md)
-> 更新时间：2026-08-27
+> 更新时间：2026-08-30
 
 ## 1. 设计目标
 
-DP 是一个使用本地账号登录的内部 Web 管理后台。系统按账号隔离安装包和目标服务器环境，通过 SSH/SFTP 执行安装、启动和停止脚本；同时提供配置编辑、健康检查、环境迁移和实时执行日志。管理员可管理账号并查看、操作全部账号的数据，普通账号只能访问自己的数据。
+DP 是一个使用本地账号登录的内部 Web 管理后台。系统按账号隔离安装包、目标服务器环境和模型，通过
+SSH/SFTP 执行服务生命周期操作及模型传输；同时提供配置编辑、健康检查、环境迁移和实时执行日志。
+管理员可管理账号并查看、操作全部账号的数据，普通账号只能访问自己的数据。
 
 本设计优先考虑：
 
@@ -125,30 +127,36 @@ flowchart LR
    - 按 IP 或服务类型检索，分页展示（默认每页 10 条）
    - 一键 SSH 校验
    - JSON 导入、导出
-3. **服务管理**
+3. **模型管理**
+   - 选择已有环境，复用 SSH 凭据把模型部署到目标绝对目录
+   - 第一阶段支持超大 `.tar.gz` 分片续传、远端安全解压、日志、重试和删除
+   - 第二阶段支持 ModelScope 和 Hugging Face，默认 ModelScope
+4. **服务管理**
    - 按 IP 或服务类型检索
    - 以独立列展示所属账号及各环境上的服务状态
    - 按服务器维护独立配置
    - 安装、启动、停止、重置操作
-4. **账号管理（仅管理员）**
+5. **账号管理（仅管理员）**
    - 新增账号、重置密码、启用或禁用、删除
    - 有业务数据的账号禁止删除
-5. **审计日志（仅管理员）**
+6. **审计日志（仅管理员）**
    - 查看全部账号的认证、账号管理和资源操作轨迹
    - 按时间、账号、资源所属账号、事件、结果和来源 IP 筛选
    - 查看脱敏详情，并按当前筛选条件导出 CSV
-6. **管理总览（仅管理员）**
+7. **管理总览（仅管理员）**
    - 系统规模、运行健康、失败操作、当前管理员未读通讯和风险通知聚合
    - 待处理事项按通讯消息与风险通知分区，分别跳转到对应通讯事项或带筛选条件的管理页面
-7. **操作中心（仅管理员）**
+8. **操作中心（仅管理员）**
    - 全账号操作筛选、状态跟踪、失败处置和历史日志回看
-8. **通知中心（仅管理员）**
+9. **通知中心（仅管理员）**
    - 风险事件未读提醒、详情跳转和处理确认
-9. **消息中心（全部账号）**
+10. **消息中心（全部账号）**
    - 管理员与普通账号之间的协作事项、未读消息和回执
    - 作为侧边栏一级入口，同时保留顶栏快捷提醒入口
 
-管理员在安装包、环境和服务页面使用统一的“数据范围”筛选器。默认展示全部账号；新建资源在表单中显式选择所属账号并默认当前管理员，编辑或操作其他账号资源时保持原归属。普通账号不显示数据范围筛选器和管理员入口。
+管理员在安装包、环境、模型和服务页面使用统一的“数据范围”筛选器。默认展示全部账号；新建资源在
+表单中显式选择所属账号并默认当前管理员，编辑或操作其他账号资源时保持原归属。普通账号不显示数据
+范围筛选器和管理员入口。
 
 #### 登录页视觉规范
 
@@ -191,6 +199,17 @@ flowchart LR
 - SSH 校验逐项展示：连接、创建目录、上传测试文件；失败时标记具体阶段。
 - 导入为 `.json` 文件上传。校验或解密失败时整批不写入；成功后展示新增数和覆盖数。
 - 导出直接下载带版本号的 JSON 文件，例如 `dp-environments-20260728.json`。
+
+#### 模型管理页
+
+- 作为“环境管理”下方的一级页面，列表展示模型名称、来源、所属账号、目标环境/IP/目录、大小、状态、
+  进度、创建人和时间。
+- 第一阶段新建表单只开放“离线上传”，选择已有环境、模型名称、目标绝对目录和 `.tar.gz` 文件。
+- 浏览器按服务端 offset 顺序上传分片，刷新后查询 offset 并继续；页面显示本地上传和远端部署两个阶段。
+- 行操作提供继续上传、查看任务日志、重试部署和删除。删除要求输入模型名称二次确认并提示先停止引用
+  模型目录的服务。
+- 在线下载入口标记为后续功能；第二阶段默认 ModelScope，并允许切换 Hugging Face。
+- 详细交互和安全边界见[模型管理需求与设计](./model-management.md)。
 
 #### 服务管理页
 
@@ -630,7 +649,7 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 
 - 总览统计使用少量聚合 SQL；健康数量在应用层合并健康监控快照，避免数据库保存易过期的运行态。
 - 账号详情使用条件聚合查询，最近操作统计固定为最近 30 天；最近登录和来源 IP 从成功登录审计快照读取，有效会话仅统计未过期记录。
-- 资源交接在单个 SQLite 事务中重新校验源/目标账号、运行中操作和唯一键冲突，再更新 `packages.owner_id`、`package_versions.owner_id` 与 `environments.owner_id`。任何检查或更新失败均回滚。
+- 资源交接在单个 SQLite 事务中重新校验源/目标账号、运行中服务操作、模型任务和唯一键冲突，再更新 `packages.owner_id`、`package_versions.owner_id`、`environments.owner_id`、`models.owner_id`、`model_uploads.owner_id` 与 `model_tasks.owner_id`。任何检查或更新失败均回滚。
 - 安装包版本是不可变文件，交接只变更数据库归属，不移动实体文件，也不改写 `storage_path`。后续读取、版本删除和服务类型删除始终使用持久化路径，因此不会产生文件移动与数据库提交之间的崩溃窗口。
 - 交接不改写 `operations`、`audit_events` 与 `notifications` 的归属快照；既有服务配置通过 `environment_id` 自动随环境归属变化。
 
@@ -748,6 +767,19 @@ HTTP 层提供单一 `GET /events` SSE。连接建立时先发送 `sync` 事件�
 - 整批导入使用单个事务：任何记录格式错误、密文无法解密或唯一性异常时全部回滚。
 - 对导入密文先做解密验证，但保存原密文，不进行无意义的解密再加密。
 
+### 6.14 `models`、`model_uploads` 与 `model_tasks`
+
+模型管理使用独立的模型、上传会话和任务表，不复用服务 `operations`。原因是模型任务可能持续数小时，
+不能改变服务页面的最近生命周期状态，也不能占用服务操作的环境级互斥锁。
+
+- `models` 保存 owner、目标环境、主机快照、来源、目标目录、文件摘要、大小、状态和创建信息；
+- `model_uploads` 保存可续传上传的总大小、持久化 offset、远端暂存路径和过期时间；
+- `model_tasks` 保存部署/删除动作、状态、阶段、进度、错误、操作者快照和 JSONL 日志路径。
+
+同一账号、目标 IP 和规范目标目录只能存在一个未删除模型。环境有未删除模型时禁止改变 SSH 目标身份或
+删除环境；账号资源交接在同一事务中交接模型，活动模型任务存在时拒绝交接。详细字段和状态机见
+[模型管理需求与设计](./model-management.md)。
+
 ## 7. 密码加密与密钥管理
 
 本节仅描述目标服务器的 SSH 密码。登录密码只保存 bcrypt 哈希，不使用 `DP_MASTER_KEY` 加密，也不能被导出或还原。
@@ -809,6 +841,7 @@ data/
 │           └── versions/
 │               └── <version-id>.tar.gz
 ├── operations/
+├── model-tasks/             # 仅保存模型任务 JSONL 日志，不保存模型包
 └── tmp/
 ```
 
@@ -965,6 +998,17 @@ cd '<install_dir>' && ./start.sh
 
 上传超时与脚本 3 分钟超时分开计算，避免大包尚未传完就被当成脚本超时。
 
+### 9.7 模型传输与远端目录
+
+模型任务复用环境的 SSH 凭据和主机指纹，但使用独立任务管理器、全局并发上限和最长 24 小时的可配置
+传输超时。离线包的每个浏览器分片经 DP 流式中转并直接追加到目标目录旁的远端暂存包，不在 DP 数据盘
+保存完整副本。上传完成后 DP 通过 SFTP 流式读取远端包，完成摘要和 tar 安全校验；远端解压到同盘临时
+目录，写入 `.dp-model.json` 后原子改名为最终目录。
+
+最终目录必须不存在。失败或重试只能清理带本任务 ID 的临时项。删除时必须验证远端标记与数据库的模型
+ID 与不可变的标记 owner 一致，先原子改名为 trash 再异步递归删除。详细规则见
+[模型管理需求与设计](./model-management.md)。
+
 ## 10. 健康检查
 
 ### 10.1 DP 自身健康检查
@@ -1043,6 +1087,7 @@ data: {"status":"failed","stage":"script","exit_code":1}
 | 安装包 | `package.upload`、`package.replace`、`package.note.update`、`package.version.activate`、`package.version.delete`、`package.delete` |
 | 环境 | `environment.create`、`environment.update`、`environment.delete`、`environment.validate`、`environment.import`、`environment.export`、`tag.create`、`tag.update`、`tag.delete` |
 | 服务 | `service.config.update`、`service.config.rollback`、`service.install.requested/completed`、`service.start.requested/completed`、`service.stop.requested/completed`、`service.reset.requested/completed`、`service.health_check` |
+| 模型 | `model.upload.create/cancel/complete`、`model.deploy.requested/completed`、`model.retry`、`model.delete.requested/completed` |
 | 审计 | `audit.detail.view`、`audit.export` |
 
 采集流程：
@@ -1239,6 +1284,27 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 
 该接口不接受账号 ID 参数，订阅范围固定为当前会话账号。普通账号不能订阅其他普通账号或管理员事件；管理员只接收按业务规则发布给全部启用管理员的事件。事件只触发重新读取，不替代 `/communications` 权限校验。
 
+### 12.9 模型管理
+
+第一阶段接口：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/models` | 查询权限范围内模型 |
+| `GET` | `/models/{id}` | 获取模型和最近任务详情 |
+| `POST` | `/model-uploads` | 创建离线上传会话 |
+| `HEAD` | `/model-uploads/{id}` | 获取已持久化 `Upload-Offset` |
+| `PATCH` | `/model-uploads/{id}` | 从指定 offset 上传一个二进制分片 |
+| `POST` | `/model-uploads/{id}/complete` | 完成上传并创建异步远端部署任务 |
+| `DELETE` | `/model-uploads/{id}` | 取消未完成上传 |
+| `POST` | `/models/{id}/retry` | 重试失败或中断的远端部署 |
+| `DELETE` | `/models/{id}` | 创建异步远端删除任务 |
+| `GET` | `/model-tasks/{id}` | 获取任务状态 |
+| `GET` | `/model-tasks/{id}/events` | SSE 回放并跟踪模型任务日志 |
+
+分片请求不使用 JSON envelope；成功响应通过 `Upload-Offset` 返回下一偏移。其他接口继续使用统一
+`data/error` 响应。第二阶段增加在线下载创建接口，具体契约实施时写入 OpenAPI。
+
 ## 13. 一致性与故障处理
 
 ### 13.1 本地文件和数据库
@@ -1248,6 +1314,8 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 - 删除安装包先读取全部版本路径并删除数据库元数据，再逐个清理对应文件；磁盘清理失败时接口返回错误并保留可定位的孤立文件，不影响后续同名类型重新上传。
 - 删除环境在单事务中删除环境行，`service_configs` 和 `service_config_revisions` 外键级联；`operations` 与 JSONL 日志继续保留至运维历史保留任务到期。
 - 已安装实例的配置先原子替换远端文件，再在单个本地事务中更新配置修订、当前投影和健康端口；本地事务失败时立即以旧内容补偿恢复远端文件。
+- 模型分片先写入并同步暂存文件，再在同一事务中推进 `model_uploads.offset`；数据库中的 offset 永远不能大于磁盘已持久化长度。
+- 模型部署和删除只操作任务专属临时目录或带有效 `.dp-model.json` 标记的目录；远端步骤成功后再提交本地模型状态，失败时保留可重试记录并清理任务专属临时目录。
 - 数据目录必须位于同一文件系统，保证 `rename` 原子性。
 - SQLite 启用 `foreign_keys=ON`、WAL 和 `busy_timeout`。
 
@@ -1255,6 +1323,8 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 
 - 环境、安装状态、包元数据、实例配置和操作结果均持久化。
 - 运行中的操作在重启后标记 `interrupted`，不自动重复远端脚本。
+- 未完成模型上传保留暂存文件和 offset，浏览器可在保留期内续传；运行中的模型任务在重启后标记 `interrupted`，不自动重复 SFTP、解压、下载或删除动作。
+- 重试模型任务前先核对最终目录、任务临时目录和 `.dp-model.json`，只清理当前任务创建且可验证归属的临时文件，不猜测远端执行结果。
 - 收到关闭信号后先停止接收新请求并取消后台上下文，再等待远程操作、健康监控和维护任务退出，最后关闭 SQLite；操作终态和完成审计在数据库关闭前落盘。
 - 下次安装前检查远端 `.dp-installed.json`，弥补“远端成功但本地提交前进程崩溃”的窗口。
 - 健康检查状态允许短暂丢失，启动后自动重建。
@@ -1310,6 +1380,11 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 | `DP_HEALTH_INTERVAL` | 否 | `10s` | 健康检查周期 |
 | `DP_UPLOAD_MAX_BYTES` | 否 | `32212254720` | 压缩包上传上限，单位为字节 |
 | `DP_UPLOAD_TIMEOUT` | 否 | `10m` | SFTP 上传超时 |
+| `DP_MODEL_UPLOAD_MAX_BYTES` | 否 | `1099511627776` | 单个离线模型压缩包上限，默认 1 TiB |
+| `DP_MODEL_UPLOAD_CHUNK_BYTES` | 否 | `67108864` | 浏览器建议分片大小，默认 64 MiB |
+| `DP_MODEL_UPLOAD_RETENTION` | 否 | `72h` | 未完成模型上传及暂存文件保留时间 |
+| `DP_MODEL_TRANSFER_TIMEOUT` | 否 | `24h` | 模型 SFTP、远端解压和在线下载任务上限 |
+| `DP_MODEL_TASK_CONCURRENCY` | 否 | `2` | 全局模型远端任务并发数 |
 | `DP_LOG_LEVEL` | 否 | `info` | 应用日志级别 |
 | `DP_AUDIT_RETENTION_DAYS` | 否 | `180` | 审计日志保留天数 |
 | `DP_AUDIT_EXPORT_MAX_ROWS` | 否 | `100000` | 单次审计 CSV 导出最大行数 |
@@ -1330,11 +1405,12 @@ Docker 部署约定：
 1. 使用 Node 与 Go 多阶段镜像完成前端测试/构建、后端测试/编译，运行镜像不包含源码和构建工具。
 2. 多架构构建时，Node 前端测试/构建和 Go 测试阶段固定使用 BuildKit 的 `BUILDPLATFORM` 原生执行，避免在 x86_64 主机生成 ARM64 镜像时通过 QEMU 运行 Vitest 或 Go 测试。Go 编译通过 `TARGETOS`、`TARGETARCH` 和 `CGO_ENABLED=0` 生成目标架构二进制，最终运行阶段保持 `TARGETPLATFORM`。
 3. 前端容器测试使用 `vitest run` 的显式单次运行模式；组件测试单例超时设为 15 秒，作为共享或较慢构建节点的容错，但不能用提高超时替代原生构建平台。
-4. Compose 将宿主机 `./data` 绑定挂载到 `/app/data`，统一持久化 SQLite、安装包和操作日志。
+4. Compose 将宿主机 `./data` 绑定挂载到 `/app/data`，统一持久化 SQLite、安装包和模型任务日志；模型完整包暂存在目标机，DP 数据盘不需要按模型大小预留空间。
 5. `.env` 由 Compose 读取，保存 `DP_MASTER_KEY` 和运行参数，不复制到镜像；它必须与 `data/` 一并备份和迁移。
 6. 容器以宿主机当前 UID/GID 运行，避免绑定目录生成 root 所有者文件。
 7. 根文件系统只读，仅 `/app/data` 与 `/tmp` 可写；容器删除或重建不得删除宿主机数据。
-8. 一键发布脚本输出包含镜像、Compose 文件、启动脚本和配置模板的离线 `.tar.gz`，目标服务器不依赖 Go、Node.js或镜像仓库。
+8. 一键发布脚本输出包含 DP 镜像、Compose 文件、启动脚本和配置模板的离线 `.tar.gz`，目标服务器不依赖 Go、Node.js 或镜像仓库。
+9. 第二阶段发布包额外携带固定版本、固定摘要的模型下载器镜像归档。DP 按任务把归档上传到目标环境并加载，目标机不从公网拉取下载器镜像。
 
 提供：
 
@@ -1372,6 +1448,10 @@ Docker 部署约定：
 - 操作日志 SSE 重连、`Last-Event-ID` 回放和慢客户端。
 - 假 SSH/SFTP 服务器或容器化 SSH 集成测试。
 - 假 `/healthz` 服务覆盖 HTTP 200 + `{"status":"ok"}`、非 200、响应超限、超时、非法 JSON、缓存过期和恢复告警闭环。
+- 模型分片 offset 冲突、断线续传、DP 重启续传、超限、过期清理和稀疏大文件场景；测试大小字段和进度计算不会在 30 GiB 附近溢出。
+- 模型 tar 的路径穿越、特殊文件、公共顶层目录、展开大小和文件数限制；SFTP、远端空间不足、解压及原子改名失败时状态和临时目录可恢复。
+- 模型访问按 owner 隔离，目标环境归属一致；模型任务不改变服务 `last_operation`，也不占用服务生命周期互斥锁。
+- 删除模型必须匹配 `.dp-model.json` 中的模型 ID 和 owner；标记缺失、目录被替换、正在部署或跨账号删除均拒绝。
 - CI 执行 `go test ./...`、`go test -race ./...` 和静态检查。
 
 ### 16.2 前端
@@ -1387,6 +1467,7 @@ Docker 部署约定：
 - JSON/YAML 编辑器格式切换和错误反馈。
 - 按包状态、安装状态和操作状态启禁按钮。
 - SSE 日志追加、断线恢复和终态展示。
+- 模型管理菜单位于环境管理下方；环境与 owner 联动、分片续传、双阶段进度、日志、失败重试和输入模型名称确认删除交互正确。
 - Vitest 与 React Testing Library 覆盖关键页面交互和客户端契约；完整浏览器端到端链路后续按实际回归成本引入。
 
 ## 17. 实施顺序
@@ -1400,6 +1481,8 @@ Docker 部署约定：
 7. 实现 React 页面、Monaco 编辑器和操作弹窗。
 8. 补齐端到端测试、嵌入式前端构建和生产部署配置。
 9. 增加本地账号、会话、owner 数据迁移、后端授权、管理员账号管理与前端账号筛选。
+10. 第一阶段实现模型表、可续传离线上传、压缩包校验、SFTP 部署、任务日志和安全删除。
+11. 第二阶段构建并随 DP 离线包发布固定下载器镜像，实现 ModelScope 默认、Hugging Face 可选的在线下载。
 
 ## 18. 调研依据
 
@@ -1414,3 +1497,6 @@ Docker 部署约定：
 - [Go `crypto/cipher` 文档：AES-GCM AEAD](https://pkg.go.dev/crypto/cipher)
 - [Go YAML v3 包文档](https://pkg.go.dev/go.yaml.in/yaml/v3)
 - [SQLite 官方文档：适用场景与并发边界](https://www.sqlite.org/whentouse.html)
+- [ModelScope 官方文档：模型下载](https://www.modelscope.cn/docs/models/download)
+- [Hugging Face Hub 官方文档：下载文件](https://huggingface.co/docs/huggingface_hub/en/guides/download)
+- [Hugging Face Hub 官方文档：CLI 命令](https://huggingface.co/docs/huggingface_hub/en/package_reference/cli)

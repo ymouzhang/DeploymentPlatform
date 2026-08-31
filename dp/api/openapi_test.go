@@ -52,6 +52,11 @@ func TestOpenAPIContractIsValidYAML(t *testing.T) {
 			t.Errorf("missing communication path %s", path)
 		}
 	}
+	for _, path := range []string{"/models", "/models/{id}", "/models/{id}/retry", "/model-uploads", "/model-uploads/{id}", "/model-uploads/{id}/complete", "/model-tasks/{id}", "/model-tasks/{id}/events"} {
+		if _, ok := header.Paths[path]; !ok {
+			t.Errorf("missing model-management path %s", path)
+		}
+	}
 	if _, ok := header.Paths["/events"]; !ok {
 		t.Error("missing account-scoped realtime event path")
 	}

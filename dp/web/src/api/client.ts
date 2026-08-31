@@ -24,6 +24,9 @@ import type {
   CommunicationFilter,
   CommunicationMessage,
   CommunicationResourceInput,
+	Model,
+	ModelTask,
+	ModelUploadCreated,
 } from '../types'
 
 interface DataEnvelope<T> {
@@ -104,7 +107,7 @@ export const api = {
   listUserSessions: (id: string) => request<Session[]>(`/api/v1/users/${id}/sessions`),
   revokeUserSession: (id: string, sessionId: string) => request(`/api/v1/users/${id}/sessions/${sessionId}`, { method: 'DELETE' }),
   transferUserResources: (id: string, target_user_id: string) =>
-    request<{ source_user_id: string; target_user_id: string; packages: number; environments: number }>(`/api/v1/users/${id}/transfer`, { method: 'POST', body: JSON.stringify({ target_user_id }) }),
+    request<{ source_user_id: string; target_user_id: string; packages: number; environments: number; models: number }>(`/api/v1/users/${id}/transfer`, { method: 'POST', body: JSON.stringify({ target_user_id }) }),
   listEnvironments: (ownerId?: string, tagIds?: string[]) =>
     request<Environment[]>(withScope('/api/v1/environments', ownerId, tagIds)),
   createEnvironment: (input: EnvironmentInput, ownerId?: string) =>
@@ -173,6 +176,27 @@ export const api = {
   deletePackageVersion: ({ serviceType, versionId, ownerId }: { serviceType: string; versionId: string; ownerId?: string }) =>
     request(withOwner(`/api/v1/service-types/${encodeURIComponent(serviceType)}/package/versions/${versionId}`, ownerId), { method: 'DELETE' }),
   listServices: (ownerId?: string, tagIds?: string[]) => request<Service[]>(withScope('/api/v1/services', ownerId, tagIds)),
+	listModels: (ownerId?: string) => request<Model[]>(withOwner('/api/v1/models', ownerId)),
+	createModelUpload: (input: { name: string; environment_id: string; target_dir: string; original_filename: string; total_bytes: number }, ownerId?: string) =>
+		request<ModelUploadCreated>(withOwner('/api/v1/model-uploads', ownerId), { method: 'POST', body: JSON.stringify(input) }),
+	modelUploadOffset: async (id: string) => {
+		const response = await fetch(`/api/v1/model-uploads/${id}`, { method: 'HEAD' })
+		if (!response.ok) throw await responseError(response)
+		return Number(response.headers.get('Upload-Offset') ?? '0')
+	},
+	uploadModelChunk: async (id: string, offset: number, chunk: Blob) => {
+		const response = await fetch(`/api/v1/model-uploads/${id}`, {
+			method: 'PATCH', headers: { 'Content-Type': 'application/offset+octet-stream', 'Upload-Offset': String(offset) }, body: chunk,
+		})
+		const next = Number(response.headers.get('Upload-Offset') ?? offset)
+		if (!response.ok) throw await responseError(response)
+		return next
+	},
+	completeModelUpload: (id: string) => request<ModelTask>(`/api/v1/model-uploads/${id}/complete`, { method: 'POST', body: '{}' }),
+	cancelModelUpload: (id: string) => request(`/api/v1/model-uploads/${id}`, { method: 'DELETE' }),
+	retryModel: (id: string) => request<ModelTask>(`/api/v1/models/${id}/retry`, { method: 'POST', body: '{}' }),
+	deleteModel: (id: string, confirm_name: string) => request<ModelTask | { deleted: string }>(`/api/v1/models/${id}`, { method: 'DELETE', body: JSON.stringify({ confirm_name }) }),
+	getModelTask: (id: string) => request<ModelTask>(`/api/v1/model-tasks/${id}`),
   getServiceConfig: (environmentId: string) =>
     request<ServiceConfig>(`/api/v1/services/${environmentId}/config`),
   updateServiceConfig: ({ environmentId, content }: { environmentId: string; content: string }) =>
@@ -231,6 +255,12 @@ export const api = {
     const filename = disposition.match(/filename="?([^";]+)"?/)?.[1] ?? 'dp-audit.csv'
     return { blob: await response.blob(), filename }
   },
+}
+
+async function responseError(response: Response) {
+	let payload: ErrorEnvelope = { error: { code: 'HTTP_ERROR', message: `请求失败 (${response.status})` } }
+	try { payload = await response.json() as ErrorEnvelope } catch { /* use fallback */ }
+	return new ApiError(response.status, payload)
 }
 
 function withOwner(path: string, ownerId?: string) {

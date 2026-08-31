@@ -20,6 +20,7 @@ import (
 	"DP/internal/config"
 	"DP/internal/health"
 	"DP/internal/httpapi"
+	modelmanager "DP/internal/model"
 	"DP/internal/operation"
 	"DP/internal/realtime"
 	"DP/internal/remote"
@@ -75,9 +76,14 @@ func run() error {
 	operationManager := operation.NewManager(
 		rootCtx, cfg.DataDir, db, passwordCipher, packageManager, remoteExecutor, auditService, log,
 	)
+	modelManager := modelmanager.NewManager(
+		rootCtx, cfg.DataDir, db, passwordCipher, remoteExecutor, auditService,
+		cfg.ModelUploadMaxBytes, cfg.ModelUploadChunkBytes, cfg.ModelUploadRetention,
+		cfg.ModelTransferTimeout, cfg.ModelTaskConcurrency, log,
+	)
 	healthMonitor := health.NewMonitor(db, cfg.DataDir, cfg.HealthInterval)
 	var background sync.WaitGroup
-	background.Add(2)
+	background.Add(3)
 	go func() {
 		defer background.Done()
 		healthMonitor.Run(rootCtx)
@@ -85,6 +91,10 @@ func run() error {
 	go func() {
 		defer background.Done()
 		auditService.Run(rootCtx)
+	}()
+	go func() {
+		defer background.Done()
+		modelManager.Run(rootCtx)
 	}()
 
 	dist, err := fs.Sub(webui.Files, "dist")
@@ -101,7 +111,7 @@ func run() error {
 		authService,
 		communicationService,
 		realtimeHub,
-		environmentService, serviceConfigService, serviceLogService, packageManager, operationManager, healthMonitor,
+		environmentService, serviceConfigService, serviceLogService, packageManager, operationManager, modelManager, healthMonitor,
 		db, auditService, cfg.UploadMaxBytes, cfg.AuditExportMaxRows, cfg.TrustedProxyCIDRs, log,
 	)
 	server := &http.Server{
@@ -133,6 +143,7 @@ func run() error {
 		runErr = errors.Join(runErr, fmt.Errorf("shutdown HTTP server: %w", shutdownErr))
 	}
 	operationManager.Wait()
+	modelManager.Wait()
 	background.Wait()
 	return runErr
 }

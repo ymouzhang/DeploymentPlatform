@@ -127,13 +127,14 @@ func (s *Store) UserDetail(ctx context.Context, id string, now time.Time) (domai
 	err = s.db.QueryRowContext(ctx, `SELECT
 		(SELECT COUNT(*) FROM packages WHERE owner_id = ?),
 		(SELECT COUNT(*) FROM environments WHERE owner_id = ?),
+		(SELECT COUNT(*) FROM models WHERE owner_id = ? AND deleted_at IS NULL),
 		(SELECT COUNT(*) FROM environments WHERE owner_id = ? AND installed = 1),
 		(SELECT COUNT(*) FROM operations WHERE owner_id = ? AND created_at >= ?),
 		(SELECT COUNT(*) FROM sessions WHERE user_id = ? AND expires_at > ?),
 		(SELECT COUNT(*) FROM audit_events WHERE actor_user_id = ? AND action = 'auth.login' AND outcome != 'success'),
 		(SELECT COUNT(*) FROM audit_events WHERE actor_user_id = ? AND risk_level = 'high')`,
-		id, id, id, id, formatTime(now.Add(-30*24*time.Hour)), id, formatTime(now), id, id).Scan(&detail.PackageCount, &detail.EnvironmentCount,
-		&detail.InstalledServiceCount, &detail.RecentOperationCount, &detail.ActiveSessionCount, &detail.LoginFailureCount, &detail.HighRiskCount)
+		id, id, id, id, id, formatTime(now.Add(-30*24*time.Hour)), id, formatTime(now), id, id).Scan(&detail.PackageCount, &detail.EnvironmentCount,
+		&detail.ModelCount, &detail.InstalledServiceCount, &detail.RecentOperationCount, &detail.ActiveSessionCount, &detail.LoginFailureCount, &detail.HighRiskCount)
 	if err != nil {
 		return domain.UserDetail{}, err
 	}
@@ -214,6 +215,16 @@ func (s *Store) TransferResources(ctx context.Context, sourceID, targetID string
 	if err != nil {
 		return domain.TransferResult{}, err
 	}
+	modelResult, err := tx.ExecContext(ctx, `UPDATE models SET owner_id = ?, updated_at = ? WHERE owner_id = ?`, targetID, formatTime(time.Now().UTC()), sourceID)
+	if err != nil {
+		return domain.TransferResult{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE model_uploads SET owner_id = ? WHERE owner_id = ?`, targetID, sourceID); err != nil {
+		return domain.TransferResult{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE model_tasks SET owner_id = ? WHERE owner_id = ?`, targetID, sourceID); err != nil {
+		return domain.TransferResult{}, err
+	}
 	now := formatTime(time.Now().UTC())
 	for _, item := range tagTransfers {
 		var targetTagID string
@@ -241,7 +252,8 @@ func (s *Store) TransferResources(ctx context.Context, sourceID, targetID string
 	}
 	packages, _ := packageResult.RowsAffected()
 	environments, _ := envResult.RowsAffected()
-	return domain.TransferResult{SourceUserID: sourceID, TargetUserID: targetID, Packages: int(packages), Environments: int(environments)}, nil
+	models, _ := modelResult.RowsAffected()
+	return domain.TransferResult{SourceUserID: sourceID, TargetUserID: targetID, Packages: int(packages), Environments: int(environments), Models: int(models)}, nil
 }
 
 type transferQuerier interface {
@@ -270,15 +282,23 @@ func validateTransfer(ctx context.Context, query transferQuerier, sourceID, targ
 	if active > 0 {
 		return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "源账号仍有执行中的操作"}
 	}
+	if err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM model_tasks WHERE owner_id = ? AND status IN (?, ?)`,
+		sourceID, domain.OperationQueued, domain.OperationRunning).Scan(&active); err != nil {
+		return err
+	}
+	if active > 0 {
+		return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "源账号仍有执行中的模型任务"}
+	}
 	var conflicts int
 	if err := query.QueryRowContext(ctx, `SELECT
 		(SELECT COUNT(*) FROM packages s JOIN packages t ON t.owner_id = ? AND t.service_type = s.service_type WHERE s.owner_id = ?) +
-		(SELECT COUNT(*) FROM environments s JOIN environments t ON t.owner_id = ? AND t.ip = s.ip AND t.service_type = s.service_type WHERE s.owner_id = ?)`,
-		targetID, sourceID, targetID, sourceID).Scan(&conflicts); err != nil {
+		(SELECT COUNT(*) FROM environments s JOIN environments t ON t.owner_id = ? AND t.ip = s.ip AND t.service_type = s.service_type WHERE s.owner_id = ?) +
+		(SELECT COUNT(*) FROM models s JOIN models t ON t.owner_id = ? AND t.environment_ip = s.environment_ip AND t.target_dir = s.target_dir AND t.deleted_at IS NULL WHERE s.owner_id = ? AND s.deleted_at IS NULL)`,
+		targetID, sourceID, targetID, sourceID, targetID, sourceID).Scan(&conflicts); err != nil {
 		return err
 	}
 	if conflicts > 0 {
-		return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "目标账号存在同名安装包或相同服务器服务"}
+		return &domain.AppError{Code: "TRANSFER_CONFLICT", Message: "目标账号存在同名安装包、相同服务器服务或相同模型目录"}
 	}
 	return nil
 }

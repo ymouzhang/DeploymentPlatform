@@ -165,7 +165,7 @@ function AuditDetail({ event, onOpenOperation }: { event: AuditEvent; onOpenOper
 const categoryOptions = [
   { value: 'authentication', label: '认证安全' }, { value: 'account', label: '账号管理' },
   { value: 'package', label: '安装包' }, { value: 'environment', label: '环境' },
-  { value: 'service', label: '服务' }, { value: 'communication', label: '用户通讯' }, { value: 'audit', label: '审计' },
+  { value: 'service', label: '服务' }, { value: 'model', label: '模型' }, { value: 'communication', label: '用户通讯' }, { value: 'audit', label: '审计' },
 ]
 
 const actions: Record<string, string> = {
@@ -176,6 +176,7 @@ const actions: Record<string, string> = {
   'environment.create': '新增环境', 'environment.update': '修改环境', 'environment.delete': '删除环境', 'environment.validate': 'SSH 校验', 'environment.import': '导入环境', 'environment.export': '导出环境',
   'tag.create': '新增资源标签', 'tag.update': '修改资源标签', 'tag.delete': '删除资源标签',
   'service.config.update': '保存实例配置', 'service.config.rollback': '回滚实例配置', 'service.health_check': '手动健康检查', 'audit.detail.view': '查看审计详情', 'audit.export': '导出审计日志',
+	'model.upload.create': '创建模型上传', 'model.upload.cancel': '取消模型上传', 'model.deploy.request': '提交模型部署', 'model.deploy.retry': '重试模型部署', 'model.delete.request': '提交模型删除', 'model.deploy.completed': '模型部署完成', 'model.delete.completed': '模型删除完成',
   'communication.create': '新建协作事项', 'communication.read': '读取协作事项', 'communication.message.send': '发送通讯消息', 'communication.message.admin.send': '管理员发送消息', 'communication.receipt.user.send': '用户发送回执', 'communication.close': '关闭协作事项', 'communication.reopen': '重新打开协作事项',
 }
 

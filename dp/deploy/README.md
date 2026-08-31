@@ -43,3 +43,8 @@
 升级前请同时备份这两项。迁移到另一台服务器时，将它们与部署文件一起复制。
 
 `.env` 中可通过 `DP_PACKAGE_VERSION_RETENTION` 设置每个服务类型的安装包版本保留目标数量，通过 `DP_OPERATION_RETENTION_DAYS` 和 `DP_NOTIFICATION_RETENTION_DAYS` 设置终态操作日志及已处理通知的保留天数，通过 `DP_STALE_ACCOUNT_DAYS` 设置长期未登录账号提醒阈值（默认 90 天）。当前或被环境引用的安装包版本、运行中操作和未处理通知不会被自动清理。
+
+模型离线上传按分片经 DP 直接写入所选环境的目标机，完整模型包不会落到 DP 的 `data/`。目标机在解压期间
+需要同时容纳压缩包、展开目录和安全余量。可通过 `DP_MODEL_UPLOAD_MAX_BYTES`、
+`DP_MODEL_UPLOAD_CHUNK_BYTES`、`DP_MODEL_UPLOAD_RETENTION`、`DP_MODEL_TRANSFER_TIMEOUT` 和
+`DP_MODEL_TASK_CONCURRENCY` 调整模型上传限制、会话保留时间及任务并发。

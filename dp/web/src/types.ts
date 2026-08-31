@@ -75,6 +75,7 @@ export interface ResourceTag extends ResourceTagRef {
   owner_id: string
   owner_username?: string
   environment_count: number
+	model_count: number
   created_at: string
   updated_at: string
 }
@@ -214,6 +215,57 @@ export interface Operation {
   started_at?: string
   finished_at?: string
   tags?: ResourceTagRef[]
+}
+
+export type ModelStatus = 'uploading' | 'deploying' | 'ready' | 'failed' | 'deleting' | 'deleted'
+
+export interface ModelTask {
+  id: string
+  model_id: string
+  owner_id: string
+	actor_user_id?: string
+	actor_username?: string
+  action: 'deploy' | 'delete'
+  status: OperationStatus
+  stage: string
+  progress: number
+  error_code?: string
+  error_message?: string
+  created_at: string
+  started_at?: string
+  finished_at?: string
+}
+
+export interface Model {
+  id: string
+  owner_id: string
+  owner_username?: string
+  environment_id: string
+  environment_name: string
+  environment_ip: string
+  name: string
+  source: 'offline' | 'modelscope' | 'huggingface'
+  target_dir: string
+  original_filename: string
+  size_bytes: number
+  expanded_size_bytes: number
+  file_count: number
+  sha256?: string
+  status: ModelStatus
+  error_message?: string
+  created_by_username?: string
+  created_at: string
+  updated_at: string
+  ready_at?: string
+  latest_task?: ModelTask
+}
+
+export interface ModelUploadCreated {
+  model: Model
+  upload_id: string
+  offset: number
+  chunk_bytes: number
+  expires_at: string
 }
 
 export interface UserDetail extends User {
@@ -369,7 +421,7 @@ export interface OperationEvent {
 export interface AuditEvent {
   id: string
   occurred_at: string
-  category: 'authentication' | 'account' | 'package' | 'environment' | 'service' | 'communication' | 'audit'
+  category: 'authentication' | 'account' | 'package' | 'environment' | 'service' | 'model' | 'communication' | 'audit'
   action: string
   outcome: 'success' | 'failure' | 'denied'
   risk_level: 'normal' | 'high'

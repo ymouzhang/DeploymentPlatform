@@ -49,6 +49,11 @@ initialize() {
         echo 'DP_NOTIFICATION_RETENTION_DAYS=180'
         echo 'DP_OPERATION_RETENTION_DAYS=180'
         echo 'DP_PACKAGE_VERSION_RETENTION=10'
+        echo 'DP_MODEL_UPLOAD_MAX_BYTES=1099511627776'
+        echo 'DP_MODEL_UPLOAD_CHUNK_BYTES=67108864'
+        echo 'DP_MODEL_UPLOAD_RETENTION=72h'
+        echo 'DP_MODEL_TRANSFER_TIMEOUT=24h'
+        echo 'DP_MODEL_TASK_CONCURRENCY=2'
         echo '# DP_TRUSTED_PROXY_CIDRS=10.0.0.0/8'
       } >> .env
       echo "检测到旧版 .env，已追加初始管理员：admin"

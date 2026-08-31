@@ -169,6 +169,16 @@ func auditAction(method, path string) (category, action, targetType string, ok b
 		return "package", "package.version.delete", "package_version", true
 	case method == http.MethodDelete && strings.Contains(path, "/service-types/") && strings.HasSuffix(path, "/package"):
 		return "package", "package.delete", "package", true
+	case method == http.MethodPost && path == "/api/v1/model-uploads":
+		return "model", "model.upload.create", "model", true
+	case method == http.MethodPost && strings.HasPrefix(path, "/api/v1/model-uploads/") && strings.HasSuffix(path, "/complete"):
+		return "model", "model.deploy.request", "model", true
+	case method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/model-uploads/"):
+		return "model", "model.upload.cancel", "model", true
+	case method == http.MethodPost && strings.HasPrefix(path, "/api/v1/models/") && strings.HasSuffix(path, "/retry"):
+		return "model", "model.deploy.retry", "model", true
+	case method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/models/"):
+		return "model", "model.delete.request", "model", true
 	case method == http.MethodPut && strings.HasSuffix(path, "/config") && strings.Contains(path, "/services/"):
 		return "service", "service.config.update", "service", true
 	case method == http.MethodPost && strings.Contains(path, "/config/revisions/") && strings.HasSuffix(path, "/rollback"):

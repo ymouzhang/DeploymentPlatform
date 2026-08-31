@@ -25,6 +25,11 @@ const (
 	defaultOperationRetention      = int64(180)
 	defaultPackageVersionRetention = int64(10)
 	defaultStaleAccountDays        = int64(90)
+	defaultModelUploadMaxBytes     = int64(1 << 40)
+	defaultModelUploadChunkBytes   = int64(64 << 20)
+	defaultModelUploadRetention    = 72 * time.Hour
+	defaultModelTransferTimeout    = 24 * time.Hour
+	defaultModelTaskConcurrency    = int64(2)
 )
 
 type Config struct {
@@ -45,6 +50,11 @@ type Config struct {
 	StaleAccountDays          int
 	TrustedProxyCIDRs         string
 	LogLevel                  slog.Level
+	ModelUploadMaxBytes       int64
+	ModelUploadChunkBytes     int64
+	ModelUploadRetention      time.Duration
+	ModelTransferTimeout      time.Duration
+	ModelTaskConcurrency      int
 }
 
 func Load() (Config, error) {
@@ -119,6 +129,23 @@ func Load() (Config, error) {
 	if cfg.UploadMaxBytes <= 0 {
 		return Config{}, errors.New("DP_UPLOAD_MAX_BYTES must be positive")
 	}
+	if cfg.ModelUploadMaxBytes, err = int64Env("DP_MODEL_UPLOAD_MAX_BYTES", defaultModelUploadMaxBytes); err != nil || cfg.ModelUploadMaxBytes <= 0 {
+		return Config{}, errors.New("DP_MODEL_UPLOAD_MAX_BYTES must be a positive integer")
+	}
+	if cfg.ModelUploadChunkBytes, err = int64Env("DP_MODEL_UPLOAD_CHUNK_BYTES", defaultModelUploadChunkBytes); err != nil || cfg.ModelUploadChunkBytes <= 0 || cfg.ModelUploadChunkBytes > cfg.ModelUploadMaxBytes {
+		return Config{}, errors.New("DP_MODEL_UPLOAD_CHUNK_BYTES must be positive and not exceed DP_MODEL_UPLOAD_MAX_BYTES")
+	}
+	if cfg.ModelUploadRetention, err = durationEnv("DP_MODEL_UPLOAD_RETENTION", defaultModelUploadRetention); err != nil {
+		return Config{}, err
+	}
+	if cfg.ModelTransferTimeout, err = durationEnv("DP_MODEL_TRANSFER_TIMEOUT", defaultModelTransferTimeout); err != nil {
+		return Config{}, err
+	}
+	modelConcurrency, err := int64Env("DP_MODEL_TASK_CONCURRENCY", defaultModelTaskConcurrency)
+	if err != nil || modelConcurrency <= 0 || modelConcurrency > 64 {
+		return Config{}, errors.New("DP_MODEL_TASK_CONCURRENCY must be between 1 and 64")
+	}
+	cfg.ModelTaskConcurrency = int(modelConcurrency)
 
 	switch strings.ToLower(envOr("DP_LOG_LEVEL", "info")) {
 	case "debug":

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: DP API
-  version: 1.9.0
+  version: 1.10.0
   description: Deployment Platform HTTP API with local-account authentication and owner isolation
 servers:
   - url: /api/v1
@@ -1134,6 +1134,120 @@ paths:
               schema: { $ref: "#/components/schemas/AuditEventResponse" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /models:
+    get:
+      operationId: listModels
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      responses:
+        "200":
+          description: Models visible to the current owner scope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelListResponse" }
+  /models/{id}:
+    get:
+      operationId: getModel
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Model detail, content: { application/json: { schema: { $ref: "#/components/schemas/ModelResponse" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteModel
+      description: Verifies the remote `.dp-model.json` marker before removing a ready model.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm_name]
+              properties: { confirm_name: { type: string } }
+      responses:
+        "200": { description: Uploading or failed model removed synchronously }
+        "202": { description: Remote deletion task accepted, content: { application/json: { schema: { $ref: "#/components/schemas/ModelTaskResponse" } } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /models/{id}/retry:
+    post:
+      operationId: retryModelDeploy
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202": { description: Deployment retry accepted, content: { application/json: { schema: { $ref: "#/components/schemas/ModelTaskResponse" } } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /model-uploads:
+    post:
+      operationId: createModelUpload
+      description: Creates a remote upload staging file on an existing environment; DP does not retain a local model copy.
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelUploadCreateInput" }
+      responses:
+        "201": { description: Upload session created, content: { application/json: { schema: { $ref: "#/components/schemas/ModelUploadCreatedResponse" } } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /model-uploads/{id}:
+    head:
+      operationId: getModelUploadOffset
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: Persisted remote offset
+          headers:
+            Upload-Offset: { schema: { type: integer, format: int64 } }
+            Upload-Length: { schema: { type: integer, format: int64 } }
+    patch:
+      operationId: appendModelUploadChunk
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Upload-Offset, in: header, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/offset+octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "204":
+          description: Chunk persisted to the target host
+          headers:
+            Upload-Offset: { schema: { type: integer, format: int64 } }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: cancelModelUpload
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Remote staging file removed and upload cancelled }
+  /model-uploads/{id}/complete:
+    post:
+      operationId: completeModelUpload
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202": { description: Validation and extraction task accepted, content: { application/json: { schema: { $ref: "#/components/schemas/ModelTaskResponse" } } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /model-tasks/{id}:
+    get:
+      operationId: getModelTask
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Model task snapshot, content: { application/json: { schema: { $ref: "#/components/schemas/ModelTaskResponse" } } } }
+  /model-tasks/{id}/events:
+    get:
+      operationId: streamModelTaskEvents
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Model task state and log events, content: { text/event-stream: { schema: { type: string } } } }
 components:
   securitySchemes:
     cookieAuth:
@@ -1402,10 +1516,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/User"
         - type: object
-          required: [package_count, environment_count, installed_service_count, recent_operation_count, active_session_count, login_failure_count, high_risk_count]
+          required: [package_count, environment_count, model_count, installed_service_count, recent_operation_count, active_session_count, login_failure_count, high_risk_count]
           properties:
             package_count: { type: integer }
             environment_count: { type: integer }
+            model_count: { type: integer }
             installed_service_count: { type: integer }
             recent_operation_count: { type: integer, description: Operations owned by this account during the last 30 days }
             active_session_count: { type: integer }
@@ -1425,12 +1540,13 @@ components:
       properties:
         data:
           type: object
-          required: [source_user_id, target_user_id, packages, environments]
+          required: [source_user_id, target_user_id, packages, environments, models]
           properties:
             source_user_id: { type: string, format: uuid }
             target_user_id: { type: string, format: uuid }
             packages: { type: integer }
             environments: { type: integer }
+            models: { type: integer }
     EnvironmentInput:
       type: object
       additionalProperties: false
@@ -1727,6 +1843,85 @@ components:
         data:
           type: array
           items: { $ref: "#/components/schemas/ServiceConfigRevision" }
+    ModelTask:
+      type: object
+      required: [id, model_id, owner_id, action, status, stage, progress, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        model_id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        actor_user_id: { type: string, format: uuid }
+        actor_username: { type: string }
+        action: { type: string, enum: [deploy, delete] }
+        status: { type: string, enum: [queued, running, succeeded, failed, timed_out, interrupted] }
+        stage: { type: string }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        error_code: { type: string }
+        error_message: { type: string }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+    Model:
+      type: object
+      required: [id, owner_id, environment_id, environment_name, environment_ip, name, source, target_dir, original_filename, size_bytes, expanded_size_bytes, file_count, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        owner_username: { type: string }
+        environment_id: { type: string, format: uuid }
+        environment_name: { type: string }
+        environment_ip: { type: string }
+        name: { type: string }
+        source: { type: string, enum: [offline, modelscope, huggingface] }
+        target_dir: { type: string }
+        original_filename: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        expanded_size_bytes: { type: integer, format: int64 }
+        file_count: { type: integer, format: int64 }
+        sha256: { type: string }
+        status: { type: string, enum: [uploading, deploying, ready, failed, deleting, deleted] }
+        error_message: { type: string }
+        created_by_username: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        ready_at: { type: [string, "null"], format: date-time }
+        latest_task: { $ref: "#/components/schemas/ModelTask" }
+    ModelResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: "#/components/schemas/Model" } }
+    ModelListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Model" } }
+    ModelTaskResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: "#/components/schemas/ModelTask" } }
+    ModelUploadCreateInput:
+      type: object
+      additionalProperties: false
+      required: [name, environment_id, target_dir, original_filename, total_bytes]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        environment_id: { type: string, format: uuid }
+        target_dir: { type: string, pattern: ^/ }
+        original_filename: { type: string, pattern: ".*\\.tar\\.gz$" }
+        total_bytes: { type: integer, format: int64, minimum: 1 }
+    ModelUploadCreatedResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [model, upload_id, offset, chunk_bytes, expires_at]
+          properties:
+            model: { $ref: "#/components/schemas/Model" }
+            upload_id: { type: string, format: uuid }
+            offset: { type: integer, format: int64 }
+            chunk_bytes: { type: integer, format: int64 }
+            expires_at: { type: string, format: date-time }
     Operation:
       type: object
       properties:
@@ -1853,7 +2048,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         occurred_at: { type: string, format: date-time }
-        category: { type: string, enum: [authentication, account, package, environment, service, communication, audit] }
+        category: { type: string, enum: [authentication, account, package, environment, service, model, communication, audit] }
         action: { type: string }
         outcome: { type: string, enum: [success, failure, denied] }
         risk_level: { type: string, enum: [normal, high] }
