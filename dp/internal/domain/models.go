@@ -256,6 +256,7 @@ type PackageVersion struct {
 	ConfigPort       int       `json:"config_port"`
 	ConfigFormat     string    `json:"config_format"`
 	ConfigPath       string    `json:"config_path"`
+	ConfigContent    []byte    `json:"-"`
 	ValidationStatus string    `json:"validation_status"`
 	Note             string    `json:"note"`
 	UploadedBy       string    `json:"uploaded_by,omitempty"`
@@ -274,6 +275,11 @@ type ServiceConfig struct {
 	Inherited         bool      `json:"inherited"`
 	CurrentRevisionID string    `json:"current_revision_id,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
+	PackageContent    string    `json:"package_content"`
+	PackageVersionID  string    `json:"package_version_id"`
+	PackageFilename   string    `json:"package_filename"`
+	PackageChanged    bool      `json:"package_changed"`
+	PackageUpdated    bool      `json:"package_updated"`
 }
 
 type ServiceConfigPreview struct {

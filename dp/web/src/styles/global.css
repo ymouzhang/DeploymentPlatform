@@ -298,6 +298,9 @@ body { min-height: 100vh; }
 
 .editor-frame { overflow: hidden; border: 1px solid #26372f; border-radius: 12px; }
 .config-modal-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.config-compare-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0; }
+.config-diff-labels { display: grid; grid-template-columns: 1fr 1fr; padding: 8px 14px; color: #c8d7ce; background: #17251f; font-size: 12px; font-weight: 700; }
+.config-diff-labels span:last-child { padding-left: 14px; border-left: 1px solid #31453b; }
 .editor-loading { display: grid; height: 520px; place-items: center; color: #90a097; background: #102019; }
 .operation-meta { display: flex; justify-content: space-between; margin-bottom: 12px; }
 .operation-target-cell { display: grid; min-width: 0; gap: 3px; }

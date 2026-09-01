@@ -39,25 +39,33 @@ func (s *ServiceConfigService) Get(ctx context.Context, environmentID string) (d
 	if err != nil {
 		return domain.ServiceConfig{}, err
 	}
-	config, err := s.store.GetServiceConfig(ctx, environmentID)
-	if err == nil {
-		return config, nil
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		return domain.ServiceConfig{}, err
-	}
-	content, _, inspection, err := s.packages.ReadConfigForOwner(ctx, env.OwnerID, env.ServiceType)
+	packageContent, pkg, packageInspection, err := s.packages.ReadConfigForOwner(ctx, env.OwnerID, env.ServiceType)
 	if err != nil {
 		return domain.ServiceConfig{}, err
 	}
-	return domain.ServiceConfig{
-		EnvironmentID: environmentID,
-		Content:       string(content),
-		Format:        inspection.ConfigType,
-		Path:          archive.RelativeConfigPath(inspection),
-		Port:          inspection.Port,
-		Inherited:     true,
-	}, nil
+	config, configErr := s.store.GetServiceConfig(ctx, environmentID)
+	if configErr != nil && !errors.Is(configErr, domain.ErrNotFound) {
+		return domain.ServiceConfig{}, configErr
+	}
+	if errors.Is(configErr, domain.ErrNotFound) {
+		currentContent, currentInspection := packageContent, packageInspection
+		if env.Installed && env.InstalledPackageSHA256 != "" && env.InstalledPackageSHA256 != pkg.SHA256 {
+			currentContent, _, currentInspection, err = s.packages.ReadConfigVersionForOwner(
+				ctx, env.OwnerID, env.ServiceType, env.InstalledPackageSHA256)
+			if err != nil {
+				return domain.ServiceConfig{}, err
+			}
+		}
+		config = domain.ServiceConfig{EnvironmentID: environmentID, Content: string(currentContent),
+			Format: currentInspection.ConfigType, Path: archive.RelativeConfigPath(currentInspection),
+			Port: currentInspection.Port, Inherited: true}
+	}
+	config.PackageContent = string(packageContent)
+	config.PackageVersionID = pkg.CurrentVersionID
+	config.PackageFilename = pkg.OriginalFilename
+	config.PackageChanged = config.Content != config.PackageContent
+	config.PackageUpdated = env.Installed && env.InstalledPackageSHA256 != "" && env.InstalledPackageSHA256 != pkg.SHA256
+	return config, nil
 }
 
 func (s *ServiceConfigService) Update(

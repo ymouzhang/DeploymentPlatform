@@ -283,6 +283,37 @@ func TestPackageVersionLifecycle(t *testing.T) {
 	}
 }
 
+func TestReadConfigUsesPersistedVersionTemplate(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	manager := NewManager(dataDir, 10<<20, db)
+	file := buildArchive(t, map[string]string{
+		"config/config.json": `{"port":8080,"template":true}`,
+		"start.sh":           "#!/bin/sh\n", "stop.sh": "#!/bin/sh\n",
+	})
+	src, err := os.Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := manager.Upload(ctx, "cached", "cached.tar.gz", src, nil)
+	_ = src.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manager.AbsolutePath(pkg), []byte("archive is unavailable"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, _, inspection, err := manager.ReadConfig(ctx, "cached")
+	if err != nil || string(content) != `{"port":8080,"template":true}` || inspection.Port != 8080 {
+		t.Fatalf("content=%q inspection=%+v err=%v", content, inspection, err)
+	}
+}
+
 func TestPackageVersionRetentionKeepsCurrentAndReferenced(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
@@ -377,7 +408,7 @@ func TestInspectWrappedYAMLPackageAndNestedPort(t *testing.T) {
 		"dist/config/config.yaml": "server:\n  port: 33182\n",
 		"dist/start.sh":           "#!/bin/sh\n",
 		"dist/stop.sh":            "#!/bin/sh\n",
-		"dist/dp-demo":      "binary",
+		"dist/dp-demo":            "binary",
 	})
 	result, err := inspect(file, 1<<20, true)
 	if err != nil {

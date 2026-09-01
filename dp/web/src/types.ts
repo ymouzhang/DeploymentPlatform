@@ -160,6 +160,11 @@ export interface ServiceConfig {
   inherited: boolean
   current_revision_id?: string
   updated_at?: string
+  package_content: string
+  package_version_id: string
+  package_filename: string
+  package_changed: boolean
+  package_updated: boolean
 }
 
 export interface ServiceConfigPreview {

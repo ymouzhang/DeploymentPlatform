@@ -150,7 +150,11 @@ func (m *Manager) UploadVersionForOwner(
 	var existingNote string
 	if currentPackage, getErr := m.store.GetPackageByOwner(ctx, ownerID, serviceType); getErr == nil {
 		existingNote = currentPackage.Note
-		current, inspectErr := inspect(m.AbsolutePath(currentPackage), m.maxExpanded, false)
+		currentVersion, versionErr := m.store.GetPackageVersion(ctx, ownerID, serviceType, currentPackage.CurrentVersionID)
+		if versionErr != nil {
+			return domain.Package{}, versionErr
+		}
+		current, inspectErr := m.configTemplate(ctx, currentVersion)
 		if inspectErr != nil {
 			return domain.Package{}, inspectErr
 		}
@@ -183,7 +187,7 @@ func (m *Manager) UploadVersionForOwner(
 		ID: versionID, OwnerID: ownerID, ServiceType: serviceType, OriginalFilename: filename,
 		StoragePath: relative, SHA256: hex.EncodeToString(hash.Sum(nil)), SizeBytes: written,
 		ConfigPort: inspection.Port, ConfigFormat: inspection.ConfigType,
-		ConfigPath: RelativeConfigPath(inspection), Note: pkgNote,
+		ConfigPath: RelativeConfigPath(inspection), ConfigContent: inspection.Config, Note: pkgNote,
 		UploadedBy: uploader.ID, UploadedByName: uploader.Username, UploadedAt: now,
 	}
 	if err := m.store.SavePackageVersion(ctx, version); err != nil {
@@ -246,11 +250,15 @@ func (m *Manager) ActivateVersion(ctx context.Context, ownerID, serviceType, ver
 	if target.Current {
 		return current, nil
 	}
-	currentInspection, err := inspect(m.AbsolutePath(current), m.maxExpanded, false)
+	currentVersion, err := m.store.GetPackageVersion(ctx, ownerID, serviceType, current.CurrentVersionID)
 	if err != nil {
 		return domain.Package{}, err
 	}
-	targetInspection, err := inspect(filepath.Join(m.dataDir, filepath.Clean(target.StoragePath)), m.maxExpanded, false)
+	currentInspection, err := m.configTemplate(ctx, currentVersion)
+	if err != nil {
+		return domain.Package{}, err
+	}
+	targetInspection, err := m.configTemplate(ctx, target)
 	if err != nil {
 		return domain.Package{}, err
 	}
@@ -437,11 +445,52 @@ func (m *Manager) ReadConfigForOwner(
 	if err != nil {
 		return nil, domain.Package{}, Inspection{}, err
 	}
-	inspection, err := inspect(m.AbsolutePath(pkg), m.maxExpanded, true)
+	version, err := m.store.GetPackageVersion(ctx, ownerID, serviceType, pkg.CurrentVersionID)
+	if err != nil {
+		return nil, domain.Package{}, Inspection{}, err
+	}
+	inspection, err := m.configTemplate(ctx, version)
 	if err != nil {
 		return nil, domain.Package{}, Inspection{}, err
 	}
 	return inspection.Config, pkg, inspection, nil
+}
+
+func (m *Manager) ReadConfigVersionForOwner(
+	ctx context.Context, ownerID, serviceType, sha256 string,
+) ([]byte, domain.PackageVersion, Inspection, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	version, err := m.store.GetPackageVersionBySHA(ctx, ownerID, serviceType, sha256)
+	if err != nil {
+		return nil, domain.PackageVersion{}, Inspection{}, err
+	}
+	inspection, err := m.configTemplate(ctx, version)
+	if err != nil {
+		return nil, domain.PackageVersion{}, Inspection{}, err
+	}
+	return inspection.Config, version, inspection, nil
+}
+
+func (m *Manager) configTemplate(ctx context.Context, version domain.PackageVersion) (Inspection, error) {
+	if version.ConfigContent != nil && version.ConfigFormat != "" && version.ConfigPath != "" {
+		return Inspection{
+			Port: version.ConfigPort, Config: version.ConfigContent,
+			ConfigPath: version.ConfigPath, ConfigType: version.ConfigFormat,
+		}, nil
+	}
+	inspection, err := inspect(filepath.Join(m.dataDir, filepath.Clean(version.StoragePath)), m.maxExpanded, true)
+	if err != nil {
+		return Inspection{}, err
+	}
+	relativePath := RelativeConfigPath(inspection)
+	if err := m.store.UpdatePackageVersionConfigTemplate(ctx, version.OwnerID, version.ServiceType,
+		version.ID, inspection.Config, inspection.ConfigType, relativePath, inspection.Port); err != nil {
+		return Inspection{}, err
+	}
+	inspection.ConfigPath = relativePath
+	inspection.RootPrefix = ""
+	return inspection, nil
 }
 
 func InspectForInstall(filename string, maxExpanded int64) (Inspection, error) {

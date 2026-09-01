@@ -22,6 +22,7 @@ import {
   Input,
   Modal,
   Space,
+  Spin,
   Table,
   Tag,
   Tooltip,
@@ -55,6 +56,12 @@ export function ServicesPage() {
   const [configFormat, setConfigFormat] = useState<'json' | 'yaml'>('json')
   const [configPath, setConfigPath] = useState('')
   const [configInherited, setConfigInherited] = useState(false)
+  const [configOriginalContent, setConfigOriginalContent] = useState('')
+  const [configPackageContent, setConfigPackageContent] = useState('')
+  const [configPackageFilename, setConfigPackageFilename] = useState('')
+  const [configPackageChanged, setConfigPackageChanged] = useState(false)
+  const [configPackageUpdated, setConfigPackageUpdated] = useState(false)
+  const [configView, setConfigView] = useState<'compare' | 'edit'>('edit')
   const [configLoading, setConfigLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [logService, setLogService] = useState<Service | null>(null)
@@ -135,7 +142,10 @@ export function ServicesPage() {
       setHistoryOpen(false)
       if (configEnvironment) {
         const config = await api.getServiceConfig(configEnvironment.id)
-        setConfigContent(config.content); setConfigFormat(config.format); setConfigPath(config.path); setConfigInherited(false)
+        setConfigContent(config.content); setConfigOriginalContent(config.content); setConfigFormat(config.format); setConfigPath(config.path); setConfigInherited(false)
+        setConfigPackageContent(config.package_content); setConfigPackageFilename(config.package_filename)
+        setConfigPackageChanged(config.package_changed); setConfigPackageUpdated(config.package_updated)
+        setConfigView(config.package_changed || config.package_updated ? 'compare' : 'edit')
       }
       void queryClient.invalidateQueries({ queryKey: ['service-config-revisions'] }); void queryClient.invalidateQueries({ queryKey: ['services'] })
     },
@@ -153,9 +163,15 @@ export function ServicesPage() {
         staleTime: 0,
       })
       setConfigContent(config.content)
+      setConfigOriginalContent(config.content)
       setConfigFormat(config.format)
       setConfigPath(config.path)
       setConfigInherited(config.inherited)
+      setConfigPackageContent(config.package_content)
+      setConfigPackageFilename(config.package_filename)
+      setConfigPackageChanged(config.package_changed)
+      setConfigPackageUpdated(config.package_updated)
+      setConfigView(config.package_changed || config.package_updated ? 'compare' : 'edit')
     } catch (error) {
       message.error((error as Error).message)
       setConfigOpen(false)
@@ -528,7 +544,7 @@ export function ServicesPage() {
             <span><strong>服务配置</strong><small>{configEnvironment ? `${configEnvironment.name} · ${configEnvironment.ip}` : '实例配置'}</small></span>
           </div>
         }
-        width={960}
+        width={1180}
         open={configOpen}
         onCancel={() => setConfigOpen(false)}
         footer={
@@ -543,22 +559,45 @@ export function ServicesPage() {
             <Typography.Text strong>{configEnvironment?.name}</Typography.Text>
             <Typography.Text type="secondary"> · {configPath}</Typography.Text>
           </div>
-          {configInherited && <Tag color="gold">来自安装包模板，保存后转为实例独立配置</Tag>}
+          <Space>
+            {configPackageUpdated && <Tag color="red">安装包已有新版本</Tag>}
+            {configPackageChanged && <Tag color="orange">当前配置与新包模板不同</Tag>}
+            {configInherited && <Tag color="gold">来自安装包模板，保存后转为实例独立配置</Tag>}
+          </Space>
         </div>
         {configEnvironment?.installed && (
           <div className="inline-alert compact">
             保存后将立即覆盖服务器上的配置文件，服务是否需要重启由配置项决定。
           </div>
         )}
+        {!configLoading && (configPackageChanged || configPackageUpdated) && (
+          <div className="config-compare-toolbar">
+            <Typography.Text type="secondary">新包配置：{configPackageFilename}</Typography.Text>
+            <Space>
+              <Button type={configView === 'compare' ? 'primary' : 'default'} onClick={() => setConfigView('compare')}>高亮对比</Button>
+              <Button type={configView === 'edit' ? 'primary' : 'default'} onClick={() => setConfigView('edit')}>编辑当前配置</Button>
+              <Button disabled={!configPackageChanged} onClick={() => { setConfigContent(configPackageContent); setConfigView('edit') }}>采用新包配置</Button>
+            </Space>
+          </div>
+        )}
         <div className="editor-frame">
-          <Suspense fallback={<div className="editor-loading">正在加载配置编辑器…</div>}>
-            <JsonEditor
-              height="520px"
-              language={configFormat}
-              value={configLoading ? '' : configContent}
-              onChange={(value) => setConfigContent(value ?? '')}
-            />
-          </Suspense>
+          {configLoading ? (
+            <div className="editor-loading"><Spin tip="正在加载配置模板…" /></div>
+          ) : (configPackageChanged || configPackageUpdated) && configView === 'compare' ? (
+            <Suspense fallback={<div className="editor-loading">正在加载差异编辑器…</div>}>
+              <div className="config-diff-labels"><span>当前使用的配置</span><span>新安装包配置</span></div>
+              <ConfigDiffEditor height="520px" language={configFormat} original={configOriginalContent} modified={configPackageContent} />
+            </Suspense>
+          ) : (
+            <Suspense fallback={<div className="editor-loading">正在加载配置编辑器…</div>}>
+              <JsonEditor
+                height="520px"
+                language={configFormat}
+                value={configContent}
+                onChange={(value) => setConfigContent(value ?? '')}
+              />
+            </Suspense>
+          )}
         </div>
       </Modal>
 

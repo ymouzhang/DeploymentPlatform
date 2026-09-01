@@ -17,11 +17,11 @@ func (s *Store) SavePackageVersion(ctx context.Context, version domain.PackageVe
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO package_versions (
 		id, owner_id, service_type, original_filename, storage_path, sha256, size_bytes,
-		config_port, config_format, config_path, note, uploaded_by, uploaded_by_username, uploaded_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, version.ID, version.OwnerID,
+		config_port, config_format, config_path, config_content, note, uploaded_by, uploaded_by_username, uploaded_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, version.ID, version.OwnerID,
 		version.ServiceType, version.OriginalFilename, version.StoragePath, version.SHA256,
 		version.SizeBytes, version.ConfigPort, version.ConfigFormat, version.ConfigPath,
-		version.Note, version.UploadedBy, version.UploadedByName, formatTime(version.UploadedAt))
+		version.ConfigContent, version.Note, version.UploadedBy, version.UploadedByName, formatTime(version.UploadedAt))
 	if isUniqueError(err) {
 		return &domain.AppError{Code: "PACKAGE_VERSION_EXISTS", Message: "相同内容的安装包版本已经存在"}
 	}
@@ -45,6 +45,24 @@ func (s *Store) SavePackageVersion(ctx context.Context, version domain.PackageVe
 	return tx.Commit()
 }
 
+// UpdatePackageVersionConfigTemplate backfills template metadata for versions created
+// before package templates were persisted separately from their archives.
+func (s *Store) UpdatePackageVersionConfigTemplate(
+	ctx context.Context, ownerID, serviceType, id string, content []byte, format, path string, port int,
+) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE package_versions
+		SET config_content=?, config_format=?, config_path=?, config_port=?
+		WHERE id=? AND owner_id=? AND service_type=?`,
+		content, format, path, port, id, ownerID, serviceType)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListPackageVersions(ctx context.Context, ownerID, serviceType string) ([]domain.PackageVersion, error) {
 	rows, err := s.db.QueryContext(ctx, packageVersionSelect+`
 		WHERE v.owner_id = ? AND v.service_type = ? ORDER BY v.uploaded_at DESC, v.id DESC`, ownerID, serviceType)
@@ -66,6 +84,15 @@ func (s *Store) ListPackageVersions(ctx context.Context, ownerID, serviceType st
 func (s *Store) GetPackageVersion(ctx context.Context, ownerID, serviceType, id string) (domain.PackageVersion, error) {
 	item, err := scanPackageVersion(s.db.QueryRowContext(ctx, packageVersionSelect+`
 		WHERE v.owner_id = ? AND v.service_type = ? AND v.id = ?`, ownerID, serviceType, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PackageVersion{}, domain.ErrNotFound
+	}
+	return item, err
+}
+
+func (s *Store) GetPackageVersionBySHA(ctx context.Context, ownerID, serviceType, sha256 string) (domain.PackageVersion, error) {
+	item, err := scanPackageVersion(s.db.QueryRowContext(ctx, packageVersionSelect+`
+		WHERE v.owner_id = ? AND v.service_type = ? AND v.sha256 = ?`, ownerID, serviceType, sha256))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.PackageVersion{}, domain.ErrNotFound
 	}
@@ -146,7 +173,7 @@ func (s *Store) PrunablePackageVersions(ctx context.Context, ownerID, serviceTyp
 
 const packageVersionSelect = `SELECT v.id, v.owner_id, v.service_type, v.original_filename,
 	v.storage_path, v.sha256, v.size_bytes, v.config_port, v.config_format, v.config_path,
-	v.note, v.uploaded_by, v.uploaded_by_username, v.uploaded_at,
+	v.config_content, v.note, v.uploaded_by, v.uploaded_by_username, v.uploaded_at,
 	CASE WHEN p.current_version_id = v.id THEN 1 ELSE 0 END,
 	(SELECT COUNT(*) FROM environments e WHERE e.owner_id=v.owner_id AND e.service_type=v.service_type AND e.installed_package_sha256=v.sha256)
 	FROM package_versions v JOIN packages p ON p.owner_id=v.owner_id AND p.service_type=v.service_type`
@@ -157,7 +184,7 @@ func scanPackageVersion(row scanner) (domain.PackageVersion, error) {
 	var current int
 	err := row.Scan(&item.ID, &item.OwnerID, &item.ServiceType, &item.OriginalFilename,
 		&item.StoragePath, &item.SHA256, &item.SizeBytes, &item.ConfigPort, &item.ConfigFormat,
-		&item.ConfigPath, &item.Note, &item.UploadedBy, &item.UploadedByName, &uploaded,
+		&item.ConfigPath, &item.ConfigContent, &item.Note, &item.UploadedBy, &item.UploadedByName, &uploaded,
 		&current, &item.ReferencedCount)
 	if err != nil {
 		return domain.PackageVersion{}, err

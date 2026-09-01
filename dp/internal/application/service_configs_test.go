@@ -72,6 +72,64 @@ func TestServiceConfigPreviewHistoryAndRollback(t *testing.T) {
 	}
 }
 
+func TestPackageUpdateOnlyChangesInheritedServiceConfigs(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	manager := archive.NewManager(dataDir, 10<<20, db)
+	firstPackage, err := manager.Upload(ctx, "demo", "v1.tar.gz", bytes.NewReader(configArchive(t, `{"port":8080,"version":1}`)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createEnvironment := func(name, ip string) domain.Environment {
+		t.Helper()
+		env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: store.InitialAdminID, Name: name,
+			IP: ip, SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return env
+	}
+	independent := createEnvironment("independent", "192.0.2.30")
+	inherited := createEnvironment("inherited", "192.0.2.31")
+	legacyInstalled := createEnvironment("legacy-installed", "192.0.2.32")
+	service := NewServiceConfigService(db, manager, nil, nil)
+	actor := domain.User{ID: store.InitialAdminID, Username: "admin", Role: domain.RoleAdmin}
+	custom := `{"port":9090,"custom":true}`
+	if _, err := service.Update(ctx, independent.ID, []byte(custom), actor); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkInstalled(ctx, independent.ID, firstPackage.SHA256, 9090); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkInstalled(ctx, legacyInstalled.ID, firstPackage.SHA256, 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Upload(ctx, "demo", "v2.tar.gz", bytes.NewReader(configArchive(t, `{"port":8081,"version":2}`)), nil); err != nil {
+		t.Fatal(err)
+	}
+	gotIndependent, err := service.Get(ctx, independent.ID)
+	if err != nil || gotIndependent.Inherited || gotIndependent.Content != custom ||
+		!gotIndependent.PackageChanged || !gotIndependent.PackageUpdated ||
+		gotIndependent.PackageContent != `{"port":8081,"version":2}` {
+		t.Fatalf("independent config=%+v err=%v", gotIndependent, err)
+	}
+	gotInherited, err := service.Get(ctx, inherited.ID)
+	if err != nil || !gotInherited.Inherited || gotInherited.Content != `{"port":8081,"version":2}` ||
+		gotInherited.PackageChanged || gotInherited.PackageUpdated {
+		t.Fatalf("inherited config=%+v err=%v", gotInherited, err)
+	}
+	gotLegacy, err := service.Get(ctx, legacyInstalled.ID)
+	if err != nil || !gotLegacy.Inherited || gotLegacy.Content != `{"port":8080,"version":1}` ||
+		gotLegacy.PackageContent != `{"port":8081,"version":2}` || !gotLegacy.PackageChanged || !gotLegacy.PackageUpdated {
+		t.Fatalf("legacy installed config=%+v err=%v", gotLegacy, err)
+	}
+}
+
 func TestServiceConfigRestoresRemoteWhenLocalCommitFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	dataDir := t.TempDir()
