@@ -3,5 +3,10 @@
 /inference/dist/
 /llm-gateway/lite-llm/dist/
 /agents/dify-deploy/dist/
+/models/models/
+/models/dist/
+**/.dp-model-upload-*.tar.gz
+**/.dp-model-deploy-*/
+**/.dp-model-trash-*/
 __pycache__/
 *.pyc

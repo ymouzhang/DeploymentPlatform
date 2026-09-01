@@ -17,7 +17,7 @@ const (
 	defaultDataDir                 = "./data"
 	defaultHealthInterval          = 10 * time.Second
 	defaultUploadTimeout           = 10 * time.Minute
-	defaultUploadMaxBytes          = int64(30 << 30)
+	defaultUploadMaxBytes          = int64(100 << 30)
 	defaultSessionTTL              = 24 * time.Hour
 	defaultAuditRetention          = int64(180)
 	defaultAuditExportMax          = int64(100000)

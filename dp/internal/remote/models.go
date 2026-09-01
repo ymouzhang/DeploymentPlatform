@@ -215,7 +215,16 @@ func inspectModelArchive(reader io.Reader, maxExpanded int64) (ModelArchiveInspe
 			return result, unsafeArchiveError()
 		}
 		cleaned := path.Clean(name)
-		if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		if cleaned == "." {
+			// GNU tar commonly writes a harmless leading "./" directory when
+			// packaging the contents of the model directory. Ignore only that
+			// directory placeholder; a regular file using the same path is invalid.
+			if header.Typeflag == tar.TypeDir {
+				continue
+			}
+			return result, unsafeArchiveError()
+		}
+		if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 			return result, unsafeArchiveError()
 		}
 		if _, exists := seenPaths[cleaned]; exists {

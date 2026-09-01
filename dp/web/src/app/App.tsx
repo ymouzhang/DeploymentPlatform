@@ -25,6 +25,7 @@ import { LoginPage } from '../features/auth/LoginPage'
 import { communicationKeys } from '../features/communications/queryKeys'
 import { RealtimeEvents } from '../realtime/RealtimeEvents'
 import { HeaderMessageEntry, SidebarMessageIcon, SidebarMessageLabel } from '../features/communications/MessageEntrypoints'
+import { ModelUploadProvider } from '../features/models/ModelUploadContext'
 
 const { Header, Sider, Content } = Layout
 const EnvironmentsPage = lazy(() =>
@@ -191,9 +192,10 @@ function Shell() {
         </Header>
         <Content className="app-content">
           <AuthContext.Provider value={{ user, ownerId, setOwnerId, users, logout: () => void 0 }}>
-            <RealtimeEvents />
-            <Suspense fallback={<div className="page-loading">正在加载…</div>}>
-              <Routes>
+            <ModelUploadProvider key={user.id} userId={user.id}>
+              <RealtimeEvents />
+              <Suspense fallback={<div className="page-loading">正在加载…</div>}>
+                <Routes>
                 {user.role === 'admin' && <Route path="/dashboard" element={<DashboardPage />} />}
                 <Route path="/packages" element={<PackagesPage />} />
                 <Route path="/environments" element={<EnvironmentsPage />} />
@@ -205,8 +207,9 @@ function Shell() {
                 {user.role === 'admin' && <Route path="/operations" element={<OperationsPage />} />}
                 {user.role === 'admin' && <Route path="/notifications" element={<NotificationsPage />} />}
                 <Route path="*" element={<Navigate to={user.role === 'admin' ? '/dashboard' : '/packages'} replace />} />
-              </Routes>
-            </Suspense>
+                </Routes>
+              </Suspense>
+            </ModelUploadProvider>
           </AuthContext.Provider>
         </Content>
       </Layout>

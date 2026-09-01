@@ -19,6 +19,7 @@ DP：安装、启动、停止和查看以上服务
 | SGLang | [`inference/sglang/`](inference/sglang/) | 另一种 GPU 大模型推理服务，提供 OpenAI 兼容 API | LiteLLM 访问其 `api_port` |
 | LiteLLM | [`llm-gateway/lite-llm/`](llm-gateway/lite-llm/) | 统一模型网关；把请求转发到 vLLM、SGLang 等推理服务 | 客户端和 Dify 访问其 `api_port` |
 | Dify | [`agents/dify-deploy/`](agents/dify-deploy/) | AI 应用与 Agent 平台；使用定制 Dify 分支并支持离线部署 | 浏览器和 API 访问其 `api_port` |
+| Models | [`models/`](models/) | 从 ModelScope 或 Hugging Face 拉取模型并生成 DP 离线上传包 | 上传到 DP“模型管理” |
 
 `agents/dify/` 是 Dify 源码 submodule；`agents/dify-deploy/` 是适配 DP 的配置、健康检查和离线打包
 脚本。不要直接把部署脚本写入 submodule。
@@ -43,14 +44,15 @@ DP：安装、启动、停止和查看以上服务
 ./package.sh --module sglang
 ./package.sh --module litellm
 ./package.sh --module dify
+MODEL_ID=Qwen/Qwen3-8B ./package.sh --module models
 ./package.sh --module dp --version v1.0.0
 
 # 同时打包多个模块
 ./package.sh --module litellm --module dify
 ```
 
-可选模块：`all`、`dp`、`inference`、`vllm`、`sglang`、`litellm`、`dify`。`inference` 表示同时
-打包 vLLM 和 SGLang。
+可选模块：`all`、`dp`、`inference`、`vllm`、`sglang`、`litellm`、`dify`、`models`。`inference` 表示同时
+打包 vLLM 和 SGLang；`all` 也会拉取并打包 `MODEL_ID` 指定的模型，未指定时使用脚本默认模型。
 
 Dify 使用 submodule。选择 `dify` 或 `all` 时，脚本会在缺失时自动执行初始化；也可以提前运行：
 
@@ -68,6 +70,7 @@ dist/dp-vllm-linux-amd64.tar.gz
 dist/dp-sglang-linux-amd64.tar.gz
 dist/dp-litellm-linux-amd64.tar.gz
 dist/dp-dify-linux-amd64.tar.gz
+dist/model-Qwen3-8B.tar.gz
 ```
 
 ### 3. 部署 DP

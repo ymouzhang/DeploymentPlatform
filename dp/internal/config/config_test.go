@@ -11,7 +11,7 @@ func TestAuditConfigDefaultsAndTrustedProxyValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.AuditRetentionDays != 180 || config.AuditExportMaxRows != 100000 || config.NotificationRetentionDays != 180 || config.OperationRetentionDays != 180 || config.PackageVersionRetention != 10 || config.UploadMaxBytes != int64(30<<30) || config.ModelUploadMaxBytes != int64(1<<40) || config.ModelUploadChunkBytes != int64(64<<20) || config.ModelTaskConcurrency != 2 {
+	if config.AuditRetentionDays != 180 || config.AuditExportMaxRows != 100000 || config.NotificationRetentionDays != 180 || config.OperationRetentionDays != 180 || config.PackageVersionRetention != 10 || config.UploadMaxBytes != int64(100<<30) || config.ModelUploadMaxBytes != int64(1<<40) || config.ModelUploadChunkBytes != int64(64<<20) || config.ModelTaskConcurrency != 2 {
 		t.Fatalf("config=%+v", config)
 	}
 	t.Setenv("DP_TRUSTED_PROXY_CIDRS", "not-a-cidr")

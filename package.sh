@@ -17,11 +17,13 @@ MODULE：
   sglang     仅打包 SGLang
   litellm    仅打包 LiteLLM
   dify       仅打包 Dify；缺少 submodule 时自动初始化
+  models     拉取模型并生成可上传到 DP 的离线包
 
 示例：
   ./package.sh --version v1.0.0
   ./package.sh --module vllm
   ./package.sh --module litellm --module dify
+  MODEL_ID=Qwen/Qwen3-8B ./package.sh --module models
   ./package.sh --module dp --version v1.0.0
 EOF
 }
@@ -81,12 +83,13 @@ for module_name in "${selected_modules[@]}"; do
       requested[sglang]=1
       requested[litellm]=1
       requested[dify]=1
+      requested[models]=1
       ;;
     inference)
       requested[vllm]=1
       requested[sglang]=1
       ;;
-    dp|vllm|sglang|litellm|dify)
+    dp|vllm|sglang|litellm|dify|models)
       requested["${module_name}"]=1
       ;;
     *)
@@ -137,6 +140,15 @@ if [[ -n "${requested[dify]:-}" ]]; then
     echo "Dify submodule 初始化后仍不完整：agents/dify" >&2
     exit 1
   fi
+fi
+
+if [[ -n "${requested[models]:-}" ]]; then
+  model_id="${MODEL_ID:-Qwen/Qwen3-4B-Instruct-2507}"
+  model_name="${model_id##*/}"
+  echo "==> 拉取并打包模型：${model_id}"
+  MODEL_OUTPUT_DIR="${output_dir}" \
+    ./models/package.sh "${model_id}"
+  generated_archives+=("model-${model_name}.tar.gz")
 fi
 
 if [[ -n "${requested[dp]:-}" ]]; then

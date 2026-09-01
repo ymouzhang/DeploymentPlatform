@@ -1378,7 +1378,7 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 | `DP_DATA_DIR` | 否 | `./data` | SQLite、安装包和操作日志目录 |
 | `DP_LISTEN_ADDR` | 否 | `127.0.0.1:8080` | HTTP 监听地址 |
 | `DP_HEALTH_INTERVAL` | 否 | `10s` | 健康检查周期 |
-| `DP_UPLOAD_MAX_BYTES` | 否 | `32212254720` | 压缩包上传上限，单位为字节 |
+| `DP_UPLOAD_MAX_BYTES` | 否 | `107374182400` | 单个安装包上传上限，默认 100 GiB，单位为字节 |
 | `DP_UPLOAD_TIMEOUT` | 否 | `10m` | SFTP 上传超时 |
 | `DP_MODEL_UPLOAD_MAX_BYTES` | 否 | `1099511627776` | 单个离线模型压缩包上限，默认 1 TiB |
 | `DP_MODEL_UPLOAD_CHUNK_BYTES` | 否 | `67108864` | 浏览器建议分片大小，默认 64 MiB |

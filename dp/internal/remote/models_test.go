@@ -47,6 +47,28 @@ func TestInspectModelArchiveCommonRoot(t *testing.T) {
 	}
 }
 
+func TestInspectModelArchiveAcceptsTarDotRoot(t *testing.T) {
+	content := modelArchive(t, []tar.Header{
+		{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "./config.json", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2},
+		{Name: "./model.bin", Typeflag: tar.TypeReg, Mode: 0o644, Size: 4},
+	})
+	result, err := inspectModelArchive(bytes.NewReader(content), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StripCommonRoot || result.FileCount != 2 || result.ExpandedSize != 6 {
+		t.Fatalf("unexpected inspection: %+v", result)
+	}
+}
+
+func TestInspectModelArchiveRejectsDotRootFile(t *testing.T) {
+	content := modelArchive(t, []tar.Header{{Name: ".", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}})
+	if _, err := inspectModelArchive(bytes.NewReader(content), 1024); err == nil {
+		t.Fatal("expected dot root regular file to be rejected")
+	}
+}
+
 func TestInspectModelArchiveRejectsLinksAndTraversal(t *testing.T) {
 	for name, header := range map[string]tar.Header{
 		"link":            {Name: "model/link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"},
