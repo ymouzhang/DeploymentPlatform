@@ -39,7 +39,8 @@ func TestAuthRepositoryIntegration(t *testing.T) {
 	}
 
 	user, err := db.CreateUser(ctx, domain.User{
-		Username: "integration-user", PasswordHash: "hash", Role: domain.RoleUser,
+		Username: "integration-user", PasswordHash: "hash",
+		Roles: []access.RoleRef{{ID: "00000000-0000-4000-8000-000000000103", Key: access.RoleOperator}},
 		Enabled: true, CreatedBy: admin.ID,
 	})
 	if err != nil {

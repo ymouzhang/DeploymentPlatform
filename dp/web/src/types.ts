@@ -1,9 +1,86 @@
 export type ServiceType = string
 
+export type PermissionScope = 'own' | 'all'
+
+export type Permission =
+  | 'dashboard.read'
+  | 'account.read'
+  | 'account.create'
+  | 'account.update'
+  | 'account.delete'
+  | 'account.assign_roles'
+  | 'account.transfer'
+  | 'role.read'
+  | 'role.create'
+  | 'role.update'
+  | 'role.delete'
+  | 'package.read'
+  | 'package.write'
+  | 'package.delete'
+  | 'environment.read'
+  | 'environment.write'
+  | 'environment.delete'
+  | 'environment.validate'
+  | 'environment.import'
+  | 'environment.export'
+  | 'tag.read'
+  | 'tag.write'
+  | 'model.read'
+  | 'model.upload'
+  | 'model.delete'
+  | 'service.read'
+  | 'service.config.read'
+  | 'service.config.write'
+  | 'service.install'
+  | 'service.start'
+  | 'service.stop'
+  | 'service.reset'
+  | 'service.health'
+  | 'service.log.read'
+  | 'operation.read'
+  | 'audit.read'
+  | 'audit.export'
+  | 'notification.read'
+  | 'notification.update'
+  | 'communication.read'
+  | 'communication.create'
+  | 'communication.reply'
+  | 'communication.manage'
+
+export interface RoleRef {
+  id: string
+  key: string
+  name: string
+}
+
+export interface PermissionDefinition {
+  key: Permission
+  resource: string
+  action: string
+  description: string
+  scoped: boolean
+}
+
+export interface RoleGrant {
+  permission: Permission
+  scope: PermissionScope
+}
+
+export interface Role {
+  id: string
+  key: string
+  name: string
+  description: string
+  system: boolean
+  grants: RoleGrant[]
+  member_count: number
+}
+
 export interface User {
   id: string
   username: string
-  role: 'admin' | 'user'
+  roles: RoleRef[]
+  permissions: Partial<Record<Permission, PermissionScope>>
   enabled: boolean
   must_change_password: boolean
   is_initial_admin: boolean

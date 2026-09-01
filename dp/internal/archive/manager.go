@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"DP/internal/domain"
-	"DP/internal/store"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -46,9 +45,27 @@ type Manager struct {
 	dataDir          string
 	maxArchiveBytes  int64
 	maxExpanded      int64
-	store            *store.Store
+	repository       Repository
 	versionRetention int
 	mu               sync.RWMutex
+}
+
+// Repository is the package persistence required by Manager.
+type Repository interface {
+	ActivatePackageVersion(context.Context, domain.PackageVersion) error
+	CountInstalledEnvironmentsByOwner(context.Context, string, string) (int, error)
+	DeletePackageByOwner(context.Context, string, string) error
+	DeletePackageVersion(context.Context, string, string, string) error
+	GetPackageByOwner(context.Context, string, string) (domain.Package, error)
+	GetPackageVersion(context.Context, string, string, string) (domain.PackageVersion, error)
+	GetPackageVersionBySHA(context.Context, string, string, string) (domain.PackageVersion, error)
+	ListPackageVersions(context.Context, string, string) ([]domain.PackageVersion, error)
+	PrunablePackageVersions(context.Context, string, string, int) ([]domain.PackageVersion, error)
+	SavePackageVersion(context.Context, domain.PackageVersion) error
+	TransferResources(context.Context, string, string) (domain.TransferResult, error)
+	UpdatePackageNoteByOwner(context.Context, string, string, string) (domain.Package, error)
+	UpdatePackageVersionConfigTemplate(context.Context, string, string, string, []byte, string, string, int) error
+	UpdatePackageVersionNote(context.Context, string, string, string, string) error
 }
 
 type Inspection struct {
@@ -62,14 +79,14 @@ type Inspection struct {
 	RootPrefix string
 }
 
-func NewManager(dataDir string, maxArchiveBytes int64, store *store.Store) *Manager {
+func NewManager(dataDir string, maxArchiveBytes int64, repository Repository) *Manager {
 	maxExpanded := maxArchiveBytes * 10
 	if maxExpanded < maxArchiveBytes {
 		maxExpanded = maxArchiveBytes
 	}
 	return &Manager{
 		dataDir: dataDir, maxArchiveBytes: maxArchiveBytes,
-		maxExpanded: maxExpanded, store: store, versionRetention: 10,
+		maxExpanded: maxExpanded, repository: repository, versionRetention: 10,
 	}
 }
 
@@ -148,9 +165,9 @@ func (m *Manager) UploadVersionForOwner(
 	defer m.mu.Unlock()
 
 	var existingNote string
-	if currentPackage, getErr := m.store.GetPackageByOwner(ctx, ownerID, serviceType); getErr == nil {
+	if currentPackage, getErr := m.repository.GetPackageByOwner(ctx, ownerID, serviceType); getErr == nil {
 		existingNote = currentPackage.Note
-		currentVersion, versionErr := m.store.GetPackageVersion(ctx, ownerID, serviceType, currentPackage.CurrentVersionID)
+		currentVersion, versionErr := m.repository.GetPackageVersion(ctx, ownerID, serviceType, currentPackage.CurrentVersionID)
 		if versionErr != nil {
 			return domain.Package{}, versionErr
 		}
@@ -190,12 +207,12 @@ func (m *Manager) UploadVersionForOwner(
 		ConfigPath: RelativeConfigPath(inspection), ConfigContent: inspection.Config, Note: pkgNote,
 		UploadedBy: uploader.ID, UploadedByName: uploader.Username, UploadedAt: now,
 	}
-	if err := m.store.SavePackageVersion(ctx, version); err != nil {
+	if err := m.repository.SavePackageVersion(ctx, version); err != nil {
 		_ = os.Remove(destination)
 		return domain.Package{}, err
 	}
 	m.pruneVersions(ctx, ownerID, serviceType)
-	return m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	return m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 }
 
 // UpdateNote 仅更新安装包备注，包文件保持不变。
@@ -214,43 +231,43 @@ func (m *Manager) UpdateNoteForOwner(ctx context.Context, ownerID, serviceType, 
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	pkg, err := m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	pkg, err := m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return domain.Package{}, err
 	}
 	if pkg.CurrentVersionID != "" {
-		if err := m.store.UpdatePackageVersionNote(ctx, ownerID, serviceType, pkg.CurrentVersionID, note); err != nil {
+		if err := m.repository.UpdatePackageVersionNote(ctx, ownerID, serviceType, pkg.CurrentVersionID, note); err != nil {
 			return domain.Package{}, err
 		}
-		return m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+		return m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 	}
-	return m.store.UpdatePackageNoteByOwner(ctx, ownerID, serviceType, note)
+	return m.repository.UpdatePackageNoteByOwner(ctx, ownerID, serviceType, note)
 }
 
 func (m *Manager) ListVersions(ctx context.Context, ownerID, serviceType string) ([]domain.PackageVersion, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if _, err := m.store.GetPackageByOwner(ctx, ownerID, serviceType); err != nil {
+	if _, err := m.repository.GetPackageByOwner(ctx, ownerID, serviceType); err != nil {
 		return nil, err
 	}
-	return m.store.ListPackageVersions(ctx, ownerID, serviceType)
+	return m.repository.ListPackageVersions(ctx, ownerID, serviceType)
 }
 
 func (m *Manager) ActivateVersion(ctx context.Context, ownerID, serviceType, versionID string) (domain.Package, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	current, err := m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	current, err := m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return domain.Package{}, err
 	}
-	target, err := m.store.GetPackageVersion(ctx, ownerID, serviceType, versionID)
+	target, err := m.repository.GetPackageVersion(ctx, ownerID, serviceType, versionID)
 	if err != nil {
 		return domain.Package{}, err
 	}
 	if target.Current {
 		return current, nil
 	}
-	currentVersion, err := m.store.GetPackageVersion(ctx, ownerID, serviceType, current.CurrentVersionID)
+	currentVersion, err := m.repository.GetPackageVersion(ctx, ownerID, serviceType, current.CurrentVersionID)
 	if err != nil {
 		return domain.Package{}, err
 	}
@@ -265,10 +282,10 @@ func (m *Manager) ActivateVersion(ctx context.Context, ownerID, serviceType, ver
 	if currentInspection.ConfigType != targetInspection.ConfigType || RelativeConfigPath(currentInspection) != RelativeConfigPath(targetInspection) {
 		return domain.Package{}, &domain.AppError{Code: "PACKAGE_VERSION_INCOMPATIBLE", Message: "历史版本的配置格式或路径与当前版本不兼容"}
 	}
-	if err := m.store.ActivatePackageVersion(ctx, target); err != nil {
+	if err := m.repository.ActivatePackageVersion(ctx, target); err != nil {
 		return domain.Package{}, err
 	}
-	return m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	return m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 }
 
 func (m *Manager) DeleteVersion(ctx context.Context, ownerID, serviceType, versionID string) error {
@@ -278,7 +295,7 @@ func (m *Manager) DeleteVersion(ctx context.Context, ownerID, serviceType, versi
 }
 
 func (m *Manager) deleteVersionLocked(ctx context.Context, ownerID, serviceType, versionID string) error {
-	version, err := m.store.GetPackageVersion(ctx, ownerID, serviceType, versionID)
+	version, err := m.repository.GetPackageVersion(ctx, ownerID, serviceType, versionID)
 	if err != nil {
 		return err
 	}
@@ -293,7 +310,7 @@ func (m *Manager) deleteVersionLocked(ctx context.Context, ownerID, serviceType,
 	if err := os.Rename(path, trash); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := m.store.DeletePackageVersion(ctx, ownerID, serviceType, versionID); err != nil {
+	if err := m.repository.DeletePackageVersion(ctx, ownerID, serviceType, versionID); err != nil {
 		_ = os.Rename(trash, path)
 		return err
 	}
@@ -304,7 +321,7 @@ func (m *Manager) deleteVersionLocked(ctx context.Context, ownerID, serviceType,
 }
 
 func (m *Manager) pruneVersions(ctx context.Context, ownerID, serviceType string) {
-	items, err := m.store.PrunablePackageVersions(ctx, ownerID, serviceType, m.versionRetention)
+	items, err := m.repository.PrunablePackageVersions(ctx, ownerID, serviceType, m.versionRetention)
 	if err != nil {
 		return
 	}
@@ -320,7 +337,7 @@ func (m *Manager) Get(ctx context.Context, serviceType string) (domain.Package, 
 }
 
 func (m *Manager) GetForOwner(ctx context.Context, ownerID, serviceType string) (domain.Package, error) {
-	return m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	return m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 }
 
 func (m *Manager) Delete(ctx context.Context, serviceType string) error {
@@ -336,15 +353,15 @@ func (m *Manager) DeleteForOwner(ctx context.Context, ownerID, serviceType strin
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	_, err := m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	_, err := m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return err
 	}
-	versions, err := m.store.ListPackageVersions(ctx, ownerID, serviceType)
+	versions, err := m.repository.ListPackageVersions(ctx, ownerID, serviceType)
 	if err != nil {
 		return err
 	}
-	installed, err := m.store.CountInstalledEnvironmentsByOwner(ctx, ownerID, serviceType)
+	installed, err := m.repository.CountInstalledEnvironmentsByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return err
 	}
@@ -354,7 +371,7 @@ func (m *Manager) DeleteForOwner(ctx context.Context, ownerID, serviceType strin
 			Message: "该服务类型存在已安装的环境，请先重置后再删除安装包",
 		}
 	}
-	if err := m.store.DeletePackageByOwner(ctx, ownerID, serviceType); err != nil {
+	if err := m.repository.DeletePackageByOwner(ctx, ownerID, serviceType); err != nil {
 		return err
 	}
 	var removeErr error
@@ -374,7 +391,7 @@ func (m *Manager) DeleteForOwner(ctx context.Context, ownerID, serviceType strin
 func (m *Manager) TransferOwner(ctx context.Context, sourceID, targetID string) (domain.TransferResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.store.TransferResources(ctx, sourceID, targetID)
+	return m.repository.TransferResources(ctx, sourceID, targetID)
 }
 
 func (m *Manager) AbsolutePath(pkg domain.Package) string {
@@ -393,7 +410,7 @@ func (m *Manager) SnapshotForOwner(
 ) (domain.Package, string, Inspection, func(), error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	pkg, err := m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	pkg, err := m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return domain.Package{}, "", Inspection{}, func() {}, err
 	}
@@ -441,11 +458,11 @@ func (m *Manager) ReadConfigForOwner(
 ) ([]byte, domain.Package, Inspection, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	pkg, err := m.store.GetPackageByOwner(ctx, ownerID, serviceType)
+	pkg, err := m.repository.GetPackageByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return nil, domain.Package{}, Inspection{}, err
 	}
-	version, err := m.store.GetPackageVersion(ctx, ownerID, serviceType, pkg.CurrentVersionID)
+	version, err := m.repository.GetPackageVersion(ctx, ownerID, serviceType, pkg.CurrentVersionID)
 	if err != nil {
 		return nil, domain.Package{}, Inspection{}, err
 	}
@@ -461,7 +478,7 @@ func (m *Manager) ReadConfigVersionForOwner(
 ) ([]byte, domain.PackageVersion, Inspection, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	version, err := m.store.GetPackageVersionBySHA(ctx, ownerID, serviceType, sha256)
+	version, err := m.repository.GetPackageVersionBySHA(ctx, ownerID, serviceType, sha256)
 	if err != nil {
 		return nil, domain.PackageVersion{}, Inspection{}, err
 	}
@@ -484,7 +501,7 @@ func (m *Manager) configTemplate(ctx context.Context, version domain.PackageVers
 		return Inspection{}, err
 	}
 	relativePath := RelativeConfigPath(inspection)
-	if err := m.store.UpdatePackageVersionConfigTemplate(ctx, version.OwnerID, version.ServiceType,
+	if err := m.repository.UpdatePackageVersionConfigTemplate(ctx, version.OwnerID, version.ServiceType,
 		version.ID, inspection.Config, inspection.ConfigType, relativePath, inspection.Port); err != nil {
 		return Inspection{}, err
 	}

@@ -33,6 +33,7 @@ case "${platform}" in
 esac
 architecture="${platform#linux/}"
 image_tag="dp:${version,,}"
+postgres_image="${DP_POSTGRES_IMAGE:-postgres:17-alpine}"
 output_dir="${DP_OUTPUT_DIR:-${project_dir}/dist}"
 mkdir -p "${output_dir}"
 output_dir="$(cd -- "${output_dir}" && pwd)"
@@ -53,13 +54,18 @@ DP_PLATFORM="${platform}" \
 DP_MASTER_KEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" \
 DP_ADMIN_USERNAME="admin" \
 DP_ADMIN_PASSWORD="build-only-password" \
+DP_POSTGRES_PASSWORD="build-only-postgres-password" \
   docker compose build --pull
+
+echo "==> 拉取 PostgreSQL 镜像 ${postgres_image} (${platform})"
+docker pull --platform "${platform}" "${postgres_image}"
 
 bundle_dir="${stage_dir}/${package_name}"
 mkdir -p "${bundle_dir}/data"
 
 echo "==> 导出离线镜像"
 docker image save "${image_tag}" | gzip -9 > "${bundle_dir}/dp-image.tar.gz"
+docker image save "${postgres_image}" | gzip -9 > "${bundle_dir}/postgres-image.tar.gz"
 
 cp compose.yaml "${bundle_dir}/compose.yaml"
 cp scripts/dp.sh "${bundle_dir}/dp.sh"

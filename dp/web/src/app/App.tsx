@@ -20,7 +20,8 @@ import { Alert, App as AntApp, Badge, Button, Dropdown, Form, Input, Layout, Men
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { AuthContext } from './AuthContext'
+import { AuthContext, canAccess, hasAllAccess } from './AuthContext'
+import type { Permission, User } from '../types'
 import { LoginPage } from '../features/auth/LoginPage'
 import { communicationKeys } from '../features/communications/queryKeys'
 import { RealtimeEvents } from '../realtime/RealtimeEvents'
@@ -50,14 +51,44 @@ const DashboardPage = lazy(() => import('../features/admin/DashboardPage').then(
 const OperationsPage = lazy(() => import('../features/operations/OperationsPage').then((module) => ({ default: module.OperationsPage })))
 const NotificationsPage = lazy(() => import('../features/notifications/NotificationsPage').then((module) => ({ default: module.NotificationsPage })))
 const CommunicationsPage = lazy(() => import('../features/communications/CommunicationsPage').then((module) => ({ default: module.CommunicationsPage })))
+const RolesPage = lazy(() => import('../features/roles/RolesPage').then((module) => ({ default: module.RolesPage })))
+
+const scopedPagePermissions: Partial<Record<string, Permission>> = {
+  '/packages': 'package.read',
+  '/environments': 'environment.read',
+  '/models': 'model.read',
+  '/services': 'service.read',
+}
+
+const pageOrder: Array<[string, Permission]> = [
+  ['/dashboard', 'dashboard.read'],
+  ['/packages', 'package.read'],
+  ['/environments', 'environment.read'],
+  ['/models', 'model.read'],
+  ['/services', 'service.read'],
+  ['/communications', 'communication.read'],
+	['/roles', 'role.read'],
+  ['/users', 'account.read'],
+  ['/operations', 'operation.read'],
+  ['/audit', 'audit.read'],
+  ['/notifications', 'notification.read'],
+]
+
+function firstAllowedPath(user: User) {
+  return pageOrder.find(([, permission]) => canAccess(user, permission))?.[0] ?? '/forbidden'
+}
+
+function ForbiddenPage() {
+  return <Alert type="error" showIcon message="无权访问" description="当前账号没有访问该页面所需的权限。" />
+}
 
 function Shell() {
   const { message } = AntApp.useApp()
   const queryClient = useQueryClient()
   const meQuery = useQuery({ queryKey: ['me'], queryFn: api.me })
-  const usersQuery = useQuery({ queryKey: ['users'], queryFn: api.listUsers, enabled: meQuery.data?.role === 'admin' && !meQuery.data.must_change_password })
-  const notificationQuery = useQuery({ queryKey: ['notification-summary'], queryFn: api.notificationSummary, enabled: meQuery.data?.role === 'admin' && !meQuery.data.must_change_password, refetchInterval: 30_000 })
-  const communicationQuery = useQuery({ queryKey: communicationKeys.summary, queryFn: api.communicationSummary, enabled: Boolean(meQuery.data) && !meQuery.data?.must_change_password, refetchInterval: 30_000 })
+  const usersQuery = useQuery({ queryKey: ['users'], queryFn: api.listUsers, enabled: canAccess(meQuery.data, 'account.read') && !meQuery.data?.must_change_password })
+  const notificationQuery = useQuery({ queryKey: ['notification-summary'], queryFn: api.notificationSummary, enabled: canAccess(meQuery.data, 'notification.read') && !meQuery.data?.must_change_password, refetchInterval: 30_000 })
+  const communicationQuery = useQuery({ queryKey: communicationKeys.summary, queryFn: api.communicationSummary, enabled: canAccess(meQuery.data, 'communication.read') && !meQuery.data?.must_change_password, refetchInterval: 30_000 })
   const [ownerId, setOwnerId] = useState<string | undefined>()
   const [loggedOut, setLoggedOut] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
@@ -70,15 +101,19 @@ function Shell() {
     () => window.localStorage.getItem('dp:sider-collapsed') === 'true',
   )
   useEffect(() => {
-    if (meQuery.data?.role !== 'admin' || !['/packages', '/environments', '/models', '/services'].includes(location.pathname)) return
+    const permission = scopedPagePermissions[location.pathname]
+    if (!permission || !hasAllAccess(meQuery.data, permission)) return
     const requested = new URLSearchParams(location.search).get('owner_id') ?? undefined
     if (!requested || usersQuery.data?.some((item) => item.id === requested)) setOwnerId(requested)
-  }, [location.pathname, location.search, meQuery.data?.role, usersQuery.data])
+  }, [location.pathname, location.search, meQuery.data, usersQuery.data])
   if (meQuery.isLoading && !loggedOut) return <div className="page-loading">正在验证登录状态…</div>
-  if (loggedOut || !meQuery.data) return <LoginPage onLogin={(user) => { queryClient.setQueryData(['me'], user); setLoggedOut(false); navigate(user.role === 'admin' ? '/dashboard' : '/packages', { replace: true }) }} />
+  if (loggedOut || !meQuery.data) return <LoginPage onLogin={(user) => { queryClient.setQueryData(['me'], user); setLoggedOut(false); navigate(firstAllowedPath(user), { replace: true }) }} />
   const user = meQuery.data
   const users = usersQuery.data ?? []
   const communicationUnread = communicationQuery.data?.unread ?? 0
+  const can = (permission: Permission, resourceOwnerId?: string) => canAccess(user, permission, resourceOwnerId)
+  const hasAll = (permission: Permission) => hasAllAccess(user, permission)
+  const scopedPermission = scopedPagePermissions[location.pathname]
   const finishLogout = () => { setLoggedOut(true); setOwnerId(undefined); queryClient.clear(); navigate('/login', { replace: true }) }
   const submitPassword = async (values: { current_password: string; new_password: string }) => {
     try {
@@ -103,6 +138,8 @@ function Shell() {
             ? '模型管理'
         : location.pathname === '/users'
           ? '账号管理'
+		  : location.pathname === '/roles'
+			? '角色与权限'
           : location.pathname === '/operations'
             ? '操作中心'
             : location.pathname === '/notifications'
@@ -144,16 +181,17 @@ function Shell() {
           selectedKeys={[location.pathname]}
           onClick={({ key }) => navigate(key)}
           items={[
-            ...(user.role === 'admin' ? [{ key: '/dashboard', icon: <DashboardOutlined />, label: '管理总览' }] : []),
-            { key: '/packages', icon: <FileZipOutlined />, label: '安装包管理' },
-            { key: '/environments', icon: <CloudServerOutlined />, label: '环境管理' },
-            { key: '/models', icon: <DatabaseOutlined />, label: '模型管理' },
-            { key: '/services', icon: <DeploymentUnitOutlined />, label: '服务管理' },
-            { key: '/communications', icon: <SidebarMessageIcon unread={communicationUnread} />, label: <SidebarMessageLabel unread={communicationUnread} /> },
-            ...(user.role === 'admin' ? [{ key: '/users', icon: <TeamOutlined />, label: '账号管理' }] : []),
-            ...(user.role === 'admin' ? [{ key: '/operations', icon: <HistoryOutlined />, label: '操作中心' }] : []),
-            ...(user.role === 'admin' ? [{ key: '/audit', icon: <AuditOutlined />, label: '审计日志' }] : []),
-            ...(user.role === 'admin' ? [{ key: '/notifications', icon: <BellOutlined />, label: <span>通知中心 <Badge size="small" count={notificationQuery.data?.unread ?? 0} overflowCount={99} /></span> }] : []),
+            ...(can('dashboard.read') ? [{ key: '/dashboard', icon: <DashboardOutlined />, label: '管理总览' }] : []),
+            ...(can('package.read') ? [{ key: '/packages', icon: <FileZipOutlined />, label: '安装包管理' }] : []),
+            ...(can('environment.read') ? [{ key: '/environments', icon: <CloudServerOutlined />, label: '环境管理' }] : []),
+            ...(can('model.read') ? [{ key: '/models', icon: <DatabaseOutlined />, label: '模型管理' }] : []),
+            ...(can('service.read') ? [{ key: '/services', icon: <DeploymentUnitOutlined />, label: '服务管理' }] : []),
+            ...(can('communication.read') ? [{ key: '/communications', icon: <SidebarMessageIcon unread={communicationUnread} />, label: <SidebarMessageLabel unread={communicationUnread} /> }] : []),
+            ...(can('account.read') ? [{ key: '/users', icon: <TeamOutlined />, label: '账号管理' }] : []),
+			...(can('role.read') ? [{ key: '/roles', icon: <SafetyCertificateOutlined />, label: '角色与权限' }] : []),
+            ...(can('operation.read') ? [{ key: '/operations', icon: <HistoryOutlined />, label: '操作中心' }] : []),
+            ...(can('audit.read') ? [{ key: '/audit', icon: <AuditOutlined />, label: '审计日志' }] : []),
+            ...(can('notification.read') ? [{ key: '/notifications', icon: <BellOutlined />, label: <span>通知中心 <Badge size="small" count={notificationQuery.data?.unread ?? 0} overflowCount={99} /></span> }] : []),
           ]}
         />
         <Tooltip title={siderCollapsed ? 'SSH 凭据加密存储' : undefined} placement="right">
@@ -182,31 +220,33 @@ function Shell() {
             </div>
           </div>
           <Space>
-            {user.role === 'admin' && ['/packages', '/environments', '/models', '/services'].includes(location.pathname) && <Space size={6}><Typography.Text type="secondary">数据范围</Typography.Text><Select allowClear placeholder="全部账号" value={ownerId} style={{ width: 180 }} options={users.map((item) => ({ value: item.id, label: item.username }))} onChange={(value) => setOwnerId(value)} /></Space>}
+            {scopedPermission && hasAll(scopedPermission) && can('account.read') && <Space size={6}><Typography.Text type="secondary">数据范围</Typography.Text><Select allowClear placeholder="全部账号" value={ownerId} style={{ width: 180 }} options={users.map((item) => ({ value: item.id, label: item.username }))} onChange={(value) => setOwnerId(value)} /></Space>}
             <div className="system-state" aria-label="系统连接正常"><span className="system-state-dot" />系统在线</div>
             <HeaderMessageEntry key={`message-${communicationUnread}`} unread={communicationUnread} onClick={() => navigate('/communications')} />
             <Dropdown menu={{ items: [{ key: 'sessions', icon: <LaptopOutlined />, label: '登录会话' }, { key: 'password', icon: <KeyOutlined />, label: '修改密码' }, { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }], onClick: async ({ key }) => { if (key === 'sessions') setSessionsOpen(true); else if (key === 'password') setPasswordOpen(true); else { await api.logout(); finishLogout() } } }}>
-              <Button className="account-button"><span className="account-avatar">{user.username.slice(0, 1).toUpperCase()}</span><span>{user.username}</span><span className="account-role">{user.role === 'admin' ? '管理员' : '成员'}</span></Button>
+              <Button className="account-button"><span className="account-avatar">{user.username.slice(0, 1).toUpperCase()}</span><span>{user.username}</span><span className="account-role">{user.roles.map((role) => role.name).join('、') || '无角色'}</span></Button>
             </Dropdown>
           </Space>
         </Header>
         <Content className="app-content">
-          <AuthContext.Provider value={{ user, ownerId, setOwnerId, users, logout: () => void 0 }}>
+          <AuthContext.Provider value={{ user, ownerId, setOwnerId, users, can, hasAll, logout: () => void 0 }}>
             <ModelUploadProvider key={user.id} userId={user.id}>
               <RealtimeEvents />
               <Suspense fallback={<div className="page-loading">正在加载…</div>}>
                 <Routes>
-                {user.role === 'admin' && <Route path="/dashboard" element={<DashboardPage />} />}
-                <Route path="/packages" element={<PackagesPage />} />
-                <Route path="/environments" element={<EnvironmentsPage />} />
-                <Route path="/models" element={<ModelsPage />} />
-                <Route path="/services" element={<ServicesPage />} />
-                <Route path="/communications" element={<CommunicationsPage />} />
-                {user.role === 'admin' && <Route path="/users" element={<UsersPage />} />}
-                {user.role === 'admin' && <Route path="/audit" element={<AuditPage />} />}
-                {user.role === 'admin' && <Route path="/operations" element={<OperationsPage />} />}
-                {user.role === 'admin' && <Route path="/notifications" element={<NotificationsPage />} />}
-                <Route path="*" element={<Navigate to={user.role === 'admin' ? '/dashboard' : '/packages'} replace />} />
+                <Route path="/dashboard" element={can('dashboard.read') ? <DashboardPage /> : <ForbiddenPage />} />
+                <Route path="/packages" element={can('package.read') ? <PackagesPage /> : <ForbiddenPage />} />
+                <Route path="/environments" element={can('environment.read') ? <EnvironmentsPage /> : <ForbiddenPage />} />
+                <Route path="/models" element={can('model.read') ? <ModelsPage /> : <ForbiddenPage />} />
+                <Route path="/services" element={can('service.read') ? <ServicesPage /> : <ForbiddenPage />} />
+                <Route path="/communications" element={can('communication.read') ? <CommunicationsPage /> : <ForbiddenPage />} />
+                <Route path="/users" element={can('account.read') ? <UsersPage /> : <ForbiddenPage />} />
+				<Route path="/roles" element={can('role.read') ? <RolesPage /> : <ForbiddenPage />} />
+                <Route path="/audit" element={can('audit.read') ? <AuditPage /> : <ForbiddenPage />} />
+                <Route path="/operations" element={can('operation.read') ? <OperationsPage /> : <ForbiddenPage />} />
+                <Route path="/notifications" element={can('notification.read') ? <NotificationsPage /> : <ForbiddenPage />} />
+                <Route path="/forbidden" element={<ForbiddenPage />} />
+                <Route path="*" element={<Navigate to={firstAllowedPath(user)} replace />} />
                 </Routes>
               </Suspense>
             </ModelUploadProvider>

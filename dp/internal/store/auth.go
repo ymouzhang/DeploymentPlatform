@@ -40,6 +40,15 @@ func (s *Store) InitializeAdmin(ctx context.Context, id, username, passwordHash 
 }
 
 func (s *Store) CreateUser(ctx context.Context, user domain.User) (domain.User, error) {
+	if user.Role == "" {
+		user.Role = domain.RoleUser
+		for _, role := range user.Roles {
+			if role.Key == access.RoleSuperAdmin || role.Key == access.RolePlatformAdmin {
+				user.Role = domain.RoleAdmin
+				break
+			}
+		}
+	}
 	now := time.Now().UTC()
 	user.ID = NewID()
 	user.CreatedAt, user.UpdatedAt = now, now

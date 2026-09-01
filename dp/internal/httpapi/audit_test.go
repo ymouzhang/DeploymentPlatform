@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/audit"
 	"DP/internal/domain"
 	"DP/internal/store"
@@ -70,11 +71,12 @@ func TestAuditSourceIPOnlyTrustsConfiguredProxy(t *testing.T) {
 
 func TestAuditEndpointRejectsOrdinaryUser(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/audit-events", nil)
-	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, domain.User{Role: domain.RoleUser}))
+	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, domain.User{Permissions: access.Grants{}}))
 	request = request.WithContext(context.WithValue(request.Context(), requestIDKey, "request-2"))
 	recorder := httptest.NewRecorder()
 	api := &API{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	api.listAuditEvents(recorder, request)
+	handler := api.requirePermission(access.AuditRead, http.HandlerFunc(api.listAuditEvents))
+	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}

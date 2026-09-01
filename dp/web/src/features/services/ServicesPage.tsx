@@ -30,7 +30,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../../api/client'
-import type { Service, ServiceConfigPreview, ServiceConfigRevision } from '../../types'
+import type { Permission, Service, ServiceConfigPreview, ServiceConfigRevision } from '../../types'
 import { OperationModal } from '../operations/OperationModal'
 import { ServiceLogModal } from './ServiceLogModal'
 import { useAuth } from '../../app/AuthContext'
@@ -45,7 +45,7 @@ const ConfigDiffEditor = lazy(() => import('./JsonEditor').then((module) => ({ d
 export function ServicesPage() {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
-  const { ownerId, user, users } = useAuth()
+  const { ownerId, user, users, can, hasAll } = useAuth()
   const [search] = useSearchParams()
   const highlightedEnvironmentId = search.get('environment_id')
   const [operationId, setOperationId] = useState<string | null>(null)
@@ -196,7 +196,7 @@ export function ServicesPage() {
   const commitConfig = () => {
     if (!configEnvironment || !configPreview) return
     const save = () => saveConfigMutation.mutate({ environmentId: configEnvironment.id, content: configPreview.proposed_content }, { onSuccess: () => setConfigPreview(undefined) })
-    if (user.role === 'admin' && configEnvironment.owner_id !== user.id) {
+    if (hasAll('service.config.write') && configEnvironment.owner_id !== user.id) {
       const owner = users.find((item) => item.id === configEnvironment.owner_id)?.username ?? configEnvironment.owner_id
       modal.confirm({ title: `修改 ${owner} 的服务配置？`, content: `目标环境：${configEnvironment.name}（${configEnvironment.ip}）。保存后配置归属不变，并记录高风险审计。`, okText: '确认保存', onOk: save })
       return
@@ -298,7 +298,7 @@ export function ServicesPage() {
             <Tooltip title={healthTooltip(record.health)}>
               {healthTag(record)}
             </Tooltip>
-            {record.environment.installed && (
+            {record.environment.installed && can('service.health', record.environment.owner_id) && (
               <Tooltip title="立即检查">
                 <Button
                   type="text"
@@ -322,24 +322,24 @@ export function ServicesPage() {
           const pending = actionMutation.isPending && actionMutation.variables?.id === environment.id
           const execute = (action: 'install' | 'start' | 'stop') => {
             const run = () => actionMutation.mutate({ id: environment.id, action })
-            if (user.role === 'admin' && environment.owner_id !== user.id) {
+            if (hasAll(serviceActionPermission(action)) && environment.owner_id !== user.id) {
               const owner = users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id
               modal.confirm({ title: `${action === 'install' ? '安装' : action === 'start' ? '启动' : '停止'}其他账号的服务？`, content: `目标：${environment.name}（所属账号：${owner}）。操作将记录高风险审计。`, okText: '确认执行', onOk: run })
             } else run()
           }
           return (
             <div className="row-actions">
-              <Button
+              {can('service.config.read', environment.owner_id) && <Button
                 size="small"
                 icon={<CodeOutlined />}
                 disabled={busy || !packageTypes.has(`${environment.owner_id}:${environment.service_type}`)}
                 onClick={() => void openConfig(record)}
               >
                 配置
-              </Button>
+              </Button>}
               {environment.installed ? (
                 <>
-                  <Button
+                  {can('service.start', environment.owner_id) && <Button
                     size="small"
                     type="primary"
                     ghost
@@ -349,8 +349,8 @@ export function ServicesPage() {
                     onClick={() => execute('start')}
                   >
                     启动
-                  </Button>
-                  <Button
+                  </Button>}
+                  {can('service.stop', environment.owner_id) && <Button
                     size="small"
                     danger
                     type="text"
@@ -360,8 +360,8 @@ export function ServicesPage() {
                     onClick={() => execute('stop')}
                   >
                     停止
-                  </Button>
-                  <Tooltip title={record.health.status === 'ok' ? undefined : '服务未运行'}>
+                  </Button>}
+                  {can('service.log.read', environment.owner_id) && <Tooltip title={record.health.status === 'ok' ? undefined : '服务未运行'}>
                     <span>
                       <Button
                         size="small"
@@ -373,10 +373,10 @@ export function ServicesPage() {
                         日志
                       </Button>
                     </span>
-                  </Tooltip>
+                  </Tooltip>}
                 </>
               ) : (
-                <Button
+                can('service.install', environment.owner_id) && <Button
                   size="small"
                   type="primary"
                   disabled={busy || !packageTypes.has(`${environment.owner_id}:${environment.service_type}`)}
@@ -386,7 +386,7 @@ export function ServicesPage() {
                   安装
                 </Button>
               )}
-              <Button
+              {can('service.reset', environment.owner_id) && <Button
                 size="small"
                 type="text"
                 icon={<RollbackOutlined />}
@@ -397,14 +397,14 @@ export function ServicesPage() {
                     title: `重置 ${environment.name}？`,
                     content: environment.installed ? (
                       <div className="reset-confirm">
-                        {user.role === 'admin' && environment.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id}</strong></p>}
+                        {hasAll('service.reset') && environment.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id}</strong></p>}
                         <p>如果服务最近没有成功停止，系统会先执行 stop.sh。</p>
                         <p>重置后服务变为“未安装”，可修改 IP、服务类型或安装目录并重新安装。</p>
                         <p>远端安装目录和业务文件不会被删除。</p>
                       </div>
                     ) : (
                       <div className="reset-confirm">
-                        {user.role === 'admin' && environment.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id}</strong></p>}
+                        {hasAll('service.reset') && environment.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id}</strong></p>}
                         <p>将尝试停止远端服务并清理安装标记，可用于强制停止安装失败后反复重启的服务。</p>
                         <p>远端安装目录和业务文件不会被删除。</p>
                       </div>
@@ -421,7 +421,7 @@ export function ServicesPage() {
                 }}
               >
                 重置
-              </Button>
+              </Button>}
             </div>
           )
         },
@@ -432,6 +432,8 @@ export function ServicesPage() {
       actionMutation.variables,
       healthMutation.isPending,
       healthMutation.variables,
+	  can,
+	  hasAll,
       modal,
       packageTypes,
       user.id,
@@ -660,6 +662,12 @@ function healthTag(record: Service) {
     default:
       return <Tag>状态未知</Tag>
   }
+}
+
+function serviceActionPermission(action: 'install' | 'start' | 'stop'): Permission {
+	if (action === 'install') return 'service.install'
+	if (action === 'start') return 'service.start'
+	return 'service.stop'
 }
 
 function healthTooltip(health: Service['health']) {

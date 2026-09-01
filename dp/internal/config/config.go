@@ -35,6 +35,7 @@ const (
 type Config struct {
 	ListenAddr                string
 	DataDir                   string
+	DatabaseURL               string
 	MasterKey                 []byte
 	HealthInterval            time.Duration
 	UploadTimeout             time.Duration
@@ -61,6 +62,10 @@ func Load() (Config, error) {
 	var cfg Config
 	cfg.ListenAddr = envOr("DP_LISTEN_ADDR", defaultListenAddr)
 	cfg.DataDir = envOr("DP_DATA_DIR", defaultDataDir)
+	cfg.DatabaseURL = strings.TrimSpace(os.Getenv("DP_DATABASE_URL"))
+	if cfg.DatabaseURL == "" {
+		return Config{}, errors.New("DP_DATABASE_URL is required")
+	}
 
 	keyText := strings.TrimSpace(os.Getenv("DP_MASTER_KEY"))
 	if keyText == "" {

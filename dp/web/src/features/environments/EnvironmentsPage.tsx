@@ -64,7 +64,11 @@ const stageLabels: Record<ValidationStage['name'], string> = {
 export function EnvironmentsPage() {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
-  const { ownerId, user, users } = useAuth()
+  const { ownerId, user, users, hasAll } = useAuth()
+	const environmentReadAll = hasAll('environment.read')
+	const environmentWriteAll = hasAll('environment.write')
+	const tagReadAll = hasAll('tag.read')
+	const tagWriteAll = hasAll('tag.write')
   const [search] = useSearchParams()
   const [form] = Form.useForm<EnvironmentInput>()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -83,8 +87,8 @@ export function EnvironmentsPage() {
     queryFn: () => api.listEnvironments(ownerId, tagFilter),
   })
   const tagsQuery = useQuery({ queryKey: ['tags', ownerId], queryFn: () => api.listTags(ownerId) })
-  const allTagsQuery = useQuery({ queryKey: ['tags', 'all'], queryFn: () => api.listTags(), enabled: user.role === 'admin' })
-  const tagCatalog = user.role === 'admin' ? (allTagsQuery.data ?? []) : (tagsQuery.data ?? [])
+  const allTagsQuery = useQuery({ queryKey: ['tags', 'all'], queryFn: () => api.listTags(), enabled: tagReadAll })
+  const tagCatalog = tagReadAll ? (allTagsQuery.data ?? []) : (tagsQuery.data ?? [])
   useEffect(() => {
     if (!tagsQuery.data) return
     const allowed = new Set(tagsQuery.data.map((tag) => tag.id))
@@ -94,12 +98,12 @@ export function EnvironmentsPage() {
     queryKey: ['service-types', ownerId],
     queryFn: () => api.listServiceTypes(ownerId),
   })
-  const createServiceTypesQuery = useQuery({ queryKey: ['service-types', createOwner], queryFn: () => api.listServiceTypes(createOwner), enabled: user.role === 'admin' && Boolean(createOwner) })
+  const createServiceTypesQuery = useQuery({ queryKey: ['service-types', createOwner], queryFn: () => api.listServiceTypes(createOwner), enabled: environmentWriteAll && Boolean(createOwner) })
 
   const saveMutation = useMutation({
     mutationFn: async (values: EnvironmentInput) => {
       if (editing) return api.updateEnvironment(editing.id, values)
-      return api.createEnvironment(values, user.role === 'admin' ? createOwner : undefined)
+      return api.createEnvironment(values, environmentWriteAll ? createOwner : undefined)
     },
     onSuccess: () => {
       message.success(editing ? '环境信息已更新' : '环境已创建')
@@ -147,7 +151,7 @@ export function EnvironmentsPage() {
   })
 
   const saveTagMutation = useMutation({
-    mutationFn: (values: { group_name: string; value: string }) => editingTag ? api.updateTag(editingTag.id, values) : api.createTag(values, user.role === 'admin' ? tagOwner : undefined),
+    mutationFn: (values: { group_name: string; value: string }) => editingTag ? api.updateTag(editingTag.id, values) : api.createTag(values, tagWriteAll ? tagOwner : undefined),
     onSuccess: () => {
       message.success(editingTag ? '标签已更新' : '标签已创建')
       setEditingTag(undefined)
@@ -175,7 +179,7 @@ export function EnvironmentsPage() {
     setCreateOwner(suggestedOwner)
     form.setFieldsValue({
       ...defaults,
-      service_type: (user.role === 'admin' ? (suggestedOwner === createOwner ? createServiceTypesQuery.data : undefined) : serviceTypesQuery.data)?.[0]?.name ?? '',
+      service_type: (environmentWriteAll ? (suggestedOwner === createOwner ? createServiceTypesQuery.data : undefined) : serviceTypesQuery.data)?.[0]?.name ?? '',
       tag_ids: [],
     })
     setDrawerOpen(true)
@@ -465,7 +469,7 @@ export function EnvironmentsPage() {
         }
       >
         <Form form={form} layout="vertical" initialValues={defaults} requiredMark="optional">
-          {!editing && user.role === 'admin' && <Form.Item label="所属账号" extra="新环境及其服务配置将归所选账号管理。"><Select value={createOwner} options={users.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.username }))} onChange={(value) => { setCreateOwner(value); form.setFieldValue('service_type', undefined); form.setFieldValue('tag_ids', []) }} /></Form.Item>}
+          {!editing && environmentWriteAll && <Form.Item label="所属账号" extra="新环境及其服务配置将归所选账号管理。"><Select value={createOwner} options={users.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.username }))} onChange={(value) => { setCreateOwner(value); form.setFieldValue('service_type', undefined); form.setFieldValue('tag_ids', []) }} /></Form.Item>}
           <Form.Item
             name="name"
             label="环境名称"
@@ -484,8 +488,8 @@ export function EnvironmentsPage() {
             <Form.Item name="service_type" label="服务类型" rules={[{ required: true }]}>
               <Select
                 placeholder="请先上传对应类型的安装包"
-                loading={editing || user.role !== 'admin' ? serviceTypesQuery.isLoading : createServiceTypesQuery.isLoading}
-                options={((editing || user.role !== 'admin' ? serviceTypesQuery.data : createServiceTypesQuery.data) ?? []).map((item) => ({
+                loading={editing || !environmentWriteAll ? serviceTypesQuery.isLoading : createServiceTypesQuery.isLoading}
+                options={((editing || !environmentWriteAll ? serviceTypesQuery.data : createServiceTypesQuery.data) ?? []).map((item) => ({
                   value: item.name,
                   label: item.display_name,
                 }))}
@@ -538,12 +542,12 @@ export function EnvironmentsPage() {
       <Modal title="标签管理" width={820} open={tagManagerOpen} onCancel={() => { setTagManagerOpen(false); setEditingTag(undefined); tagForm.resetFields() }} footer={null} destroyOnHidden>
         <Typography.Paragraph type="secondary">标签按账号隔离，以“分组 / 值”组织环境和服务。删除标签只解除关联。</Typography.Paragraph>
         <Form form={tagForm} layout="inline" onFinish={(values) => saveTagMutation.mutate(values)} style={{ marginBottom: 18 }}>
-          {!editingTag && user.role === 'admin' && <Form.Item><Select style={{ width: 150 }} value={tagOwner} onChange={setTagOwner} options={users.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.username }))} /></Form.Item>}
+          {!editingTag && tagWriteAll && <Form.Item><Select style={{ width: 150 }} value={tagOwner} onChange={setTagOwner} options={users.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.username }))} /></Form.Item>}
           <Form.Item name="group_name" rules={[{ required: true, message: '请输入分组' }]}><Input maxLength={32} placeholder="分组，如环境阶段" /></Form.Item>
           <Form.Item name="value" rules={[{ required: true, message: '请输入标签值' }]}><Input maxLength={32} placeholder="值，如生产" /></Form.Item>
           <Form.Item><Space><Button type="primary" htmlType="submit" loading={saveTagMutation.isPending}>{editingTag ? '保存修改' : '新增标签'}</Button>{editingTag && <Button onClick={() => { setEditingTag(undefined); tagForm.resetFields() }}>取消编辑</Button>}</Space></Form.Item>
         </Form>
-        <Table<ResourceTag> rowKey="id" size="small" pagination={modalTablePagination} scroll={{ x: 720 }} dataSource={tagCatalog.filter((tag) => user.role !== 'admin' || !ownerId || tag.owner_id === ownerId)} columns={[
+        <Table<ResourceTag> rowKey="id" size="small" pagination={modalTablePagination} scroll={{ x: 720 }} dataSource={tagCatalog.filter((tag) => !tagReadAll || !ownerId || tag.owner_id === ownerId)} columns={[
           { title: '所属账号', dataIndex: 'owner_username', width: 130, render: (value, item) => value || users.find((userItem) => userItem.id === item.owner_id)?.username || item.owner_id },
           { title: '分组', dataIndex: 'group_name', width: 160, ellipsis: true },
           { title: '值', dataIndex: 'value', width: 170, ellipsis: true },

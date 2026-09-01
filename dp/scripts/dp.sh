@@ -33,10 +33,15 @@ initialize() {
     exit 1
   fi
 
-  local master_key admin_password current_uid current_gid
+	local master_key admin_password postgres_password current_uid current_gid
   admin_password="$(head -c 18 /dev/urandom | base64 | tr -d '\n')"
+	postgres_password="$(head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')"
   if [[ -f .env ]]; then
-    if ! grep -q '^DP_ADMIN_USERNAME=' .env || ! grep -q '^DP_ADMIN_PASSWORD=' .env; then
+	if ! grep -q '^DP_POSTGRES_PASSWORD=' .env; then
+	  echo "现有 .env 缺少 DP_POSTGRES_PASSWORD；本版本不兼容 SQLite 配置，请先按 .env.example 迁移配置。" >&2
+	  exit 1
+	fi
+	if ! grep -q '^DP_ADMIN_USERNAME=' .env || ! grep -q '^DP_ADMIN_PASSWORD=' .env; then
       umask 077
       {
         echo
@@ -69,6 +74,7 @@ initialize() {
   sed \
     -e "s|^DP_MASTER_KEY=.*$|DP_MASTER_KEY=${master_key}|" \
     -e "s|^DP_ADMIN_PASSWORD=.*$|DP_ADMIN_PASSWORD=${admin_password}|" \
+	-e "s|^DP_POSTGRES_PASSWORD=.*$|DP_POSTGRES_PASSWORD=${postgres_password}|" \
     -e "s|^DP_UID=.*$|DP_UID=${current_uid}|" \
     -e "s|^DP_GID=.*$|DP_GID=${current_gid}|" \
     .env.example > .env
@@ -77,16 +83,20 @@ initialize() {
   echo "初始密码：${admin_password}"
 }
 
-load_offline_image() {
+load_offline_images() {
   if [[ -f dp-image.tar.gz ]]; then
-    echo "正在加载离线镜像..."
+	echo "正在加载 DP 离线镜像..."
     gzip -dc dp-image.tar.gz | docker image load
   fi
+	if [[ -f postgres-image.tar.gz ]]; then
+	  echo "正在加载 PostgreSQL 离线镜像..."
+	  gzip -dc postgres-image.tar.gz | docker image load
+	fi
 }
 
 start() {
   initialize
-  load_offline_image
+	load_offline_images
   if [[ -f Dockerfile ]]; then
     compose up -d --build
   else

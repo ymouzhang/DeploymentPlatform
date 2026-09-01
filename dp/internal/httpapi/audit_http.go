@@ -93,7 +93,7 @@ func (a *API) auditMiddleware(next http.Handler) http.Handler {
 		}
 		event := domain.AuditEvent{
 			Category: category, Action: firstNonEmpty(metadata.action, action), Outcome: outcome,
-			ActorUserID: actor.ID, ActorUsername: username, ActorRole: string(actor.Role),
+			ActorUserID: actor.ID, ActorUsername: username, ActorRoles: roleKeys(actor),
 			OwnerID: ownerID, OwnerUsername: ownerUsername,
 			TargetType: metadata.targetType, TargetID: metadata.targetID,
 			TargetLabel: metadata.targetLabel, RequestID: requestID(ctx),
@@ -286,10 +286,6 @@ func parseAddress(value string) netip.Addr {
 }
 
 func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	filter, err := parseAuditFilter(r, true)
 	if err != nil {
 		a.writeError(w, r, err)
@@ -310,10 +306,6 @@ func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) auditSummary(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	filter, err := parseAuditFilter(r, false)
 	if err != nil {
 		a.writeError(w, r, err)
@@ -328,10 +320,6 @@ func (a *API) auditSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getAuditEvent(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	event, err := a.store.GetAuditEvent(r.Context(), r.PathValue("id"))
 	if err != nil {
 		a.writeError(w, r, err)
@@ -342,10 +330,6 @@ func (a *API) getAuditEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) exportAuditEvents(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	filter, err := parseAuditFilter(r, false)
 	if err != nil {
 		a.writeError(w, r, err)

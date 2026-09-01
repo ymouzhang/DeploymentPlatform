@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/application"
 	"DP/internal/domain"
 	"DP/internal/store"
@@ -73,33 +74,34 @@ func TestEnvironmentAuthorizationHidesOtherOwners(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := &API{store: db}
+	other.Permissions = access.Grants{access.ServiceRead: access.ScopeOwn}
 	request := httptest.NewRequest("GET", "/api/v1/services/"+env.ID+"/config", nil)
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, other))
-	if _, err := api.authorizeEnvironment(request, env.ID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross-owner error=%v", err)
 	}
 	admin := other
-	admin.Role = domain.RoleAdmin
+	admin.Permissions = access.Grants{access.ServiceRead: access.ScopeAll}
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, admin))
-	if _, err := api.authorizeEnvironment(request, env.ID); err != nil {
+	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); err != nil {
 		t.Fatalf("admin access: %v", err)
 	}
 }
 
 func TestPackageOwnerScopeAllowsOrdinaryUserOwnID(t *testing.T) {
-	user := domain.User{ID: "user-1", Role: domain.RoleUser}
+	user := domain.User{ID: "user-1", Permissions: access.Grants{access.PackageRead: access.ScopeOwn}}
 	api := &API{}
 
 	ownRequest := httptest.NewRequest("GET", "/api/v1/service-types/demo/package?owner_id=user-1", nil)
 	ownRequest = ownRequest.WithContext(context.WithValue(ownRequest.Context(), authContextKey{}, user))
-	ownerID, err := api.packageOwnerScope(ownRequest)
+	ownerID, err := api.packageOwnerScope(ownRequest, access.PackageRead)
 	if err != nil || ownerID != user.ID {
 		t.Fatalf("own owner scope=%q err=%v", ownerID, err)
 	}
 
 	otherRequest := httptest.NewRequest("GET", "/api/v1/service-types/demo/package?owner_id=user-2", nil)
 	otherRequest = otherRequest.WithContext(context.WithValue(otherRequest.Context(), authContextKey{}, user))
-	if _, err := api.packageOwnerScope(otherRequest); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := api.packageOwnerScope(otherRequest, access.PackageRead); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross-owner error=%v", err)
 	}
 }
@@ -124,13 +126,15 @@ func TestVisibleTagIDsRejectsCrossOwnerForOrdinaryUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := &API{store: db}
+	other.Permissions = access.Grants{access.EnvironmentRead: access.ScopeOwn}
+	owner.Permissions = access.Grants{access.EnvironmentRead: access.ScopeOwn}
 	request := httptest.NewRequest("GET", "/api/v1/environments?tag_id="+tag.ID, nil)
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, other))
-	if _, err := api.visibleTagIDs(request, other.ID); err == nil {
+	if _, err := api.visibleTagIDs(request, other.ID, access.EnvironmentRead); err == nil {
 		t.Fatal("expected cross-owner tag rejection")
 	}
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, owner))
-	ids, err := api.visibleTagIDs(request, owner.ID)
+	ids, err := api.visibleTagIDs(request, owner.ID, access.EnvironmentRead)
 	if err != nil || len(ids) != 1 || ids[0] != tag.ID {
 		t.Fatalf("ids=%v err=%v", ids, err)
 	}

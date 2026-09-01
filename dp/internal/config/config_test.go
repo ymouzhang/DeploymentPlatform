@@ -4,6 +4,7 @@ import "testing"
 
 func TestAuditConfigDefaultsAndTrustedProxyValidation(t *testing.T) {
 	t.Setenv("DP_MASTER_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv("DP_DATABASE_URL", "postgres://dp:test@localhost:5432/dp")
 	t.Setenv("DP_AUDIT_RETENTION_DAYS", "")
 	t.Setenv("DP_AUDIT_EXPORT_MAX_ROWS", "")
 	t.Setenv("DP_TRUSTED_PROXY_CIDRS", "10.0.0.0/8,192.168.1.0/24")
@@ -22,6 +23,7 @@ func TestAuditConfigDefaultsAndTrustedProxyValidation(t *testing.T) {
 
 func TestModelConfigValidation(t *testing.T) {
 	t.Setenv("DP_MASTER_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv("DP_DATABASE_URL", "postgres://dp:test@localhost:5432/dp")
 	t.Setenv("DP_MODEL_UPLOAD_MAX_BYTES", "1024")
 	t.Setenv("DP_MODEL_UPLOAD_CHUNK_BYTES", "2048")
 	if _, err := Load(); err == nil {
@@ -31,5 +33,13 @@ func TestModelConfigValidation(t *testing.T) {
 	t.Setenv("DP_MODEL_TASK_CONCURRENCY", "0")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected invalid task concurrency")
+	}
+}
+
+func TestDatabaseURLIsRequired(t *testing.T) {
+	t.Setenv("DP_MASTER_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv("DP_DATABASE_URL", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected missing database URL to fail")
 	}
 }

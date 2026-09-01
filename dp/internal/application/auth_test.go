@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 	"DP/internal/store"
 )
@@ -29,14 +30,14 @@ func TestAuthLifecycle(t *testing.T) {
 	if got, err := auth.Authenticate(ctx, token); err != nil || got.ID != admin.ID {
 		t.Fatalf("authenticate: user=%+v err=%v", got, err)
 	}
-	user, err := auth.CreateUser(ctx, "operator", "operator-password", domain.RoleUser)
+	user, err := auth.CreateUser(ctx, "operator", "operator-password", []access.RoleRef{{ID: "operator", Key: access.RoleOperator}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !user.MustChangePassword {
 		t.Fatal("new ordinary account must require a first-login password change")
 	}
-	createdAdmin, err := auth.CreateUser(ctx, "second-admin", "second-admin-password", domain.RoleAdmin)
+	createdAdmin, err := auth.CreateUser(ctx, "second-admin", "second-admin-password", []access.RoleRef{{ID: "platform-admin", Key: access.RolePlatformAdmin}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestForcedPasswordChangeAndPreciseSessionRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := auth.CreateUser(ctx, "operator", "operator-password", domain.RoleUser)
+	user, err := auth.CreateUser(ctx, "operator", "operator-password", []access.RoleRef{{ID: "operator", Key: access.RoleOperator}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 
 	"golang.org/x/crypto/bcrypt"
@@ -219,11 +220,22 @@ func (s *AuthService) RevokeUserSession(ctx context.Context, actor domain.User, 
 	return s.store.DeleteUserSessionByID(ctx, userID, sessionID)
 }
 
-func (s *AuthService) CreateUser(ctx context.Context, username, password string, role domain.UserRole) (domain.User, error) {
-	return s.CreateUserBy(ctx, "", username, password, role)
+func (s *AuthService) CreateUser(
+	ctx context.Context,
+	username string,
+	password string,
+	roles []access.RoleRef,
+) (domain.User, error) {
+	return s.CreateUserBy(ctx, "", username, password, roles)
 }
 
-func (s *AuthService) CreateUserBy(ctx context.Context, creatorID, username, password string, role domain.UserRole) (domain.User, error) {
+func (s *AuthService) CreateUserBy(
+	ctx context.Context,
+	creatorID string,
+	username string,
+	password string,
+	roles []access.RoleRef,
+) (domain.User, error) {
 	var err error
 	username, err = normalizeUsername(username)
 	if err != nil {
@@ -232,15 +244,26 @@ func (s *AuthService) CreateUserBy(ctx context.Context, creatorID, username, pas
 	if err := validatePassword(password); err != nil {
 		return domain.User{}, err
 	}
-	if role != domain.RoleAdmin && role != domain.RoleUser {
-		return domain.User{}, domain.FieldError("role", "账号角色必须是 admin 或 user")
+	if len(roles) == 0 {
+		return domain.User{}, domain.FieldError("role_ids", "至少选择一个角色")
+	}
+	seen := make(map[string]struct{}, len(roles))
+	for _, role := range roles {
+		if strings.TrimSpace(role.ID) == "" {
+			return domain.User{}, domain.FieldError("role_ids", "角色 ID 不能为空")
+		}
+		if _, ok := seen[role.ID]; ok {
+			return domain.User{}, domain.FieldError("role_ids", "角色不能重复")
+		}
+		seen[role.ID] = struct{}{}
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return domain.User{}, err
 	}
 	user, err := s.store.CreateUser(ctx, domain.User{
-		Username: username, PasswordHash: string(hash), Role: role, Enabled: true, MustChangePassword: true, CreatedBy: creatorID,
+		Username: username, PasswordHash: string(hash), Roles: roles,
+		Enabled: true, MustChangePassword: true, CreatedBy: creatorID,
 	})
 	if errors.Is(err, domain.ErrConflict) {
 		return domain.User{}, &domain.AppError{Code: "USERNAME_CONFLICT", Message: "用户名已存在"}

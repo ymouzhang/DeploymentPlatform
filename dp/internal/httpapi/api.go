@@ -26,8 +26,38 @@ import (
 	modelmanager "DP/internal/model"
 	"DP/internal/operation"
 	"DP/internal/realtime"
-	"DP/internal/store"
 )
+
+type Repository interface {
+	AuditSummary(context.Context, domain.AuditFilter) (domain.AuditSummary, error)
+	CountAuditEvents(context.Context, domain.AuditFilter) (int, error)
+	CountOperationsByTags(context.Context, []string, time.Time) (int, int, error)
+	CreateResourceTag(context.Context, string, domain.ResourceTagInput) (domain.ResourceTag, error)
+	DashboardMetrics(context.Context, time.Time, time.Time) (domain.DashboardMetrics, error)
+	DeleteEnvironment(context.Context, string) ([]string, error)
+	DeleteResourceTag(context.Context, string) error
+	EnvironmentHasModels(context.Context, string) (bool, error)
+	GetAuditEvent(context.Context, string) (domain.AuditEvent, error)
+	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetModelUpload(context.Context, string) (domain.ModelUpload, error)
+	GetResourceTag(context.Context, string) (domain.ResourceTag, error)
+	GetUser(context.Context, string) (domain.User, error)
+	LatestOperations(context.Context) (map[string]domain.Operation, error)
+	ListAuditEvents(context.Context, domain.AuditFilter) ([]domain.AuditEvent, error)
+	ListEnvironments(context.Context) ([]domain.Environment, error)
+	ListNotifications(context.Context, domain.NotificationFilter) ([]domain.Notification, error)
+	ListOperations(context.Context, domain.OperationFilter) ([]domain.Operation, error)
+	ListPackagesByOwner(context.Context, string) ([]domain.Package, error)
+	ListResourceTags(context.Context, string) ([]domain.ResourceTag, error)
+	ListServicePorts(context.Context) (map[string]int, error)
+	MarkNotificationRead(context.Context, string, string, time.Time) (domain.Notification, error)
+	NotificationSummary(context.Context) (domain.NotificationSummary, error)
+	RecentNotifications(context.Context, int) ([]domain.Notification, error)
+	ReplaceEnvironmentTags(context.Context, string, []string) error
+	ResolveNotification(context.Context, string, string, time.Time) (domain.Notification, error)
+	UpdateResourceTag(context.Context, string, domain.ResourceTagInput) (domain.ResourceTag, error)
+	ValidateTagIDs(context.Context, string, []string) error
+}
 
 type API struct {
 	auth           *application.AuthService
@@ -42,7 +72,7 @@ type API struct {
 	operations     *operation.Manager
 	models         *modelmanager.Manager
 	health         *health.Monitor
-	store          *store.Store
+	store          Repository
 	audit          *audit.Service
 	uploadMax      int64
 	auditExportMax int
@@ -62,7 +92,7 @@ func New(
 	operations *operation.Manager,
 	models *modelmanager.Manager,
 	healthMonitor *health.Monitor,
-	store *store.Store,
+	store Repository,
 	auditService *audit.Service,
 	uploadMax int64,
 	auditExportMax int,
@@ -93,6 +123,9 @@ func New(
 
 func (a *API) Handler(frontend fs.FS) http.Handler {
 	mux := http.NewServeMux()
+	protected := func(pattern string, permission access.Permission, handler http.HandlerFunc) {
+		mux.Handle(pattern, a.requirePermission(permission, handler))
+	}
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("POST /api/v1/auth/login", a.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
@@ -100,89 +133,89 @@ func (a *API) Handler(frontend fs.FS) http.Handler {
 	mux.HandleFunc("PUT /api/v1/auth/password", a.changePassword)
 	mux.HandleFunc("GET /api/v1/auth/sessions", a.listOwnSessions)
 	mux.HandleFunc("DELETE /api/v1/auth/sessions/{sessionId}", a.revokeOwnSession)
-	mux.HandleFunc("GET /api/v1/users", a.listUsers)
-	mux.HandleFunc("POST /api/v1/users", a.createUser)
-	mux.HandleFunc("PUT /api/v1/users/{id}/password", a.resetUserPassword)
-	mux.HandleFunc("PUT /api/v1/users/{id}/status", a.updateUserStatus)
-	mux.HandleFunc("GET /api/v1/users/{id}", a.getUserDetail)
-	mux.HandleFunc("GET /api/v1/users/{id}/sessions", a.listUserSessions)
-	mux.HandleFunc("DELETE /api/v1/users/{id}/sessions/{sessionId}", a.revokeUserSession)
-	mux.HandleFunc("POST /api/v1/users/{id}/sessions/revoke", a.revokeUserSessions)
-	mux.HandleFunc("POST /api/v1/users/{id}/transfer", a.transferUserResources)
-	mux.HandleFunc("DELETE /api/v1/users/{id}", a.deleteUser)
-	mux.Handle("GET /api/v1/permissions", a.requirePermission(access.RoleRead, http.HandlerFunc(a.listPermissions)))
-	mux.Handle("GET /api/v1/roles", a.requirePermission(access.RoleRead, http.HandlerFunc(a.listRoles)))
-	mux.Handle("POST /api/v1/roles", a.requirePermission(access.RoleCreate, http.HandlerFunc(a.createRole)))
-	mux.Handle("GET /api/v1/roles/{id}", a.requirePermission(access.RoleRead, http.HandlerFunc(a.getRole)))
-	mux.Handle("PUT /api/v1/roles/{id}", a.requirePermission(access.RoleUpdate, http.HandlerFunc(a.updateRole)))
-	mux.Handle("DELETE /api/v1/roles/{id}", a.requirePermission(access.RoleDelete, http.HandlerFunc(a.deleteRole)))
-	mux.Handle("PUT /api/v1/users/{id}/roles", a.requirePermission(access.AccountAssignRoles, http.HandlerFunc(a.replaceUserRoles)))
-	mux.HandleFunc("GET /api/v1/service-types", a.serviceTypes)
-	mux.HandleFunc("GET /api/v1/packages", a.listPackages)
-	mux.HandleFunc("GET /api/v1/environments", a.listEnvironments)
-	mux.HandleFunc("POST /api/v1/environments", a.createEnvironment)
-	mux.HandleFunc("PUT /api/v1/environments/{id}", a.updateEnvironment)
-	mux.HandleFunc("DELETE /api/v1/environments/{id}", a.deleteEnvironment)
-	mux.HandleFunc("POST /api/v1/environments/validate", a.validateDraftEnvironment)
-	mux.HandleFunc("POST /api/v1/environments/{id}/validate", a.validateSavedEnvironment)
-	mux.HandleFunc("GET /api/v1/environments/export", a.exportEnvironments)
-	mux.HandleFunc("POST /api/v1/environments/import", a.importEnvironments)
-	mux.HandleFunc("PUT /api/v1/environments/{id}/tags", a.replaceEnvironmentTags)
-	mux.HandleFunc("GET /api/v1/tags", a.listResourceTags)
-	mux.HandleFunc("POST /api/v1/tags", a.createResourceTag)
-	mux.HandleFunc("PUT /api/v1/tags/{id}", a.updateResourceTag)
-	mux.HandleFunc("DELETE /api/v1/tags/{id}", a.deleteResourceTag)
-	mux.HandleFunc("GET /api/v1/service-types/{type}/package", a.getPackage)
-	mux.HandleFunc("PUT /api/v1/service-types/{type}/package", a.uploadPackage)
-	mux.HandleFunc("DELETE /api/v1/service-types/{type}/package", a.deletePackage)
-	mux.HandleFunc("GET /api/v1/service-types/{type}/package/versions", a.listPackageVersions)
-	mux.HandleFunc("PUT /api/v1/service-types/{type}/package/versions/{versionId}/current", a.activatePackageVersion)
-	mux.HandleFunc("DELETE /api/v1/service-types/{type}/package/versions/{versionId}", a.deletePackageVersion)
-	mux.HandleFunc("GET /api/v1/services", a.listServices)
-	mux.HandleFunc("GET /api/v1/services/{id}/config", a.getServiceConfig)
-	mux.HandleFunc("PUT /api/v1/services/{id}/config", a.updateServiceConfig)
-	mux.HandleFunc("POST /api/v1/services/{id}/config/preview", a.previewServiceConfig)
-	mux.HandleFunc("GET /api/v1/services/{id}/config/revisions", a.listServiceConfigRevisions)
-	mux.HandleFunc("GET /api/v1/services/{id}/config/revisions/{revisionId}", a.getServiceConfigRevision)
-	mux.HandleFunc("POST /api/v1/services/{id}/config/revisions/{revisionId}/rollback", a.rollbackServiceConfigRevision)
-	mux.HandleFunc("POST /api/v1/services/{id}/install", a.startAction(domain.ActionInstall))
-	mux.HandleFunc("POST /api/v1/services/{id}/start", a.startAction(domain.ActionStart))
-	mux.HandleFunc("POST /api/v1/services/{id}/stop", a.startAction(domain.ActionStop))
-	mux.HandleFunc("POST /api/v1/services/{id}/reset", a.startAction(domain.ActionReset))
-	mux.HandleFunc("POST /api/v1/services/{id}/health-check", a.checkHealth)
-	mux.HandleFunc("GET /api/v1/services/{id}/logs/stream", a.streamServiceLogs)
-	mux.HandleFunc("GET /api/v1/models", a.listModels)
-	mux.HandleFunc("GET /api/v1/models/{id}", a.getModel)
-	mux.HandleFunc("POST /api/v1/model-uploads", a.createModelUpload)
-	mux.HandleFunc("HEAD /api/v1/model-uploads/{id}", a.headModelUpload)
-	mux.HandleFunc("PATCH /api/v1/model-uploads/{id}", a.patchModelUpload)
-	mux.HandleFunc("POST /api/v1/model-uploads/{id}/complete", a.completeModelUpload)
-	mux.HandleFunc("DELETE /api/v1/model-uploads/{id}", a.cancelModelUpload)
-	mux.HandleFunc("POST /api/v1/models/{id}/retry", a.retryModel)
-	mux.HandleFunc("DELETE /api/v1/models/{id}", a.deleteModel)
-	mux.HandleFunc("GET /api/v1/model-tasks/{id}", a.getModelTask)
-	mux.HandleFunc("GET /api/v1/model-tasks/{id}/events", a.modelTaskEvents)
-	mux.HandleFunc("GET /api/v1/operations/{id}", a.getOperation)
-	mux.HandleFunc("GET /api/v1/operations/{id}/events", a.operationEvents)
-	mux.HandleFunc("GET /api/v1/operations", a.listOperations)
-	mux.HandleFunc("GET /api/v1/admin/dashboard", a.adminDashboard)
-	mux.HandleFunc("GET /api/v1/notifications/summary", a.notificationSummary)
-	mux.HandleFunc("GET /api/v1/notifications", a.listNotifications)
-	mux.HandleFunc("PUT /api/v1/notifications/{id}/read", a.markNotificationRead)
-	mux.HandleFunc("PUT /api/v1/notifications/{id}/resolve", a.resolveNotification)
-	mux.HandleFunc("GET /api/v1/communications/summary", a.communicationSummary)
+	protected("GET /api/v1/users", access.AccountRead, a.listUsers)
+	protected("POST /api/v1/users", access.AccountCreate, a.createUser)
+	protected("PUT /api/v1/users/{id}/password", access.AccountUpdate, a.resetUserPassword)
+	protected("PUT /api/v1/users/{id}/status", access.AccountUpdate, a.updateUserStatus)
+	protected("GET /api/v1/users/{id}", access.AccountRead, a.getUserDetail)
+	protected("GET /api/v1/users/{id}/sessions", access.AccountRead, a.listUserSessions)
+	protected("DELETE /api/v1/users/{id}/sessions/{sessionId}", access.AccountUpdate, a.revokeUserSession)
+	protected("POST /api/v1/users/{id}/sessions/revoke", access.AccountUpdate, a.revokeUserSessions)
+	protected("POST /api/v1/users/{id}/transfer", access.AccountTransfer, a.transferUserResources)
+	protected("DELETE /api/v1/users/{id}", access.AccountDelete, a.deleteUser)
+	protected("GET /api/v1/permissions", access.RoleRead, a.listPermissions)
+	protected("GET /api/v1/roles", access.RoleRead, a.listRoles)
+	protected("POST /api/v1/roles", access.RoleCreate, a.createRole)
+	protected("GET /api/v1/roles/{id}", access.RoleRead, a.getRole)
+	protected("PUT /api/v1/roles/{id}", access.RoleUpdate, a.updateRole)
+	protected("DELETE /api/v1/roles/{id}", access.RoleDelete, a.deleteRole)
+	protected("PUT /api/v1/users/{id}/roles", access.AccountAssignRoles, a.replaceUserRoles)
+	protected("GET /api/v1/service-types", access.PackageRead, a.serviceTypes)
+	protected("GET /api/v1/packages", access.PackageRead, a.listPackages)
+	protected("GET /api/v1/environments", access.EnvironmentRead, a.listEnvironments)
+	protected("POST /api/v1/environments", access.EnvironmentWrite, a.createEnvironment)
+	protected("PUT /api/v1/environments/{id}", access.EnvironmentWrite, a.updateEnvironment)
+	protected("DELETE /api/v1/environments/{id}", access.EnvironmentDelete, a.deleteEnvironment)
+	protected("POST /api/v1/environments/validate", access.EnvironmentValidate, a.validateDraftEnvironment)
+	protected("POST /api/v1/environments/{id}/validate", access.EnvironmentValidate, a.validateSavedEnvironment)
+	protected("GET /api/v1/environments/export", access.EnvironmentExport, a.exportEnvironments)
+	protected("POST /api/v1/environments/import", access.EnvironmentImport, a.importEnvironments)
+	protected("PUT /api/v1/environments/{id}/tags", access.TagWrite, a.replaceEnvironmentTags)
+	protected("GET /api/v1/tags", access.TagRead, a.listResourceTags)
+	protected("POST /api/v1/tags", access.TagWrite, a.createResourceTag)
+	protected("PUT /api/v1/tags/{id}", access.TagWrite, a.updateResourceTag)
+	protected("DELETE /api/v1/tags/{id}", access.TagWrite, a.deleteResourceTag)
+	protected("GET /api/v1/service-types/{type}/package", access.PackageRead, a.getPackage)
+	protected("PUT /api/v1/service-types/{type}/package", access.PackageWrite, a.uploadPackage)
+	protected("DELETE /api/v1/service-types/{type}/package", access.PackageDelete, a.deletePackage)
+	protected("GET /api/v1/service-types/{type}/package/versions", access.PackageRead, a.listPackageVersions)
+	protected("PUT /api/v1/service-types/{type}/package/versions/{versionId}/current", access.PackageWrite, a.activatePackageVersion)
+	protected("DELETE /api/v1/service-types/{type}/package/versions/{versionId}", access.PackageDelete, a.deletePackageVersion)
+	protected("GET /api/v1/services", access.ServiceRead, a.listServices)
+	protected("GET /api/v1/services/{id}/config", access.ServiceConfigRead, a.getServiceConfig)
+	protected("PUT /api/v1/services/{id}/config", access.ServiceConfigWrite, a.updateServiceConfig)
+	protected("POST /api/v1/services/{id}/config/preview", access.ServiceConfigWrite, a.previewServiceConfig)
+	protected("GET /api/v1/services/{id}/config/revisions", access.ServiceConfigRead, a.listServiceConfigRevisions)
+	protected("GET /api/v1/services/{id}/config/revisions/{revisionId}", access.ServiceConfigRead, a.getServiceConfigRevision)
+	protected("POST /api/v1/services/{id}/config/revisions/{revisionId}/rollback", access.ServiceConfigWrite, a.rollbackServiceConfigRevision)
+	protected("POST /api/v1/services/{id}/install", access.ServiceInstall, a.startAction(domain.ActionInstall))
+	protected("POST /api/v1/services/{id}/start", access.ServiceStart, a.startAction(domain.ActionStart))
+	protected("POST /api/v1/services/{id}/stop", access.ServiceStop, a.startAction(domain.ActionStop))
+	protected("POST /api/v1/services/{id}/reset", access.ServiceReset, a.startAction(domain.ActionReset))
+	protected("POST /api/v1/services/{id}/health-check", access.ServiceHealth, a.checkHealth)
+	protected("GET /api/v1/services/{id}/logs/stream", access.ServiceLogRead, a.streamServiceLogs)
+	protected("GET /api/v1/models", access.ModelRead, a.listModels)
+	protected("GET /api/v1/models/{id}", access.ModelRead, a.getModel)
+	protected("POST /api/v1/model-uploads", access.ModelUpload, a.createModelUpload)
+	protected("HEAD /api/v1/model-uploads/{id}", access.ModelUpload, a.headModelUpload)
+	protected("PATCH /api/v1/model-uploads/{id}", access.ModelUpload, a.patchModelUpload)
+	protected("POST /api/v1/model-uploads/{id}/complete", access.ModelUpload, a.completeModelUpload)
+	protected("DELETE /api/v1/model-uploads/{id}", access.ModelUpload, a.cancelModelUpload)
+	protected("POST /api/v1/models/{id}/retry", access.ModelUpload, a.retryModel)
+	protected("DELETE /api/v1/models/{id}", access.ModelDelete, a.deleteModel)
+	protected("GET /api/v1/model-tasks/{id}", access.ModelRead, a.getModelTask)
+	protected("GET /api/v1/model-tasks/{id}/events", access.ModelRead, a.modelTaskEvents)
+	protected("GET /api/v1/operations/{id}", access.OperationRead, a.getOperation)
+	protected("GET /api/v1/operations/{id}/events", access.OperationRead, a.operationEvents)
+	protected("GET /api/v1/operations", access.OperationRead, a.listOperations)
+	protected("GET /api/v1/admin/dashboard", access.DashboardRead, a.adminDashboard)
+	protected("GET /api/v1/notifications/summary", access.NotificationRead, a.notificationSummary)
+	protected("GET /api/v1/notifications", access.NotificationRead, a.listNotifications)
+	protected("PUT /api/v1/notifications/{id}/read", access.NotificationUpdate, a.markNotificationRead)
+	protected("PUT /api/v1/notifications/{id}/resolve", access.NotificationUpdate, a.resolveNotification)
+	protected("GET /api/v1/communications/summary", access.CommunicationRead, a.communicationSummary)
 	mux.HandleFunc("GET /api/v1/events", a.realtimeEvents)
-	mux.HandleFunc("GET /api/v1/communications", a.listCommunications)
-	mux.HandleFunc("POST /api/v1/communications", a.createCommunication)
-	mux.HandleFunc("GET /api/v1/communications/{id}", a.getCommunication)
-	mux.HandleFunc("PUT /api/v1/communications/{id}/read", a.markCommunicationRead)
-	mux.HandleFunc("POST /api/v1/communications/{id}/messages", a.sendCommunicationMessage)
-	mux.HandleFunc("POST /api/v1/communications/{id}/close", a.closeCommunication)
-	mux.HandleFunc("POST /api/v1/communications/{id}/reopen", a.reopenCommunication)
-	mux.HandleFunc("GET /api/v1/audit-events/summary", a.auditSummary)
-	mux.HandleFunc("GET /api/v1/audit-events/export", a.exportAuditEvents)
-	mux.HandleFunc("GET /api/v1/audit-events/{id}", a.getAuditEvent)
-	mux.HandleFunc("GET /api/v1/audit-events", a.listAuditEvents)
+	protected("GET /api/v1/communications", access.CommunicationRead, a.listCommunications)
+	protected("POST /api/v1/communications", access.CommunicationCreate, a.createCommunication)
+	protected("GET /api/v1/communications/{id}", access.CommunicationRead, a.getCommunication)
+	protected("PUT /api/v1/communications/{id}/read", access.CommunicationReply, a.markCommunicationRead)
+	protected("POST /api/v1/communications/{id}/messages", access.CommunicationReply, a.sendCommunicationMessage)
+	protected("POST /api/v1/communications/{id}/close", access.CommunicationManage, a.closeCommunication)
+	protected("POST /api/v1/communications/{id}/reopen", access.CommunicationManage, a.reopenCommunication)
+	protected("GET /api/v1/audit-events/summary", access.AuditRead, a.auditSummary)
+	protected("GET /api/v1/audit-events/export", access.AuditExport, a.exportAuditEvents)
+	protected("GET /api/v1/audit-events/{id}", access.AuditRead, a.getAuditEvent)
+	protected("GET /api/v1/audit-events", access.AuditRead, a.listAuditEvents)
 	mux.Handle("/", spaHandler(frontend))
 	return a.recoverMiddleware(a.requestMiddleware(a.originMiddleware(a.authMiddleware(a.auditMiddleware(mux)))))
 }
@@ -199,7 +232,7 @@ func (a *API) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) serviceTypes(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.listOwnerScope(r)
+	ownerID, err := a.listOwnerScope(r, access.PackageRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -220,7 +253,7 @@ func (a *API) serviceTypes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listPackages(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.listOwnerScope(r)
+	ownerID, err := a.listOwnerScope(r, access.PackageRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -234,12 +267,12 @@ func (a *API) listPackages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listEnvironments(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.listOwnerScope(r)
+	ownerID, err := a.listOwnerScope(r, access.EnvironmentRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	tagIDs, err := a.visibleTagIDs(r, ownerID)
+	tagIDs, err := a.visibleTagIDs(r, ownerID, access.EnvironmentRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -258,7 +291,7 @@ func (a *API) createEnvironment(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	ownerID, err := a.createOwnerScope(r)
+	ownerID, err := a.createOwnerScope(r, access.EnvironmentWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -277,7 +310,7 @@ func (a *API) createEnvironment(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	env, err := a.authorizeEnvironment(r, id)
+	env, err := a.authorizeEnvironment(r, id, access.EnvironmentDelete)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -312,7 +345,7 @@ func (a *API) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) updateEnvironment(w http.ResponseWriter, r *http.Request) {
-	original, err := a.authorizeEnvironment(r, r.PathValue("id"))
+	original, err := a.authorizeEnvironment(r, r.PathValue("id"), access.EnvironmentWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -362,7 +395,7 @@ func (a *API) validateDraftEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) validateSavedEnvironment(w http.ResponseWriter, r *http.Request) {
-	env, authorizeErr := a.authorizeEnvironment(r, r.PathValue("id"))
+	env, authorizeErr := a.authorizeEnvironment(r, r.PathValue("id"), access.EnvironmentValidate)
 	if authorizeErr != nil {
 		a.writeError(w, r, authorizeErr)
 		return
@@ -385,7 +418,7 @@ func (a *API) validateSavedEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) exportEnvironments(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.packageOwnerScope(r)
+	ownerID, err := a.packageOwnerScope(r, access.EnvironmentExport)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -422,7 +455,7 @@ func (a *API) importEnvironments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getPackage(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.packageOwnerScope(r)
+	ownerID, err := a.packageOwnerScope(r, access.PackageRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -436,7 +469,7 @@ func (a *API) getPackage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) uploadPackage(w http.ResponseWriter, r *http.Request) {
-	ownerID, scopeErr := a.packageOwnerScope(r)
+	ownerID, scopeErr := a.packageOwnerScope(r, access.PackageWrite)
 	if scopeErr != nil {
 		a.writeError(w, r, scopeErr)
 		return
@@ -534,7 +567,7 @@ func (a *API) uploadPackage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listPackageVersions(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.packageOwnerScope(r)
+	ownerID, err := a.packageOwnerScope(r, access.PackageRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -548,7 +581,7 @@ func (a *API) listPackageVersions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) activatePackageVersion(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.packageOwnerScope(r)
+	ownerID, err := a.packageOwnerScope(r, access.PackageWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -564,7 +597,7 @@ func (a *API) activatePackageVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deletePackageVersion(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.packageOwnerScope(r)
+	ownerID, err := a.packageOwnerScope(r, access.PackageDelete)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -580,7 +613,7 @@ func (a *API) deletePackageVersion(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deletePackage(w http.ResponseWriter, r *http.Request) {
 	serviceType := r.PathValue("type")
-	ownerID, err := a.packageOwnerScope(r)
+	ownerID, err := a.packageOwnerScope(r, access.PackageDelete)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -596,12 +629,12 @@ func (a *API) deletePackage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listServices(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.listOwnerScope(r)
+	ownerID, err := a.listOwnerScope(r, access.ServiceRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	tagIDs, err := a.visibleTagIDs(r, ownerID)
+	tagIDs, err := a.visibleTagIDs(r, ownerID, access.ServiceRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -656,7 +689,7 @@ func (a *API) listServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getServiceConfig(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id")); err != nil {
+	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -669,7 +702,7 @@ func (a *API) getServiceConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) updateServiceConfig(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"))
+	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -694,7 +727,7 @@ func (a *API) updateServiceConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) previewServiceConfig(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id")); err != nil {
+	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigWrite); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -714,7 +747,7 @@ func (a *API) previewServiceConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listServiceConfigRevisions(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id")); err != nil {
+	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -727,7 +760,7 @@ func (a *API) listServiceConfigRevisions(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *API) getServiceConfigRevision(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id")); err != nil {
+	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -740,7 +773,7 @@ func (a *API) getServiceConfigRevision(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) rollbackServiceConfigRevision(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"))
+	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -758,7 +791,7 @@ func (a *API) rollbackServiceConfigRevision(w http.ResponseWriter, r *http.Reque
 
 func (a *API) startAction(action domain.OperationAction) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		env, err := a.authorizeEnvironment(r, r.PathValue("id"))
+		env, err := a.authorizeEnvironment(r, r.PathValue("id"), serviceActionPermission(action))
 		if err != nil {
 			a.writeError(w, r, err)
 			return
@@ -768,7 +801,7 @@ func (a *API) startAction(action domain.OperationAction) http.HandlerFunc {
 		event := domain.AuditEvent{
 			Category: "service", Action: "service." + string(action) + ".requested", Outcome: "success",
 			ActorUserID: currentUser(r).ID, ActorUsername: currentUser(r).Username,
-			ActorRole: string(currentUser(r).Role), OwnerID: owner.ID, OwnerUsername: owner.Username,
+			ActorRoles: roleKeys(currentUser(r)), OwnerID: owner.ID, OwnerUsername: owner.Username,
 			TargetType: "service", TargetID: env.ID, TargetLabel: env.Name,
 			RequestID: requestID(r.Context()), SourceIP: a.sourceIP(r), UserAgent: r.UserAgent(),
 			Changes: map[string]any{"ip": env.IP, "service_type": env.ServiceType},
@@ -784,8 +817,23 @@ func (a *API) startAction(action domain.OperationAction) http.HandlerFunc {
 	}
 }
 
+func serviceActionPermission(action domain.OperationAction) access.Permission {
+	switch action {
+	case domain.ActionInstall:
+		return access.ServiceInstall
+	case domain.ActionStart:
+		return access.ServiceStart
+	case domain.ActionStop:
+		return access.ServiceStop
+	case domain.ActionReset:
+		return access.ServiceReset
+	default:
+		return ""
+	}
+}
+
 func (a *API) checkHealth(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"))
+	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceHealth)
 	if err != nil {
 		a.writeError(w, r, err)
 		return

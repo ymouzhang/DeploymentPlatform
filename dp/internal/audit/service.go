@@ -11,11 +11,26 @@ import (
 	"unicode/utf8"
 
 	"DP/internal/domain"
-	"DP/internal/store"
+	"golang.org/x/sys/unix"
 )
 
+type Repository interface {
+	CountRecentLoginFailures(context.Context, string, string, time.Time) (int, error)
+	CreateAuditEvent(context.Context, domain.AuditEvent) (domain.AuditEvent, error)
+	CreateNotification(context.Context, domain.Notification) (domain.Notification, error)
+	CreateNotificationIfUnresolved(context.Context, string, domain.Notification) error
+	DeleteAuditEventsBefore(context.Context, time.Time, int) (int64, error)
+	DeleteLoginThrottlesBefore(context.Context, time.Time) error
+	DeleteResolvedNotificationsBefore(context.Context, time.Time, int) (int64, error)
+	DeleteTerminalOperationsBefore(context.Context, time.Time, int) ([]string, error)
+	FindOperationAuditRequest(context.Context, string) (domain.AuditEvent, error)
+	HasRecentLoginThrottleAudit(context.Context, string, string, time.Time) (bool, error)
+	ListStaleUsers(context.Context, time.Time) ([]domain.User, error)
+	ResolveNotificationByDedupeKey(context.Context, string, string, time.Time) error
+}
+
 type Service struct {
-	store                 *store.Store
+	store                 Repository
 	retention             time.Duration
 	log                   *slog.Logger
 	notificationRetention time.Duration
@@ -40,7 +55,7 @@ func (s *Service) ConfigureMaintenance(dataDir string, notificationDays, operati
 	s.staleAccountThreshold = time.Duration(staleAccountDays) * 24 * time.Hour
 }
 
-func NewService(db *store.Store, retentionDays int, log *slog.Logger) *Service {
+func NewService(db Repository, retentionDays int, log *slog.Logger) *Service {
 	if retentionDays <= 0 {
 		retentionDays = 180
 	}
@@ -256,7 +271,7 @@ func (s *Service) cleanupOperations(ctx context.Context) {
 }
 
 func (s *Service) checkDisk(ctx context.Context) {
-	total, free, err := s.store.DiskUsage()
+	total, free, err := diskUsage(s.dataDir)
 	if err != nil {
 		s.log.Warn("check data disk usage", "error", err)
 		return
@@ -269,6 +284,14 @@ func (s *Service) checkDisk(ctx context.Context) {
 		RiskLevel: "high", Category: "system", Title: "数据目录空间不足",
 		Message: "DP 数据目录可用空间低于 1 GiB 或 10%，请及时扩容或清理", Link: "/dashboard",
 	})
+}
+
+func diskUsage(path string) (total uint64, free uint64, err error) {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(path, &stat); err != nil {
+		return 0, 0, err
+	}
+	return stat.Blocks * uint64(stat.Bsize), stat.Bavail * uint64(stat.Bsize), nil
 }
 
 func riskLevel(event domain.AuditEvent) string {

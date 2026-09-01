@@ -17,8 +17,6 @@ import (
 const (
 	pendingAdminUsername = "__dp_pending_admin__"
 	initialAdminID       = "00000000-0000-4000-8000-000000000001"
-	platformAdminRoleID  = "00000000-0000-4000-8000-000000000102"
-	operatorRoleID       = "00000000-0000-4000-8000-000000000103"
 )
 
 const userSelect = `SELECT
@@ -62,6 +60,9 @@ func (db *DB) InitializeAdmin(
 }
 
 func (db *DB) CreateUser(ctx context.Context, user domain.User) (domain.User, error) {
+	if len(user.Roles) == 0 {
+		return domain.User{}, domain.FieldError("role_ids", "至少选择一个角色")
+	}
 	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return domain.User{}, fmt.Errorf("begin create user: %w", err)
@@ -77,14 +78,23 @@ func (db *DB) CreateUser(ctx context.Context, user domain.User) (domain.User, er
 	if err != nil {
 		return domain.User{}, mapUserWriteError("insert user", err)
 	}
-	roleID := operatorRoleID
-	if user.Role == domain.RoleAdmin {
-		roleID = platformAdminRoleID
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at)
-		VALUES ($1, $2, $3, $4)`, user.ID, roleID, nullableUUID(user.CreatedBy), now)
-	if err != nil {
-		return domain.User{}, mapUserWriteError("insert initial user role", err)
+	seen := make(map[string]struct{}, len(user.Roles))
+	for _, role := range user.Roles {
+		if role.ID == "" {
+			return domain.User{}, domain.FieldError("role_ids", "角色 ID 不能为空")
+		}
+		if _, exists := seen[role.ID]; exists {
+			return domain.User{}, domain.FieldError("role_ids", "角色不能重复")
+		}
+		seen[role.ID] = struct{}{}
+		_, err = tx.Exec(ctx, `INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at)
+			VALUES ($1, $2, $3, $4)`, user.ID, role.ID, nullableUUID(user.CreatedBy), now)
+		if isPostgresError(err, "23503") {
+			return domain.User{}, domain.FieldError("role_ids", "包含未知角色")
+		}
+		if err != nil {
+			return domain.User{}, mapUserWriteError("insert initial user role", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.User{}, fmt.Errorf("commit create user: %w", err)

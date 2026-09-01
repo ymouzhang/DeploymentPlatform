@@ -27,6 +27,9 @@ import type {
 	Model,
 	ModelTask,
 	ModelUploadCreated,
+	PermissionDefinition,
+	Role,
+	RoleGrant,
 } from '../types'
 
 interface DataEnvelope<T> {
@@ -95,8 +98,17 @@ export const api = {
   listOwnSessions: () => request<Session[]>('/api/v1/auth/sessions'),
   revokeOwnSession: (sessionId: string) => request<{ session_revoked: boolean; current: boolean }>(`/api/v1/auth/sessions/${sessionId}`, { method: 'DELETE' }),
   listUsers: () => request<User[]>('/api/v1/users'),
-  createUser: (input: { username: string; password: string; role: 'admin' | 'user' }) =>
+  createUser: (input: { username: string; password: string; role_ids: string[] }) =>
     request<User>('/api/v1/users', { method: 'POST', body: JSON.stringify(input) }),
+	listPermissions: () => request<PermissionDefinition[]>('/api/v1/permissions'),
+	listRoles: () => request<Role[]>('/api/v1/roles'),
+	createRole: (input: { key: string; name: string; description: string; grants: RoleGrant[] }) =>
+		request<Role>('/api/v1/roles', { method: 'POST', body: JSON.stringify(input) }),
+	updateRole: (id: string, input: { name: string; description: string; grants: RoleGrant[] }) =>
+		request<Role>(`/api/v1/roles/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+	deleteRole: (id: string) => request(`/api/v1/roles/${id}`, { method: 'DELETE' }),
+	replaceUserRoles: (id: string, role_ids: string[]) =>
+		request(`/api/v1/users/${id}/roles`, { method: 'PUT', body: JSON.stringify({ role_ids }) }),
   resetUserPassword: (id: string, new_password: string, require_password_change: boolean) =>
     request(`/api/v1/users/${id}/password`, { method: 'PUT', body: JSON.stringify({ new_password, require_password_change }) }),
   updateUserStatus: (id: string, enabled: boolean) =>

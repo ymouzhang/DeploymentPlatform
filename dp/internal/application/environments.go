@@ -10,17 +10,29 @@ import (
 	"DP/internal/domain"
 	"DP/internal/remote"
 	"DP/internal/security"
-	"DP/internal/store"
 )
 
+type EnvironmentRepository interface {
+	CreateEnvironmentWithTags(context.Context, domain.Environment, []string) (domain.Environment, error)
+	DeleteServiceConfig(context.Context, string) error
+	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetPackageByOwner(context.Context, string, string) (domain.Package, error)
+	ListEnvironments(context.Context) ([]domain.Environment, error)
+	ListEnvironmentsByOwner(context.Context, string) ([]domain.Environment, error)
+	RecordValidation(context.Context, string, string, string) error
+	UpdateEnvironmentWithTags(context.Context, domain.Environment, []string) (domain.Environment, error)
+	UpsertImportedEnvironments(context.Context, []domain.Environment) (int, int, error)
+	ValidateTagIDs(context.Context, string, []string) error
+}
+
 type EnvironmentService struct {
-	store  *store.Store
+	store  EnvironmentRepository
 	cipher *security.PasswordCipher
 	remote *remote.Executor
 }
 
 func NewEnvironmentService(
-	store *store.Store,
+	store EnvironmentRepository,
 	cipher *security.PasswordCipher,
 	remoteExecutor *remote.Executor,
 ) *EnvironmentService {
@@ -42,7 +54,7 @@ func (s *EnvironmentService) ListFiltered(ctx context.Context, ownerID string, t
 	if err != nil {
 		return nil, err
 	}
-	environments = store.FilterEnvironmentsByTagIDs(environments, tagIDs)
+	environments = FilterEnvironmentsByTagIDs(environments, tagIDs)
 	result := make([]domain.EnvironmentView, 0, len(environments))
 	for _, env := range environments {
 		result = append(result, viewEnvironment(env))

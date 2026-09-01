@@ -6,17 +6,21 @@ import (
 	"DP/internal/domain"
 	"DP/internal/remote"
 	"DP/internal/security"
-	"DP/internal/store"
 )
 
+type ServiceLogRepository interface {
+	GetEnvironment(context.Context, string) (domain.Environment, error)
+	RecordValidation(context.Context, string, string, string) error
+}
+
 type ServiceLogService struct {
-	store  *store.Store
+	store  ServiceLogRepository
 	cipher *security.PasswordCipher
 	remote *remote.Executor
 }
 
 func NewServiceLogService(
-	store *store.Store,
+	store ServiceLogRepository,
 	cipher *security.PasswordCipher,
 	remoteExecutor *remote.Executor,
 ) *ServiceLogService {

@@ -10,29 +10,33 @@ import (
 	"path/filepath"
 	"testing"
 
+	"DP/internal/access"
 	"DP/internal/application"
 	"DP/internal/domain"
 	"DP/internal/store"
 )
 
-func TestAdminP0EndpointsRejectOrdinaryUsers(t *testing.T) {
+func TestPermissionMiddlewareRejectsMissingBusinessGrants(t *testing.T) {
 	api := &API{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	user := domain.User{ID: "user-1", Role: domain.RoleUser}
+	user := domain.User{ID: "user-1", Permissions: access.Grants{}}
 	tests := []struct {
-		path    string
-		handler http.HandlerFunc
+		path       string
+		permission access.Permission
 	}{
-		{"/api/v1/admin/dashboard", api.adminDashboard},
-		{"/api/v1/operations", api.listOperations},
-		{"/api/v1/notifications", api.listNotifications},
-		{"/api/v1/users/user-2", api.getUserDetail},
+		{"/api/v1/admin/dashboard", access.DashboardRead},
+		{"/api/v1/operations", access.OperationRead},
+		{"/api/v1/notifications", access.NotificationRead},
+		{"/api/v1/users/user-2", access.AccountRead},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, test.path, nil)
 			request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, user))
 			recorder := httptest.NewRecorder()
-			test.handler(recorder, request)
+			handler := api.requirePermission(test.permission, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			handler.ServeHTTP(recorder, request)
 			if recorder.Code != http.StatusForbidden {
 				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}

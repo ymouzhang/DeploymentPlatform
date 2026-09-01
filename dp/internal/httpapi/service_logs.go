@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 )
 
@@ -21,7 +22,7 @@ type serviceLogEvent struct {
 }
 
 func (a *API) streamServiceLogs(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id")); err != nil {
+	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceLogRead); err != nil {
 		a.writeError(w, r, err)
 		return
 	}

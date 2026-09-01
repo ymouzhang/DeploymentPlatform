@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 )
 
@@ -116,7 +117,7 @@ func (a *API) sendCommunicationMessage(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	if currentUser(r).Role == domain.RoleAdmin {
+	if scope, _ := currentUser(r).Permissions.Scope(access.CommunicationReply); scope == access.ScopeAll {
 		setAuditAction(r, "communication.message.admin.send")
 	} else {
 		setAuditAction(r, "communication.receipt.user.send")

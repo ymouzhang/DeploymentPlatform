@@ -35,7 +35,8 @@ const serviceTypePattern = /^[a-z][a-z0-9-]{0,62}$/
 export function PackagesPage() {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
-  const { ownerId, user, users } = useAuth()
+  const { ownerId, user, users, can, hasAll } = useAuth()
+	const packageWriteAll = hasAll('package.write')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [serviceType, setServiceType] = useState('')
   const [replacingType, setReplacingType] = useState('')
@@ -220,10 +221,10 @@ export function PackagesPage() {
         render: (_, record) => (
           <div className="row-actions package-row-actions">
             <Button size="small" icon={<HistoryOutlined />} onClick={() => setVersionPackage(record)}>版本 {record.version_count}</Button>
-            <Button size="small" icon={<CloudUploadOutlined />} onClick={() => openUpload(record.service_type, record.owner_id)}>
+            {can('package.write', record.owner_id) && <Button size="small" icon={<CloudUploadOutlined />} onClick={() => openUpload(record.service_type, record.owner_id)}>
               更新
-            </Button>
-            <Button
+            </Button>}
+            {can('package.delete', record.owner_id) && <Button
               danger
               size="small"
               icon={<DeleteOutlined />}
@@ -240,7 +241,7 @@ export function PackagesPage() {
               }}
             >
               删除
-            </Button>
+            </Button>}
           </div>
         ),
       },
@@ -263,14 +264,14 @@ export function PackagesPage() {
             style={{ width: 240 }}
             onChange={(event) => setKeyword(event.target.value)}
           />
-          <Button
+          {can('package.write') && <Button
             type="primary"
             size="large"
             icon={<CloudUploadOutlined />}
             onClick={() => openUpload()}
           >
             上传安装包
-          </Button>
+          </Button>}
         </Space>
       </div>
 
@@ -331,7 +332,7 @@ export function PackagesPage() {
             { title: '上传人', dataIndex: 'uploaded_by_username', width: 110, render: (value: string) => value || '升级迁移' },
             { title: '上传时间', dataIndex: 'uploaded_at', width: 170, render: formatTime },
             { title: '引用', dataIndex: 'referenced_environment_count', width: 80, render: (value: number) => `${value} 个` },
-            { title: '操作', width: 200, fixed: 'right', render: (_, item) => <div className="row-actions"><Button size="small" disabled={item.current} loading={activateMutation.isPending && activateMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '切换当前版本？', content: '只影响后续安装，不会自动重装现有环境。', onOk: () => activateMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>设为当前</Button><Button size="small" danger disabled={item.current || item.referenced_environment_count > 0} loading={deleteVersionMutation.isPending && deleteVersionMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '删除历史版本？', content: '版本文件将从本地存储永久删除。', okButtonProps: { danger: true }, onOk: () => deleteVersionMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>删除</Button></div> },
+            { title: '操作', width: 200, fixed: 'right', render: (_, item) => <div className="row-actions">{can('package.write', item.owner_id) && <Button size="small" disabled={item.current} loading={activateMutation.isPending && activateMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '切换当前版本？', content: '只影响后续安装，不会自动重装现有环境。', onOk: () => activateMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>设为当前</Button>}{can('package.delete', item.owner_id) && <Button size="small" danger disabled={item.current || item.referenced_environment_count > 0} loading={deleteVersionMutation.isPending && deleteVersionMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '删除历史版本？', content: '版本文件将从本地存储永久删除。', okButtonProps: { danger: true }, onOk: () => deleteVersionMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>删除</Button>}</div> },
           ]}
         />
       </Modal>
@@ -347,7 +348,7 @@ export function PackagesPage() {
         destroyOnHidden
       >
         <div className="upload-form">
-          {user.role === 'admin' && <><label>所属账号</label><Select disabled={Boolean(replacingType)} value={uploadOwner} options={users.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.username }))} onChange={setUploadOwner} /><Typography.Text type="secondary" className="field-help">新安装包默认归当前管理员；代其他账号创建时会记录高风险审计。</Typography.Text></>}
+          {packageWriteAll && <><label>所属账号</label><Select disabled={Boolean(replacingType)} value={uploadOwner} options={users.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.username }))} onChange={setUploadOwner} /><Typography.Text type="secondary" className="field-help">代其他账号创建时会记录高风险审计。</Typography.Text></>}
           <label>服务类型</label>
           <Select
             mode="tags"

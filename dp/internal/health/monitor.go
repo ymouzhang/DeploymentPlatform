@@ -13,11 +13,19 @@ import (
 	"time"
 
 	"DP/internal/domain"
-	"DP/internal/store"
 )
 
+type Repository interface {
+	CreateNotification(context.Context, domain.Notification) (domain.Notification, error)
+	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetUser(context.Context, string) (domain.User, error)
+	ListEnvironments(context.Context) ([]domain.Environment, error)
+	Ping(context.Context) error
+	ResolveNotificationByDedupeKey(context.Context, string, string, time.Time) error
+}
+
 type Monitor struct {
-	store    *store.Store
+	store    Repository
 	dataDir  string
 	interval time.Duration
 	client   *http.Client
@@ -35,7 +43,7 @@ type ProbeResult struct {
 	Status string `json:"status"`
 }
 
-func NewMonitor(store *store.Store, dataDir string, interval time.Duration) *Monitor {
+func NewMonitor(store Repository, dataDir string, interval time.Duration) *Monitor {
 	transport := &http.Transport{
 		Proxy:              nil,
 		MaxIdleConns:       20,

@@ -1,6 +1,23 @@
 name: dp
 
 services:
+  postgres:
+    image: ${DP_POSTGRES_IMAGE:-postgres:17-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${DP_POSTGRES_DB:-dp}"
+      POSTGRES_USER: "${DP_POSTGRES_USER:-dp}"
+      POSTGRES_PASSWORD: "${DP_POSTGRES_PASSWORD:?请在 .env 中设置 DP_POSTGRES_PASSWORD}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 30s
+
   dp:
     image: ${DP_IMAGE:-dp:latest}
     build:
@@ -10,12 +27,16 @@ services:
     restart: unless-stopped
     init: true
     user: "${DP_UID:-1000}:${DP_GID:-1000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${DP_HTTP_PORT:-30199}:30199"
     environment:
       DP_MASTER_KEY: "${DP_MASTER_KEY:?请在 .env 中设置 DP_MASTER_KEY}"
       DP_ADMIN_USERNAME: "${DP_ADMIN_USERNAME:?请在 .env 中设置 DP_ADMIN_USERNAME}"
       DP_ADMIN_PASSWORD: "${DP_ADMIN_PASSWORD:?请在 .env 中设置 DP_ADMIN_PASSWORD}"
+      DP_DATABASE_URL: "postgres://${DP_POSTGRES_USER:-dp}:${DP_POSTGRES_PASSWORD}@postgres:5432/${DP_POSTGRES_DB:-dp}?sslmode=disable"
       DP_SESSION_TTL: "${DP_SESSION_TTL:-24h}"
       DP_DATA_DIR: /app/data
       DP_LISTEN_ADDR: 0.0.0.0:30199
@@ -53,3 +74,6 @@ services:
       retries: 5
       start_period: 10s
     stop_grace_period: 15s
+
+volumes:
+  postgres-data:

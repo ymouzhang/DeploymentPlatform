@@ -137,27 +137,55 @@ func (s *RoleService) ReplaceUserRoles(
 	if err := requirePermission(actor, access.AccountAssignRoles); err != nil {
 		return err
 	}
-	if hasDuplicateStrings(roleIDs) {
-		return domain.FieldError("role_ids", "角色不能重复")
+	_, err := s.assignableRoles(ctx, actor, roleIDs)
+	if err != nil {
+		return err
 	}
+	return mapRoleRepositoryError(s.repository.ReplaceUserRoles(ctx, actor.UserID, userID, roleIDs))
+}
+
+func (s *RoleService) RolesForNewUser(
+	ctx context.Context,
+	actor access.Subject,
+	roleIDs []string,
+) ([]access.RoleRef, error) {
+	if err := requirePermission(actor, access.AccountCreate); err != nil {
+		return nil, err
+	}
+	return s.assignableRoles(ctx, actor, roleIDs)
+}
+
+func (s *RoleService) assignableRoles(
+	ctx context.Context,
+	actor access.Subject,
+	roleIDs []string,
+) ([]access.RoleRef, error) {
+	if len(roleIDs) == 0 {
+		return nil, domain.FieldError("role_ids", "至少选择一个角色")
+	}
+	if hasDuplicateStrings(roleIDs) {
+		return nil, domain.FieldError("role_ids", "角色不能重复")
+	}
+	roles := make([]access.RoleRef, 0, len(roleIDs))
 	for _, roleID := range roleIDs {
 		if strings.TrimSpace(roleID) == "" {
-			return domain.FieldError("role_ids", "角色 ID 不能为空")
+			return nil, domain.FieldError("role_ids", "角色 ID 不能为空")
 		}
 		role, err := s.repository.GetRole(ctx, roleID)
 		if err != nil {
-			return mapRoleRepositoryError(err)
+			return nil, mapRoleRepositoryError(err)
 		}
 		if role.Key == access.RoleSuperAdmin && !actor.HasRole(access.RoleSuperAdmin) {
-			return grantForbiddenError()
+			return nil, grantForbiddenError()
 		}
 		for _, grant := range role.Grants {
 			if !actor.Grants.CanGrant(grant.Permission, grant.Scope) {
-				return grantForbiddenError()
+				return nil, grantForbiddenError()
 			}
 		}
+		roles = append(roles, access.RoleRef{ID: role.ID, Key: role.Key, Name: role.Name})
 	}
-	return mapRoleRepositoryError(s.repository.ReplaceUserRoles(ctx, actor.UserID, userID, roleIDs))
+	return roles, nil
 }
 
 func (s *RoleService) validateGrants(

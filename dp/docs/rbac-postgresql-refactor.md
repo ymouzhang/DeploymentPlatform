@@ -159,6 +159,8 @@ flowchart LR
 
 路由注册必须声明权限键，不能在 Handler 中散落 `user.Role == ...`。资源加载器只负责解析资源归属，不承担业务修改。列表接口根据最终 scope 自动收窄查询：`all` 可选择指定 `owner_id` 或全部，`own` 强制当前用户 ID。
 
+认证登录、退出、当前账号密码和本人会话属于账号自助端点，仅要求有效会话；`GET /api/v1/events` 是已认证用户的事件传输通道，不独立授予数据读取能力，服务端只向订阅者投递其已有权限范围内产生的事件。除此之外的业务路由必须在注册处声明一个权限键。
+
 ### 3.7 角色管理 API
 
 | 方法 | 路径 | 权限 |
@@ -170,6 +172,8 @@ flowchart LR
 | PUT | `/api/v1/roles/{id}` | `role.update` |
 | DELETE | `/api/v1/roles/{id}` | `role.delete` |
 | PUT | `/api/v1/users/{id}/roles` | `account.assign_roles` |
+
+`POST /api/v1/users` 使用 `{"username":"...","password":"...","role_ids":["..."]}`，不再接受旧的单值 `role`。至少选择一个角色；服务端拒绝重复、未知或超出创建者自身可授予范围的角色。账号与全部角色绑定在同一 PostgreSQL 事务中创建，任一步骤失败都不留下无角色账号。
 
 创建角色请求包含 `key`、`name`、`description` 和 `grants`；更新角色请求不允许修改稳定的
 `key`，只包含 `name`、`description` 和完整的 `grants`。每个 grant 由

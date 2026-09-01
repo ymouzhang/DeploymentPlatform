@@ -6,15 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"DP/internal/access"
+	"DP/internal/application"
 	"DP/internal/domain"
-	"DP/internal/store"
 )
 
 func (a *API) getUserDetail(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	detail, err := a.auth.UserDetail(r.Context(), r.PathValue("id"))
 	if err != nil {
 		a.writeError(w, r, err)
@@ -24,10 +21,6 @@ func (a *API) getUserDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) revokeUserSessions(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	target, _ := a.store.GetUser(r.Context(), r.PathValue("id"))
 	if target.ID != "" {
 		setAuditTarget(r, target, "user", target.ID, target.Username, map[string]any{"sessions_revoked": true})
@@ -40,10 +33,6 @@ func (a *API) revokeUserSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listUserSessions(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	items, err := a.auth.ListSessions(r.Context(), r.PathValue("id"), currentSession(r).ID)
 	if err != nil {
 		a.writeError(w, r, err)
@@ -53,10 +42,6 @@ func (a *API) listUserSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) revokeUserSession(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	target, err := a.store.GetUser(r.Context(), r.PathValue("id"))
 	if err != nil {
 		a.writeError(w, r, err)
@@ -72,10 +57,6 @@ func (a *API) revokeUserSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) transferUserResources(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	var input struct {
 		TargetUserID string `json:"target_user_id"`
 	}
@@ -105,13 +86,9 @@ func (a *API) transferUserResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listOperations(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	q := r.URL.Query()
 	filter := domain.OperationFilter{ActorID: q.Get("actor_id"), OwnerID: q.Get("owner_id"), Action: q.Get("action"), Status: q.Get("status"), Keyword: strings.TrimSpace(q.Get("keyword")), Limit: 50}
-	tagIDs, tagErr := a.visibleTagIDs(r, filter.OwnerID)
+	tagIDs, tagErr := a.visibleTagIDs(r, filter.OwnerID, access.OperationRead)
 	if tagErr != nil {
 		a.writeError(w, r, tagErr)
 		return
@@ -177,12 +154,8 @@ func (a *API) listOperations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) adminDashboard(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	now := time.Now().UTC()
-	tagIDs, err := a.visibleTagIDs(r, "")
+	tagIDs, err := a.visibleTagIDs(r, "", access.DashboardRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -198,7 +171,7 @@ func (a *API) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(tagIDs) > 0 {
-		environments = store.FilterEnvironmentsByTagIDs(environments, tagIDs)
+		environments = application.FilterEnvironmentsByTagIDs(environments, tagIDs)
 		metrics.Environments, metrics.InstalledServices, metrics.UnvalidatedEnvironments, metrics.StaleValidationEnvironments = len(environments), 0, 0, 0
 		for _, env := range environments {
 			if env.Installed {
@@ -253,10 +226,6 @@ func (a *API) adminDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) notificationSummary(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	result, err := a.store.NotificationSummary(r.Context())
 	if err != nil {
 		a.writeError(w, r, err)
@@ -266,10 +235,6 @@ func (a *API) notificationSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listNotifications(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	q := r.URL.Query()
 	filter := domain.NotificationFilter{RiskLevel: q.Get("risk_level"), Limit: 30}
 	if filter.RiskLevel != "" && filter.RiskLevel != "normal" && filter.RiskLevel != "high" {
@@ -321,10 +286,6 @@ func (a *API) resolveNotification(w http.ResponseWriter, r *http.Request) {
 	a.updateNotification(w, r, true)
 }
 func (a *API) updateNotification(w http.ResponseWriter, r *http.Request, resolve bool) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	var item domain.Notification
 	var err error
 	now := time.Now().UTC()

@@ -9,7 +9,6 @@ import (
 	"DP/internal/archive"
 	"DP/internal/domain"
 	"DP/internal/security"
-	"DP/internal/store"
 )
 
 type configWriter interface {
@@ -17,14 +16,23 @@ type configWriter interface {
 }
 
 type ServiceConfigService struct {
-	store    *store.Store
+	store    ServiceConfigRepository
 	packages *archive.Manager
 	cipher   *security.PasswordCipher
 	remote   configWriter
 }
 
+type ServiceConfigRepository interface {
+	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetServiceConfig(context.Context, string) (domain.ServiceConfig, error)
+	GetServiceConfigRevision(context.Context, string, string) (domain.ServiceConfigRevision, error)
+	ListServiceConfigRevisions(context.Context, string) ([]domain.ServiceConfigRevision, error)
+	RecordValidation(context.Context, string, string, string) error
+	SaveServiceConfigRevision(context.Context, domain.ServiceConfig, domain.ServiceConfigRevision, bool) (domain.ServiceConfigRevision, error)
+}
+
 func NewServiceConfigService(
-	store *store.Store,
+	store ServiceConfigRepository,
 	packages *archive.Manager,
 	cipher *security.PasswordCipher,
 	remoteWriter configWriter,

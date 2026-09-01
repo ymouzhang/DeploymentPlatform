@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 )
 
@@ -34,7 +35,11 @@ func requestedTagIDs(r *http.Request) ([]string, error) {
 	return result, nil
 }
 
-func (a *API) visibleTagIDs(r *http.Request, ownerID string) ([]string, error) {
+func (a *API) visibleTagIDs(
+	r *http.Request,
+	ownerID string,
+	permission access.Permission,
+) ([]string, error) {
 	ids, err := requestedTagIDs(r)
 	if err != nil || len(ids) == 0 {
 		return ids, err
@@ -45,7 +50,7 @@ func (a *API) visibleTagIDs(r *http.Request, ownerID string) ([]string, error) {
 		if err != nil {
 			return nil, domain.FieldError("tag_id", "标签不存在或不可用")
 		}
-		if user.Role != domain.RoleAdmin && tag.OwnerID != user.ID {
+		if !user.Permissions.Allows(permission, user.ID, tag.OwnerID) {
 			return nil, domain.FieldError("tag_id", "标签不存在或不可用")
 		}
 		if ownerID != "" && tag.OwnerID != ownerID {
@@ -56,7 +61,7 @@ func (a *API) visibleTagIDs(r *http.Request, ownerID string) ([]string, error) {
 }
 
 func (a *API) listResourceTags(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.listOwnerScope(r)
+	ownerID, err := a.listOwnerScope(r, access.TagRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -70,7 +75,7 @@ func (a *API) listResourceTags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createResourceTag(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.createOwnerScope(r)
+	ownerID, err := a.createOwnerScope(r, access.TagWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -104,7 +109,7 @@ func (a *API) authorizeResourceTag(r *http.Request, id string) (domain.ResourceT
 		return item, err
 	}
 	user := currentUser(r)
-	if user.Role != domain.RoleAdmin && item.OwnerID != user.ID {
+	if !user.Permissions.Allows(access.TagWrite, user.ID, item.OwnerID) {
 		return domain.ResourceTag{}, domain.ErrNotFound
 	}
 	return item, nil
@@ -155,7 +160,7 @@ func (a *API) deleteResourceTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) replaceEnvironmentTags(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"))
+	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.TagWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return

@@ -8,11 +8,12 @@ import (
 	"strconv"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 )
 
 func (a *API) listModels(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.listOwnerScope(r)
+	ownerID, err := a.listOwnerScope(r, access.ModelRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -26,7 +27,7 @@ func (a *API) listModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getModel(w http.ResponseWriter, r *http.Request) {
-	item, err := a.authorizeModel(r, r.PathValue("id"))
+	item, err := a.authorizeModel(r, r.PathValue("id"), access.ModelRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -35,7 +36,7 @@ func (a *API) getModel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createModelUpload(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.createOwnerScope(r)
+	ownerID, err := a.createOwnerScope(r, access.ModelUpload)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -65,7 +66,7 @@ func (a *API) createModelUpload(w http.ResponseWriter, r *http.Request) {
 func (a *API) headModelUpload(w http.ResponseWriter, r *http.Request) {
 	upload, err := a.store.GetModelUpload(r.Context(), r.PathValue("id"))
 	if err == nil {
-		err = a.authorizeOwner(r, upload.OwnerID)
+		err = a.authorizeOwner(r, upload.OwnerID, access.ModelUpload)
 	}
 	if err != nil {
 		a.writeError(w, r, err)
@@ -85,7 +86,7 @@ func (a *API) headModelUpload(w http.ResponseWriter, r *http.Request) {
 func (a *API) patchModelUpload(w http.ResponseWriter, r *http.Request) {
 	upload, err := a.store.GetModelUpload(r.Context(), r.PathValue("id"))
 	if err == nil {
-		err = a.authorizeOwner(r, upload.OwnerID)
+		err = a.authorizeOwner(r, upload.OwnerID, access.ModelUpload)
 	}
 	if err != nil {
 		a.writeError(w, r, err)
@@ -113,7 +114,7 @@ func (a *API) patchModelUpload(w http.ResponseWriter, r *http.Request) {
 func (a *API) completeModelUpload(w http.ResponseWriter, r *http.Request) {
 	upload, err := a.store.GetModelUpload(r.Context(), r.PathValue("id"))
 	if err == nil {
-		err = a.authorizeOwner(r, upload.OwnerID)
+		err = a.authorizeOwner(r, upload.OwnerID, access.ModelUpload)
 	}
 	if err != nil {
 		a.writeError(w, r, err)
@@ -133,7 +134,7 @@ func (a *API) completeModelUpload(w http.ResponseWriter, r *http.Request) {
 func (a *API) cancelModelUpload(w http.ResponseWriter, r *http.Request) {
 	upload, err := a.store.GetModelUpload(r.Context(), r.PathValue("id"))
 	if err == nil {
-		err = a.authorizeOwner(r, upload.OwnerID)
+		err = a.authorizeOwner(r, upload.OwnerID, access.ModelUpload)
 	}
 	if err != nil {
 		a.writeError(w, r, err)
@@ -150,7 +151,7 @@ func (a *API) cancelModelUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) retryModel(w http.ResponseWriter, r *http.Request) {
-	item, err := a.authorizeModel(r, r.PathValue("id"))
+	item, err := a.authorizeModel(r, r.PathValue("id"), access.ModelUpload)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -166,7 +167,7 @@ func (a *API) retryModel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteModel(w http.ResponseWriter, r *http.Request) {
-	item, err := a.authorizeModel(r, r.PathValue("id"))
+	item, err := a.authorizeModel(r, r.PathValue("id"), access.ModelDelete)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -197,7 +198,7 @@ func (a *API) deleteModel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getModelTask(w http.ResponseWriter, r *http.Request) {
-	task, err := a.authorizeModelTask(r, r.PathValue("id"))
+	task, err := a.authorizeModelTask(r, r.PathValue("id"), access.ModelRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -211,7 +212,7 @@ func (a *API) modelTaskEvents(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, errors.New("streaming is not supported"))
 		return
 	}
-	task, err := a.authorizeModelTask(r, r.PathValue("id"))
+	task, err := a.authorizeModelTask(r, r.PathValue("id"), access.ModelRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -263,31 +264,39 @@ func (a *API) modelTaskEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *API) authorizeOwner(r *http.Request, ownerID string) error {
+func (a *API) authorizeOwner(r *http.Request, ownerID string, permission access.Permission) error {
 	user := currentUser(r)
-	if user.Role != domain.RoleAdmin && user.ID != ownerID {
+	if !user.Permissions.Allows(permission, user.ID, ownerID) {
 		return domain.ErrNotFound
 	}
 	return nil
 }
 
-func (a *API) authorizeModel(r *http.Request, id string) (domain.Model, error) {
+func (a *API) authorizeModel(
+	r *http.Request,
+	id string,
+	permission access.Permission,
+) (domain.Model, error) {
 	item, err := a.models.Get(r.Context(), id)
 	if err != nil {
 		return item, err
 	}
-	if err := a.authorizeOwner(r, item.OwnerID); err != nil {
+	if err := a.authorizeOwner(r, item.OwnerID, permission); err != nil {
 		return domain.Model{}, err
 	}
 	return item, nil
 }
 
-func (a *API) authorizeModelTask(r *http.Request, id string) (domain.ModelTask, error) {
+func (a *API) authorizeModelTask(
+	r *http.Request,
+	id string,
+	permission access.Permission,
+) (domain.ModelTask, error) {
 	task, err := a.models.GetTask(r.Context(), id)
 	if err != nil {
 		return task, err
 	}
-	if err := a.authorizeOwner(r, task.OwnerID); err != nil {
+	if err := a.authorizeOwner(r, task.OwnerID, permission); err != nil {
 		return domain.ModelTask{}, err
 	}
 	return task, nil

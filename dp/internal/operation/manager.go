@@ -17,13 +17,26 @@ import (
 	"DP/internal/domain"
 	"DP/internal/remote"
 	"DP/internal/security"
-	"DP/internal/store"
 )
+
+type Repository interface {
+	CreateOperation(context.Context, domain.Operation) error
+	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetOperation(context.Context, string) (domain.Operation, error)
+	GetServiceConfig(context.Context, string) (domain.ServiceConfig, error)
+	LastSuccessfulAction(context.Context, string) (domain.OperationAction, error)
+	MarkInstalled(context.Context, string, string, int) error
+	MarkUninstalled(context.Context, string) error
+	RecordValidation(context.Context, string, string, string) error
+	UpdateEnvironmentArch(context.Context, string, string) error
+	UpdateOperation(context.Context, domain.Operation) error
+	UpsertServiceConfig(context.Context, domain.ServiceConfig) (domain.ServiceConfig, error)
+}
 
 type Manager struct {
 	ctx      context.Context
 	dataDir  string
-	store    *store.Store
+	store    Repository
 	cipher   *security.PasswordCipher
 	packages *archive.Manager
 	remote   *remote.Executor
@@ -38,7 +51,7 @@ type Manager struct {
 func NewManager(
 	ctx context.Context,
 	dataDir string,
-	store *store.Store,
+	store Repository,
 	cipher *security.PasswordCipher,
 	packages *archive.Manager,
 	remoteExecutor *remote.Executor,

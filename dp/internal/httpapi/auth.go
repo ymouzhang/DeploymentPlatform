@@ -40,6 +40,14 @@ func currentSubject(r *http.Request) access.Subject {
 	return access.Subject{UserID: user.ID, Roles: user.Roles, Grants: user.Permissions}
 }
 
+func roleKeys(user domain.User) []string {
+	keys := make([]string, 0, len(user.Roles))
+	for _, role := range user.Roles {
+		keys = append(keys, role.Key)
+	}
+	return keys
+}
+
 func (a *API) requirePermission(permission access.Permission, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := currentUser(r)
@@ -158,18 +166,7 @@ func (a *API) changePassword(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]bool{"password_changed": true})
 }
 
-func (a *API) requireAdmin(r *http.Request) error {
-	if currentUser(r).Role != domain.RoleAdmin {
-		return domain.ErrForbidden
-	}
-	return nil
-}
-
 func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	users, err := a.auth.ListUsers(r.Context())
 	if err != nil {
 		a.writeError(w, r, err)
@@ -179,34 +176,35 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	var input struct {
-		Username string          `json:"username"`
-		Password string          `json:"password"`
-		Role     domain.UserRole `json:"role"`
+		Username string   `json:"username"`
+		Password string   `json:"password"`
+		RoleIDs  []string `json:"role_ids"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	setAuditTarget(r, currentUser(r), "user", "", strings.ToLower(strings.TrimSpace(input.Username)), map[string]any{"role": input.Role, "must_change_password": true})
-	user, err := a.auth.CreateUserBy(r.Context(), currentUser(r).ID, input.Username, input.Password, input.Role)
+	roles, err := a.roles.RolesForNewUser(r.Context(), currentSubject(r), input.RoleIDs)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	setAuditTarget(r, user, "user", user.ID, user.Username, map[string]any{"role": user.Role, "enabled": user.Enabled, "must_change_password": user.MustChangePassword})
+	setAuditTarget(r, currentUser(r), "user", "", strings.ToLower(strings.TrimSpace(input.Username)), map[string]any{
+		"role_ids": input.RoleIDs, "must_change_password": true,
+	})
+	user, err := a.auth.CreateUserBy(r.Context(), currentUser(r).ID, input.Username, input.Password, roles)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	setAuditTarget(r, user, "user", user.ID, user.Username, map[string]any{
+		"roles": roleKeys(user), "enabled": user.Enabled, "must_change_password": user.MustChangePassword,
+	})
 	writeData(w, http.StatusCreated, user)
 }
 
 func (a *API) resetUserPassword(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	var input struct {
 		Password      string `json:"new_password"`
 		RequireChange *bool  `json:"require_password_change"`
@@ -230,10 +228,6 @@ func (a *API) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) updateUserStatus(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	var input struct {
 		Enabled *bool `json:"enabled"`
 	}
@@ -263,10 +257,6 @@ func (a *API) updateUserStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
-	if err := a.requireAdmin(r); err != nil {
-		a.writeError(w, r, err)
-		return
-	}
 	target, _ := a.store.GetUser(r.Context(), r.PathValue("id"))
 	if target.ID != "" {
 		setAuditTarget(r, target, "user", target.ID, target.Username, nil)
@@ -278,10 +268,14 @@ func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]string{"deleted": r.PathValue("id")})
 }
 
-func (a *API) listOwnerScope(r *http.Request) (string, error) {
+func (a *API) listOwnerScope(r *http.Request, permission access.Permission) (string, error) {
 	user := currentUser(r)
 	requested := strings.TrimSpace(r.URL.Query().Get("owner_id"))
-	if user.Role != domain.RoleAdmin {
+	scope, ok := user.Permissions.Scope(permission)
+	if !ok {
+		return "", domain.ErrForbidden
+	}
+	if scope == access.ScopeOwn {
 		return user.ID, nil
 	}
 	if requested != "" {
@@ -292,13 +286,13 @@ func (a *API) listOwnerScope(r *http.Request) (string, error) {
 	return requested, nil
 }
 
-func (a *API) packageOwnerScope(r *http.Request) (string, error) {
+func (a *API) packageOwnerScope(r *http.Request, permission access.Permission) (string, error) {
 	user := currentUser(r)
 	requested := strings.TrimSpace(r.URL.Query().Get("owner_id"))
 	if requested == "" || requested == user.ID {
 		return user.ID, nil
 	}
-	if user.Role != domain.RoleAdmin {
+	if !user.Permissions.Allows(permission, user.ID, requested) {
 		return "", domain.ErrNotFound
 	}
 	if _, err := a.store.GetUser(r.Context(), requested); err != nil {
@@ -307,13 +301,13 @@ func (a *API) packageOwnerScope(r *http.Request) (string, error) {
 	return requested, nil
 }
 
-func (a *API) createOwnerScope(r *http.Request) (string, error) {
+func (a *API) createOwnerScope(r *http.Request, permission access.Permission) (string, error) {
 	user := currentUser(r)
 	requested := strings.TrimSpace(r.URL.Query().Get("owner_id"))
 	if requested == "" || requested == user.ID {
 		return user.ID, nil
 	}
-	if user.Role != domain.RoleAdmin {
+	if !user.Permissions.Allows(permission, user.ID, requested) {
 		return "", domain.ErrNotFound
 	}
 	target, err := a.store.GetUser(r.Context(), requested)
@@ -326,13 +320,17 @@ func (a *API) createOwnerScope(r *http.Request) (string, error) {
 	return target.ID, nil
 }
 
-func (a *API) authorizeEnvironment(r *http.Request, id string) (domain.Environment, error) {
+func (a *API) authorizeEnvironment(
+	r *http.Request,
+	id string,
+	permission access.Permission,
+) (domain.Environment, error) {
 	env, err := a.store.GetEnvironment(r.Context(), id)
 	if err != nil {
 		return domain.Environment{}, err
 	}
 	user := currentUser(r)
-	if user.Role != domain.RoleAdmin && env.OwnerID != user.ID {
+	if !user.Permissions.Allows(permission, user.ID, env.OwnerID) {
 		return domain.Environment{}, domain.ErrNotFound
 	}
 	return env, nil
@@ -344,11 +342,11 @@ func (a *API) authorizeOperation(r *http.Request, id string) (domain.Operation, 
 		return domain.Operation{}, err
 	}
 	user := currentUser(r)
-	if user.Role == domain.RoleAdmin || (op.OwnerID != "" && op.OwnerID == user.ID) {
+	if op.OwnerID != "" && user.Permissions.Allows(access.OperationRead, user.ID, op.OwnerID) {
 		return op, nil
 	}
 	if op.OwnerID == "" {
-		_, err = a.authorizeEnvironment(r, op.EnvironmentID)
+		_, err = a.authorizeEnvironment(r, op.EnvironmentID, access.OperationRead)
 		return op, err
 	}
 	return domain.Operation{}, domain.ErrNotFound

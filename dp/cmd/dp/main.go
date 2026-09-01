@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -24,8 +23,8 @@ import (
 	"DP/internal/operation"
 	"DP/internal/realtime"
 	"DP/internal/remote"
+	"DP/internal/repository/postgres"
 	"DP/internal/security"
-	"DP/internal/store"
 	"DP/webui"
 )
 
@@ -51,12 +50,13 @@ func run() error {
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	db, err := store.Open(rootCtx, filepath.Join(cfg.DataDir, "dp.db"))
+	db, err := postgres.Open(rootCtx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	authService := application.NewAuthService(db, cfg.SessionTTL)
+	roleService := application.NewRoleService(db)
 	realtimeHub := realtime.NewHub(64)
 	communicationService := application.NewCommunicationService(db, realtimeHub)
 	if err := authService.InitializeAdmin(rootCtx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
@@ -112,7 +112,7 @@ func run() error {
 	}
 	api := httpapi.New(
 		authService,
-		nil,
+		roleService,
 		communicationService,
 		realtimeHub,
 		environmentService, serviceConfigService, serviceLogService, packageManager, operationManager, modelManager, healthMonitor,

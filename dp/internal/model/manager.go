@@ -17,13 +17,31 @@ import (
 	"DP/internal/domain"
 	"DP/internal/remote"
 	"DP/internal/security"
-	"DP/internal/store"
 )
+
+type Repository interface {
+	CancelModelUpload(context.Context, string) error
+	CompleteModelUpload(context.Context, string) error
+	CreateModelTask(context.Context, domain.ModelTask) (domain.ModelTask, error)
+	CreateModelUpload(context.Context, domain.Model, domain.ModelUpload) (domain.Model, domain.ModelUpload, error)
+	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetModel(context.Context, string) (domain.Model, error)
+	GetModelTask(context.Context, string) (domain.ModelTask, error)
+	GetModelUpload(context.Context, string) (domain.ModelUpload, error)
+	GetModelUploadByModel(context.Context, string) (domain.ModelUpload, error)
+	ListExpiredModelUploads(context.Context, time.Time, int) ([]domain.ModelUpload, error)
+	ListModels(context.Context, string) ([]domain.Model, error)
+	MarkModelDeleted(context.Context, string) error
+	MarkModelReady(context.Context, string, string, int64, int64) error
+	SetModelState(context.Context, string, domain.ModelStatus, string) error
+	SetModelUploadOffset(context.Context, string, int64) error
+	UpdateModelTask(context.Context, domain.ModelTask) error
+}
 
 type Manager struct {
 	ctx             context.Context
 	dataDir         string
-	store           *store.Store
+	store           Repository
 	cipher          *security.PasswordCipher
 	remote          *remote.Executor
 	audit           *audit.Service
@@ -46,7 +64,7 @@ type UploadCreated struct {
 	ExpiresAt  time.Time    `json:"expires_at"`
 }
 
-func NewManager(ctx context.Context, dataDir string, db *store.Store, cipher *security.PasswordCipher, executor *remote.Executor,
+func NewManager(ctx context.Context, dataDir string, db Repository, cipher *security.PasswordCipher, executor *remote.Executor,
 	auditService *audit.Service, maxBytes, chunkBytes int64, retention, transferTimeout time.Duration, concurrency int, log *slog.Logger) *Manager {
 	return &Manager{ctx: ctx, dataDir: dataDir, store: db, cipher: cipher, remote: executor,
 		audit:    auditService,
