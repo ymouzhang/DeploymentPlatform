@@ -1,25 +1,26 @@
 # DP 前后端架构设计
 
-> 文档状态：初版
+> 文档状态：RBAC/PostgreSQL 重构中
 > 依据：[PRD](./prd.md)
+> 重构基线：[RBAC 与 PostgreSQL 重构设计](./rbac-postgresql-refactor.md)
 > 路线图：[管理员产品优化路线图](./admin-product-optimization.md)
-> 更新时间：2026-08-30
+> 更新时间：2026-09-02
 
 ## 1. 设计目标
 
 DP 是一个使用本地账号登录的内部 Web 管理后台。系统按账号隔离安装包、目标服务器环境和模型，通过
 SSH/SFTP 执行服务生命周期操作及模型传输；同时提供配置编辑、健康检查、环境迁移和实时执行日志。
-管理员可管理账号并查看、操作全部账号的数据，普通账号只能访问自己的数据。
+系统通过 RBAC 将用户绑定到一个或多个角色，并以权限及 `own/all` 数据范围决定可访问资源。
 
 本设计优先考虑：
 
-- 单机部署简单：一个 Go 进程、一个 SQLite 数据库、一个数据目录。
+- 部署边界清晰：一个 Go 模块化单体、一个 PostgreSQL 服务和一个业务文件目录，由 Docker Compose 管理。
 - 密码安全：SSH 密码始终密文落盘，仅在后端实际连接时短暂解密。
-- 权限可靠：认证、角色判断和数据归属校验全部在后端完成，前端只负责呈现可用入口。
+- 权限可靠：认证、权限判断和数据范围校验全部在后端统一完成，前端只负责呈现可用入口。
 - 操作可观察：浏览器关闭或 SSE 重连后仍可查看操作进度和结果。
 - 文件操作可靠：安装包上传采用临时文件加原子替换；远端实例配置采用临时文件加原子替换。
 - 易于扩展：上传安装包时可创建自定义服务类型，通用包约定保持一致。
-- 避免过度设计：第一版不拆微服务，不引入消息队列、Redis 或独立数据库服务。
+- 避免过度设计：不拆微服务，不引入消息队列、Redis、权限 DSL、角色继承或显式 deny。
 
 ## 2. 总体架构
 
@@ -32,7 +33,7 @@ flowchart LR
     APP[应用服务]
     OPS[操作执行器]
     HC[健康检查器]
-    DB[(SQLite)]
+    DB[(PostgreSQL)]
     FS[(数据目录)]
     SSH[SSH / SFTP]
     REMOTE[目标服务器]
@@ -57,11 +58,11 @@ flowchart LR
 
 - 前端构建为静态文件，通过 Go `embed` 嵌入并由同一进程提供。
 - 浏览器与 API 同源，不开放 CORS。
-- SQLite 保存账号、登录会话、环境、安装包元数据、安装状态、操作记录和审计事件。
+- PostgreSQL 保存账号、RBAC、登录会话、环境、安装包元数据、安装状态、操作记录和审计事件。
 - 文件系统保存不可变安装包版本，`storage_path` 是文件位置的唯一依据；操作日志通过环境归属间接关联账号。
 - Go 进程直接执行 SSH、SFTP、压缩包处理和健康检查。
 
-第一版只支持单实例运行。多个 DP 实例不得同时读写同一个 SQLite 文件或数据目录。
+本轮仍按单 DP 实例交付；PostgreSQL 与业务文件分开持久化，为未来扩展留出边界，但本轮不实现多副本协调。
 
 ## 3. 技术选型
 
@@ -92,15 +93,14 @@ flowchart LR
 | --- | --- | --- |
 | 语言 | Go 1.26 | 与当前 `go.mod` 一致 |
 | HTTP | 标准库 `net/http`、`ServeMux` | 已支持方法和路径参数，当前 API 规模无需额外 Web 框架 |
-| 数据访问 | `database/sql` + 显式 SQL | 表少、查询明确，便于控制事务和冲突覆盖 |
-| 数据库 | SQLite，WAL 模式 | 单机低写并发后台，无需额外数据库服务 |
-| SQLite 驱动 | `modernc.org/sqlite` | 纯 Go，便于生成无 CGO 的单文件程序 |
+| 数据访问 | `pgx/v5/pgxpool` + 显式 SQL | 使用 PostgreSQL 原生类型、事务、连接池和错误码 |
+| 数据库 | PostgreSQL 17 | RBAC 关系、事务约束和后续并发治理的唯一数据库 |
 | 数据迁移 | 内嵌版本化 SQL migration | 启动时先迁移，再启动 HTTP 服务 |
 | SSH | `golang.org/x/crypto/ssh` | Go 官方扩展仓库的 SSH 客户端实现 |
 | 文件上传 | `github.com/pkg/sftp` | 复用 SSH 连接上传安装包及执行写权限探测 |
 | 加密 | 标准库 AES-256-GCM | 同时提供加密和完整性校验，密文可跨后台迁移 |
 | 登录密码 | `bcrypt` | 只保存不可逆密码哈希，不复用 SSH 密码加密机制 |
-| 会话 | 随机不透明 Token + SQLite | 浏览器只保存 HttpOnly Cookie，数据库只保存 Token 的 SHA-256 摘要 |
+| 会话 | 随机不透明 Token + PostgreSQL | 浏览器只保存 HttpOnly Cookie，数据库只保存 Token 的 SHA-256 摘要 |
 | YAML 解析 | `go.yaml.in/yaml/v3` | 后端解析并校验 `config/config.yaml` |
 | 日志 | `log/slog` | 输出结构化日志，并统一做敏感字段过滤 |
 | API 契约 | OpenAPI 3.1 | 前后端共享接口模型，前端生成 TypeScript 类型 |
@@ -312,8 +312,9 @@ web/
 flowchart TD
     H[HTTP Handler / Middleware]
     A[Application Service]
+    Z[Access / RBAC]
     D[Domain Model / Interfaces]
-    R[SQLite Repository]
+    R[PostgreSQL Repository]
     P[Package Store]
     C[Password Cipher]
     S[SSH Executor]
@@ -322,7 +323,9 @@ flowchart TD
     K[Health Checker]
 
     H --> A
+    H --> Z
     A --> D
+    A --> Z
     A --> R
     A --> P
     A --> C
@@ -333,10 +336,11 @@ flowchart TD
     A --> K
 ```
 
-- **HTTP 层**：解析请求、校验基本格式、调用应用服务、序列化响应和 SSE。
+- **HTTP 层**：注册路由所需权限、解析请求、调用应用服务、序列化响应和 SSE；不判断固定角色名。
+- **授权层**：维护权限常量、scope 合并和资源归属决策，不依赖 HTTP 或 PostgreSQL。
 - **应用层**：环境导入、安装、启动、停止等用例及事务边界。
-- **领域层**：环境、安装包、操作、服务类型等模型和规则，不依赖 HTTP/SQLite。
-- **基础设施层**：SQLite、文件系统、加密、SSH/SFTP、健康检查和事件存储。
+- **领域层**：账号、角色、环境、安装包、操作等模型和规则，不依赖 HTTP/PostgreSQL。
+- **基础设施层**：PostgreSQL、文件系统、加密、SSH/SFTP、健康检查和事件存储。
 
 不要建立纯粹为“分层”而存在的接口。只在需要替换实现或隔离外部系统的边界定义接口，例如 `EnvironmentRepository`、`SSHClient`、`PackageStore`、`PasswordCipher`。
 
@@ -347,10 +351,11 @@ cmd/dp/
 └── main.go
 internal/
 ├── config/                   # 环境变量加载与启动校验
+├── access/                   # 权限常量、scope 与授权决策
 ├── domain/                   # 领域模型、状态枚举、错误
 ├── application/              # 用例编排
 ├── httpapi/                  # Handler、中间件、SSE、静态文件
-├── repository/sqlite/        # SQL Repository
+├── repository/postgres/      # pgxpool、migration、按领域拆分的 SQL
 ├── security/                 # AES-GCM、脱敏、Origin 校验
 ├── archive/                  # tar.gz 校验与配置模板读取
 ├── packagefs/                # 安装包原子存储
@@ -384,37 +389,42 @@ data/                         # 运行时生成，不提交 Git
 
 ## 6. 数据设计
 
+本轮数据模型全部使用 PostgreSQL。主键和外键使用 `UUID`，时间使用 `TIMESTAMPTZ`，布尔状态使用
+`BOOLEAN`，结构化快照使用 `JSONB`；下列业务表语义继续有效，精确 PostgreSQL schema、RBAC 表和
+不兼容迁移规则以[RBAC 与 PostgreSQL 重构设计](./rbac-postgresql-refactor.md)为准。
+
 ### 6.1 `users`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID |
-| `username` | TEXT UNIQUE | 登录名，规范化后唯一 |
+| `id` | UUID PK | 用户 ID |
+| `username` | VARCHAR(32) UNIQUE | 登录名，规范化后唯一 |
 | `password_hash` | TEXT | bcrypt 密码哈希 |
-| `role` | TEXT | `admin` 或 `user` |
-| `enabled` | INTEGER | 是否允许登录和继续使用已有会话 |
-| `must_change_password` | INTEGER | 是否使用初始化、账号创建或管理员重置产生的临时密码；为真时限制为仅可查询本人、修改本人密码和退出 |
-| `is_initial_admin` | INTEGER | 是否为首次启动创建且受保护的管理员 |
-| `created_by` | TEXT | 创建该账号的管理员 ID；初始管理员为空 |
-| `created_at` | TEXT | 创建时间 |
-| `updated_at` | TEXT | 更新时间 |
+| `enabled` | BOOLEAN | 是否允许登录和继续使用已有会话 |
+| `must_change_password` | BOOLEAN | 是否使用临时密码；为真时只允许认证自服务 |
+| `is_initial_admin` | BOOLEAN | 是否为首次启动创建且受保护的账号 |
+| `created_by` | UUID FK NULL | 创建该账号的操作者；初始管理员为空 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | 更新时间 |
 
 用户名长度为 3–32，只允许字母、数字、点、下划线和连字符，并以字母或数字开头；密码长度为 8–128。用户名按小写规范化，避免大小写相似账号。
+
+用户不再包含单一 `role` 字段；`roles`、`permissions`、`user_roles` 和 `role_permissions` 构成 Core RBAC。
 
 ### 6.2 `sessions`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `token_hash` | TEXT PK | 随机会话 Token 的 SHA-256 摘要 |
-| `id` | TEXT UNIQUE | 对外展示和撤销使用的随机会话 ID，不用于认证 |
-| `user_id` | TEXT FK | 登录账号 |
+| `token_hash` | CHAR(64) PK | 随机会话 Token 的 SHA-256 摘要 |
+| `id` | UUID UNIQUE | 对外展示和撤销使用的会话 ID，不用于认证 |
+| `user_id` | UUID FK | 登录账号 |
 | `source_ip` | TEXT | 登录时按可信代理规则解析的来源 IP |
 | `user_agent` | TEXT | 登录时截断保存的客户端摘要，最长 512 字符 |
-| `last_seen_at` | TEXT | 最近活动时间，认证请求至多每 5 分钟刷新一次 |
-| `expires_at` | TEXT | 固定过期时间 |
-| `created_at` | TEXT | 创建时间 |
+| `last_seen_at` | TIMESTAMPTZ | 最近活动时间，认证请求至多每 5 分钟刷新一次 |
+| `expires_at` | TIMESTAMPTZ | 固定过期时间 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
 
-浏览器 Cookie 中保存 32 字节随机 Token，SQLite 只保存摘要；API 只返回独立会话 ID，不返回 Token 摘要。Cookie 使用 `HttpOnly`、`SameSite=Strict` 和 `/` 路径；HTTPS 请求附加 `Secure`。会话默认有效期 24 小时。登录时清理过期会话；退出、改密、重置密码或禁用账号时删除相应会话。认证上下文同时携带用户和会话 ID，用于识别当前会话及精确撤销。
+浏览器 Cookie 中保存 32 字节随机 Token，PostgreSQL 只保存摘要；API 只返回独立会话 ID，不返回 Token 摘要。Cookie 使用 `HttpOnly`、`SameSite=Strict` 和 `/` 路径；HTTPS 请求附加 `Secure`。会话默认有效期 24 小时。登录时清理过期会话；退出、改密、重置密码或禁用账号时删除相应会话。认证上下文同时携带用户、会话 ID 和实时计算的最终权限。
 
 #### 6.2.1 `login_throttles`
 
@@ -426,7 +436,7 @@ data/                         # 运行时生成，不提交 Git
 | `blocked_until` | TEXT | 当前退避截止时间 |
 | `updated_at` | TEXT | 最近更新，用于清理过期状态 |
 
-登录前先同时检查用户名和来源 IP 两个键，任一键仍在退避期即返回统一的 `LOGIN_THROTTLED`。失败后在 SQLite 事务内更新两个键，第 5 次起按 `30s × 2^(失败次数-5)` 退避并封顶 15 分钟；成功后删除两个键。状态持久化避免应用重启绕过限流，超过 24 小时未更新的状态由后台任务清理。同一用户名和来源 IP 的限流拒绝在 30 秒内聚合为一条审计，避免攻击流量反向放大审计表。
+登录前先同时检查用户名和来源 IP 两个键，任一键仍在退避期即返回统一的 `LOGIN_THROTTLED`。失败后在 PostgreSQL 事务内更新两个键，第 5 次起按 `30s × 2^(失败次数-5)` 退避并封顶 15 分钟；成功后删除两个键。状态持久化避免应用重启绕过限流，超过 24 小时未更新的状态由后台任务清理。同一用户名和来源 IP 的限流拒绝在 30 秒内聚合为一条审计，避免攻击流量反向放大审计表。
 
 ### 6.3 `environments`
 
@@ -533,7 +543,7 @@ UNIQUE(owner_id, ip, service_type)
 
 每次有效保存插入不可变修订，并在同一事务中更新 `service_configs` 当前投影；内容完全相同时直接返回当前配置，不创建修订。回滚读取目标修订内容，执行与普通保存相同的格式校验和远端原子写入，再创建来源为 `rollback` 的新修订。审计仅记录修订 ID、来源、端口及内容摘要，不记录配置正文。
 
-已安装实例保存配置时先原子替换远端文件，再在一个 SQLite 事务中写入修订、当前投影和健康端口。如果本地事务失败，应用立即以保存前内容补偿恢复远端文件，并合并报告原始错误与补偿错误；不引入独立发布任务或分布式事务。
+已安装实例保存配置时先原子替换远端文件，再在一个 PostgreSQL 事务中写入修订、当前投影和健康端口。如果本地事务失败，应用立即以保存前内容补偿恢复远端文件，并合并报告原始错误与补偿错误；不引入独立发布任务或分布式事务。
 
 ### 6.6 `operations`
 
@@ -553,7 +563,7 @@ UNIQUE(owner_id, ip, service_type)
 | `started_at` | TEXT NULL | 开始时间 |
 | `finished_at` | TEXT NULL | 结束时间 |
 
-详细日志不逐行写 SQLite，而是追加到：
+详细日志不逐行写 PostgreSQL，而是追加到：
 
 ```text
 data/operations/<operation-id>.jsonl
@@ -610,11 +620,11 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 - 异步服务操作创建 `operations` 后立即追加 `*.requested`，操作进入终态后再追加 `*.completed`；完成事件记录最终 outcome、error_code、request_id 和 operation_id。两次追加均为幂等业务之外的可观测性写入，不与长时间远程操作共享数据库事务。
 - 权限拒绝在授权边界写 `denied`；明显的格式校验错误只记录涉及账号安全、数据导出或高风险变更的事件，避免攻击者用无效请求无限放大数据库。
 - 审计表不提供更新接口。清理仅由后台保留策略任务批量执行；应用层其他模块不暴露删除审计记录的 Repository 方法。
-- SQLite 文件拥有者仍可直接篡改数据库，因此本功能提供应用层可追溯性，不宣称能够抵御取得宿主机文件权限的攻击者。若未来需要合规级防篡改，应将事件同步到外部只追加日志系统或带签名的远程存储。
+- PostgreSQL 超级用户或宿主机控制者仍可篡改数据库，因此本功能提供应用层可追溯性，不宣称能够抵御基础设施管理员。若未来需要合规级防篡改，应将事件同步到外部只追加日志系统或带签名的远程存储。
 
-### 6.8 兼容迁移与导入导出 JSON
+### 6.8 不兼容重构与导入导出 JSON
 
-首次引入权限管理的 migration 创建待初始化的受保护管理员记录，并将所有现有 `packages` 和 `environments` 指向该账号；`service_configs`、`operations` 和日志通过环境继承归属。应用完成环境变量校验和密码哈希后，将该待初始化管理员原子更新为正式用户名、密码哈希和 `must_change_password=1`，随后才允许启动 HTTP 服务。只有仍处于待初始化状态的记录会执行该更新，应用重启和版本升级不会重新标记既有初始管理员。迁移必须重建原有全局唯一约束，使其变为账号内唯一，并保持 UUID、配置和操作历史不变。
+本轮删除 SQLite schema 和旧 migration，从空 PostgreSQL 数据库执行新的 `001_initial.sql`。系统不读取或转换旧 `data/dp.db`，也不把旧 `admin/user` 字段映射为角色。环境 JSON 导入导出继续作为业务功能，但不是数据库迁移机制。
 
 ### 6.9 `notifications`
 
@@ -649,7 +659,7 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 
 - 总览统计使用少量聚合 SQL；健康数量在应用层合并健康监控快照，避免数据库保存易过期的运行态。
 - 账号详情使用条件聚合查询，最近操作统计固定为最近 30 天；最近登录和来源 IP 从成功登录审计快照读取，有效会话仅统计未过期记录。
-- 资源交接在单个 SQLite 事务中重新校验源/目标账号、运行中服务操作、模型任务和唯一键冲突，再更新 `packages.owner_id`、`package_versions.owner_id`、`environments.owner_id`、`models.owner_id`、`model_uploads.owner_id` 与 `model_tasks.owner_id`。任何检查或更新失败均回滚。
+- 资源交接在单个 PostgreSQL 事务中重新校验源/目标账号、运行中服务操作、模型任务和唯一键冲突，再更新 `packages.owner_id`、`package_versions.owner_id`、`environments.owner_id`、`models.owner_id`、`model_uploads.owner_id` 与 `model_tasks.owner_id`。任何检查或更新失败均回滚。
 - 安装包版本是不可变文件，交接只变更数据库归属，不移动实体文件，也不改写 `storage_path`。后续读取、版本删除和服务类型删除始终使用持久化路径，因此不会产生文件移动与数据库提交之间的崩溃窗口。
 - 交接不改写 `operations`、`audit_events` 与 `notifications` 的归属快照；既有服务配置通过 `environment_id` 自动随环境归属变化。
 
@@ -725,7 +735,7 @@ HTTP 层提供单一 `GET /events` SSE。连接建立时先发送 `sync` 事件�
 
 前端 `realtime` 模块在认证 Shell 生命周期内维护每标签页唯一 `EventSource`。事件正文不直接写入页面状态，而是通过集中式通讯 query key 失效 React Query 缓存；管理总览缓存也随通讯事件失效，使待处理消息与顶栏未读数同步。浏览器自动重连、连接 `open`、SSE `sync` 和页面恢复可见时均执行一次同步。SSE 断线不阻止 HTTP 发送，原 30 秒摘要、列表和详情轮询继续作为最终一致性兜底。
 
-当前部署为单 Go 进程和本地 SQLite，因此进程内事件中心满足首版范围。未来若允许多副本共享数据库，必须将发布层替换为 Redis Pub/Sub、数据库 outbox 或其他跨实例总线；业务应用服务只依赖发布接口，不直接依赖具体传输实现。
+当前部署为单 Go 进程和 PostgreSQL，因此进程内事件中心满足本轮范围。未来若允许多副本共享数据库，必须将发布层替换为 Redis Pub/Sub、数据库 outbox 或其他跨实例总线；业务应用服务只依赖发布接口，不直接依赖具体传输实现。
 
 导出格式带显式版本，避免未来字段扩展破坏兼容性：
 
@@ -812,7 +822,7 @@ sequenceDiagram
     participant B as 浏览器
     participant A as Go API
     participant C as AES-GCM
-    participant D as SQLite
+    participant D as PostgreSQL
     participant S as SSH
 
     B->>A: HTTPS 提交明文密码
@@ -834,7 +844,6 @@ Go 运行时不能保证立即清零字符串内存，因此实现中避免多�
 
 ```text
 data/
-├── dp.db
 ├── packages/
 │   └── <owner-id>/
 │       └── dp-demo/
@@ -917,7 +926,7 @@ sequenceDiagram
     participant FE as 前端
     participant API as Go API
     participant OP as 操作执行器
-    participant DB as SQLite
+    participant DB as PostgreSQL
     participant R as 目标服务器
 
     FE->>API: POST /services/{envId}/install
@@ -1014,7 +1023,7 @@ ID 与不可变的标记 owner 一致，先原子改名为 trash 再异步递归
 
 ### 10.1 DP 自身健康检查
 
-DP 只提供一个无需登录的 `GET /healthz`。处理器执行一次轻量 SQLite 查询和数据目录写入探测；两者都成功时返回 HTTP 200，否则返回 HTTP 503。响应使用普通 JSON，不套业务 API 的 `data` envelope，也不暴露内部错误：
+DP 只提供一个无需登录的 `GET /healthz`。处理器执行一次轻量 PostgreSQL 查询和数据目录写入探测；两者都成功时返回 HTTP 200，否则返回 HTTP 503。响应使用普通 JSON，不套业务 API 的 `data` envelope，也不暴露内部错误：
 
 ```json
 {"status":"ok"}
@@ -1099,13 +1108,13 @@ data: {"status":"failed","stage":"script","exit_code":1}
 4. 异步操作创建时把 request ID 与 actor 快照保存到操作上下文；操作执行器进入终态时追加完成事件。
 5. 查询层只允许预定义筛选字段和排序，`changes_json` 不参与模糊 SQL 搜索，避免低效全表扫描。
 
-审计保留期默认 180 天，并通过 `DP_AUDIT_RETENTION_DAYS` 配置；每天低峰期小批量清理过期记录，避免大事务长期占用 SQLite 写锁。高风险长期留存或外部归档不在第一版内。
+审计保留期默认 180 天，并通过 `DP_AUDIT_RETENTION_DAYS` 配置；每天低峰期小批量清理过期记录，避免大事务产生长时间行锁和表膨胀。高风险长期留存或外部归档不在第一版内。
 
 ## 12. API 设计
 
 统一前缀：`/api/v1`。
 
-除 `POST /auth/login` 和 `GET /healthz` 外，所有 API（包括 SSE）都必须携带有效会话。资源接口先验证登录状态，再执行角色和数据归属判断；为避免枚举其他账号资源，普通账号访问他人资源统一返回 `404`。仅管理员可使用可选的 `owner_id` 查询参数筛选或操作其他账号的数据；省略时，普通账号固定为本人，管理员列表默认查看全部账号，管理员新增资源默认归本人。
+除 `POST /auth/login` 和 `GET /healthz` 外，所有 API（包括 SSE）都必须携带有效会话。每条业务路由必须声明权限键；资源接口先校验权限，再按最终 `own/all` scope 收窄查询或校验目标归属。缺少权限或 scope 时返回 `403`，资源确实不存在时返回 `404`。只有获得对应 `all` scope 的账号可使用 `owner_id` 查看或操作其他账号数据；新增资源仍默认归当前账号。
 
 ### 12.1 认证与账号
 
@@ -1127,6 +1136,13 @@ data: {"status":"failed","stage":"script","exit_code":1}
 | `DELETE` | `/users/{id}/sessions/{sessionId}` | 管理员撤销目标账号指定会话 |
 | `POST` | `/users/{id}/sessions/revoke` | 管理员强制撤销目标账号全部会话 |
 | `POST` | `/users/{id}/transfer` | 管理员将目标账号全部业务资源原子交接给启用账号 |
+| `PUT` | `/users/{id}/roles` | 具有 `account.assign_roles` 的账号更新目标用户角色 |
+| `GET` | `/permissions` | 具有 `role.read` 的账号查看固定权限目录 |
+| `GET` | `/roles` | 具有 `role.read` 的账号查看角色 |
+| `POST` | `/roles` | 具有 `role.create` 的账号创建自定义角色 |
+| `GET` | `/roles/{id}` | 具有 `role.read` 的账号查看角色详情与成员 |
+| `PUT` | `/roles/{id}` | 具有 `role.update` 的账号更新自定义角色与权限绑定 |
+| `DELETE` | `/roles/{id}` | 具有 `role.delete` 的账号删除未占用的自定义角色 |
 
 账号不存在或密码错误时统一返回相同的用户名或密码错误。用户名或来源 IP 进入退避期时返回 `429 LOGIN_THROTTLED`；用户名和密码校验正确但账号被禁用时返回 `403 ACCOUNT_DISABLED`，登录页面明确提示“账号已被禁用”，这样只向已掌握正确凭据的请求者展示账号状态。初始化管理员和所有新建账号在持久化时固定设置 `must_change_password=1`；创建接口不接受调用方覆盖该字段。`must_change_password` 为真时，认证中间件仅放行 `/auth/me`、`/auth/password` 和 `/auth/logout`，其他接口返回 `403 PASSWORD_CHANGE_REQUIRED`。账号本人使用当前临时密码修改成功后清除标记、撤销全部会话并返回登录页。账号与会话列表不返回密码哈希、Token 或 Token 摘要。账号管理接口禁止禁用或删除初始管理员和当前登录账号；删除仍有业务数据的账号返回 `409 USER_IN_USE`。资源交接遇到运行中操作或目标唯一键冲突返回 `409 TRANSFER_CONFLICT`，消息明确区分运行中操作、目标账号状态和目标资源冲突，但不暴露凭据或配置内容。
 
@@ -1226,7 +1242,7 @@ data: {"status":"failed","stage":"script","exit_code":1}
 
 - `400`：请求或 JSON 格式错误。
 - `401`：未登录、会话无效或会话已过期。
-- `403`：已登录但缺少管理员角色。
+- `403`：已登录但缺少路由权限或目标资源 scope。
 - `404`：环境、安装包或操作不存在。
 - `409`：环境冲突、重复安装、操作并发冲突、删除被占用的环境（`ENVIRONMENT_INSTALLED`）或安装包（`PACKAGE_IN_USE`）。
 - `413`：上传文件过大。
@@ -1318,7 +1334,7 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 - 模型分片先写入并同步暂存文件，再在同一事务中推进 `model_uploads.offset`；数据库中的 offset 永远不能大于磁盘已持久化长度。
 - 模型部署和删除只操作任务专属临时目录或带有效 `.dp-model.json` 标记的目录；远端步骤成功后再提交本地模型状态，失败时保留可重试记录并清理任务专属临时目录。
 - 数据目录必须位于同一文件系统，保证 `rename` 原子性。
-- SQLite 启用 `foreign_keys=ON`、WAL 和 `busy_timeout`。
+- PostgreSQL 使用外键、CHECK、唯一索引和事务保证一致性；约束冲突按 SQLSTATE 映射为稳定领域错误。
 
 ### 13.2 服务重启
 
@@ -1326,7 +1342,7 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 - 运行中的操作在重启后标记 `interrupted`，不自动重复远端脚本。
 - 未完成模型上传保留暂存文件和 offset，浏览器可在保留期内续传；运行中的模型任务在重启后标记 `interrupted`，不自动重复 SFTP、解压、下载或删除动作。
 - 重试模型任务前先核对最终目录、任务临时目录和 `.dp-model.json`，只清理当前任务创建且可验证归属的临时文件，不猜测远端执行结果。
-- 收到关闭信号后先停止接收新请求并取消后台上下文，再等待远程操作、健康监控和维护任务退出，最后关闭 SQLite；操作终态和完成审计在数据库关闭前落盘。
+- 收到关闭信号后先停止接收新请求并取消后台上下文，再等待远程操作、健康监控和维护任务退出，最后关闭 PostgreSQL 连接池；操作终态和完成审计在数据库关闭前落盘。
 - 下次安装前检查远端 `.dp-installed.json`，弥补“远端成功但本地提交前进程崩溃”的窗口。
 - 健康检查状态允许短暂丢失，启动后自动重建。
 
@@ -1367,16 +1383,19 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 
 ## 15. 配置与部署
 
+部署与数据库重构的完整约定见[RBAC 与 PostgreSQL 重构设计](./rbac-postgresql-refactor.md)。本轮以 Docker Compose 同时运行 DP 与 PostgreSQL，不提供 SQLite 模式。
+
 建议环境变量：
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `DP_MASTER_KEY` | 是 | 无 | Base64 编码 32 字节主密钥 |
+| `DP_DATABASE_URL` | 是 | 无 | PostgreSQL 连接 URI；Compose 内由启动脚本生成 |
 | `DP_ADMIN_USERNAME` | 首次启动 | 无 | 初始管理员用户名；初始化完成后不再自动覆盖数据库账号 |
 | `DP_ADMIN_PASSWORD` | 首次启动 | 无 | 初始管理员密码，8–128 字符；初始化完成后不再自动重置密码 |
 | `DP_SESSION_TTL` | 否 | `24h` | 登录会话有效期 |
 | `DP_STALE_ACCOUNT_DAYS` | 否 | `90` | 启用账号长期未成功登录的站内提醒阈值；必须为正整数 |
-| `DP_DATA_DIR` | 否 | `./data` | SQLite、安装包和操作日志目录 |
+| `DP_DATA_DIR` | 否 | `./data` | 安装包和操作日志目录，不包含数据库 |
 | `DP_LISTEN_ADDR` | 否 | `127.0.0.1:8080` | HTTP 监听地址 |
 | `DP_HEALTH_INTERVAL` | 否 | `10s` | 健康检查周期 |
 | `DP_UPLOAD_MAX_BYTES` | 否 | `107374182400` | 单个安装包上传上限，默认 100 GiB，单位为字节 |
@@ -1397,25 +1416,25 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 构建产物：
 
 1. 前端 `pnpm build` 生成 `webui/dist`。
-2. Go 使用 `//go:embed` 嵌入 `webui/dist` 和数据库 migration。
+2. Go 使用 `//go:embed` 嵌入 `webui/dist` 和 PostgreSQL migration。
 3. 输出单个 `dp` 可执行文件。
-4. 首次运行还需要初始管理员用户名和密码；完成初始化后，运行时只需可写数据目录和 `DP_MASTER_KEY`，但部署配置应安全保留以便灾备重建。
+4. 首次运行还需要 PostgreSQL 连接、初始管理员用户名和密码；完成初始化后仍需 PostgreSQL、可写业务目录和 `DP_MASTER_KEY`。
 
 Docker 部署约定：
 
 1. 使用 Node 与 Go 多阶段镜像完成前端测试/构建、后端测试/编译，运行镜像不包含源码和构建工具。
 2. 多架构构建时，Node 前端测试/构建和 Go 测试阶段固定使用 BuildKit 的 `BUILDPLATFORM` 原生执行，避免在 x86_64 主机生成 ARM64 镜像时通过 QEMU 运行 Vitest 或 Go 测试。Go 编译通过 `TARGETOS`、`TARGETARCH` 和 `CGO_ENABLED=0` 生成目标架构二进制，最终运行阶段保持 `TARGETPLATFORM`。
 3. 前端容器测试使用 `vitest run` 的显式单次运行模式；组件测试单例超时设为 15 秒，作为共享或较慢构建节点的容错，但不能用提高超时替代原生构建平台。
-4. Compose 将宿主机 `./data` 绑定挂载到 `/app/data`，统一持久化 SQLite、安装包和模型任务日志；模型完整包暂存在目标机，DP 数据盘不需要按模型大小预留空间。
-5. `.env` 由 Compose 读取，保存 `DP_MASTER_KEY` 和运行参数，不复制到镜像；它必须与 `data/` 一并备份和迁移。
+4. Compose 将宿主机 `./data` 绑定挂载到 `/app/data` 保存安装包和模型任务日志，PostgreSQL 使用独立持久卷；模型完整包暂存在目标机。
+5. `.env` 保存 `DP_MASTER_KEY`、PostgreSQL 凭据和运行参数；备份必须同时覆盖 `.env`、`data/` 和 `pg_dump` 产物。
 6. 容器以宿主机当前 UID/GID 运行，避免绑定目录生成 root 所有者文件。
 7. 根文件系统只读，仅 `/app/data` 与 `/tmp` 可写；容器删除或重建不得删除宿主机数据。
-8. 一键发布脚本输出包含 DP 镜像、Compose 文件、启动脚本和配置模板的离线 `.tar.gz`，目标服务器不依赖 Go、Node.js 或镜像仓库。
+8. 一键发布脚本输出同时包含 DP 与 PostgreSQL 镜像、Compose 文件、启动脚本和配置模板的离线 `.tar.gz`，目标服务器不依赖 Go、Node.js 或镜像仓库。
 9. 第二阶段发布包额外携带固定版本、固定摘要的模型下载器镜像归档。DP 按任务把归档上传到目标环境并加载，目标机不从公网拉取下载器镜像。
 
 提供：
 
-- `GET /healthz`：检查 DP 的 SQLite 与数据目录，返回最小 `ok/error` JSON。
+- `GET /healthz`：检查 DP 的 PostgreSQL 与数据目录，返回最小 `ok/error` JSON。
 - 优雅关闭：停止接收新操作，等待短暂宽限期，未结束操作标记为中断。
 - 数据目录挂载持久卷；不得放在临时容器文件系统。
 
@@ -1424,16 +1443,16 @@ Docker 部署约定：
 ### 16.1 后端
 
 - 加密往返、错误主密钥、nonce 唯一性、跨实例密文兼容。
-- 初始管理员迁移、密码哈希、登录失败、会话过期/注销、改密后会话撤销。
-- 普通账号跨 owner 的列表、详情、变更、下载和 SSE 越权测试；管理员全量与按账号筛选测试。
+- 空 PostgreSQL 初始化、初始 `super_admin`、密码哈希、登录失败、会话过期/注销、改密后会话撤销。
+- Core RBAC 多角色并集、默认拒绝、own/all、跨 owner 的列表、详情、变更、下载和 SSE 越权测试。
 - 不同账号相同服务类型和相同 `IP + service_type` 的唯一约束测试。
 - 初始管理员/当前账号保护、禁用立即失效、有数据账号删除冲突测试。
 - 审计事件覆盖成功、失败和拒绝结果；actor/owner/target 快照及跨账号操作归属正确。
 - 密码、SSH 密文、Token、Cookie、配置正文和远程输出不会进入审计字段或 CSV。
 - 同步业务变更成功或失败后尽力追加审计，异步操作 requested/completed 正确关联 operation ID；审计写入失败必须记录 request ID 和错误日志。
 - 删除账号或资源后审计仍可查询；游标分页无重复遗漏；时间、账号、事件、结果和 IP 筛选正确。
-- 非管理员审计接口全部返回 403；可信代理 IP 解析、伪造转发头、保留期清理和 CSV 公式注入防护测试。
-- 管理总览指标口径、管理员接口角色校验、操作中心组合筛选与游标分页测试。
+- 缺少 `audit.read/export` 的审计接口全部返回 403；可信代理 IP 解析、伪造转发头、保留期清理和 CSV 公式注入防护测试。
+- 管理总览指标口径、权限与 scope 校验、操作中心组合筛选与游标分页测试。
 - 资源交接的运行中操作、同名安装包和环境唯一键冲突测试；安装包不可变文件路径保持不变，数据库失败无部分交接，历史操作归属快照保持不变。
 - 标签账号隔离、大小写唯一性、跨账号关联拒绝、环境标签原子替换、删除解关联、资源交接映射、v1/v2 导入兼容及多标签交集筛选测试。
 - 操作标签快照在标签改名、删除和环境删除后仍可查询；管理总览标签筛选只改变文档声明的资源指标。
@@ -1473,17 +1492,13 @@ Docker 部署约定：
 
 ## 17. 实施顺序
 
-1. 建立 Go 启动配置、SQLite migration、环境 CRUD 和 AES-GCM。
-2. 完成环境导入导出及 SSH 校验。
-3. 完成安装包上传、校验、模板读取与实例配置持久化。
-4. 完成操作模型、SSE 日志和 SSH 脚本执行器。
-5. 完成安装、启动、停止和防重复安装。
-6. 完成健康检查调度器和服务聚合接口。
-7. 实现 React 页面、Monaco 编辑器和操作弹窗。
-8. 补齐端到端测试、嵌入式前端构建和生产部署配置。
-9. 增加本地账号、会话、owner 数据迁移、后端授权、管理员账号管理与前端账号筛选。
-10. 第一阶段实现模型表、可续传离线上传、压缩包校验、SFTP 部署、任务日志和安全删除。
-11. 第二阶段构建并随 DP 离线包发布固定下载器镜像，实现 ModelScope 默认、Hugging Face 可选的在线下载。
+1. 以 `001_initial.sql` 建立完整 PostgreSQL schema、权限目录和内置角色。
+2. 重写认证、Core RBAC、路由权限声明和资源 scope 校验。
+3. 按业务域迁移 repository SQL、事务和 PostgreSQL 错误映射。
+4. 改造前端权限上下文、路由、菜单、账号管理和角色权限页面。
+5. 更新 OpenAPI、Compose、启动脚本、备份说明和双镜像离线包。
+6. 删除 SQLite、二值角色和旧 migration，不保留兼容分支。
+7. 完成权限矩阵、PostgreSQL 集成、前端、备份恢复和离线部署验收。
 
 ## 18. 调研依据
 
@@ -1497,7 +1512,11 @@ Docker 部署约定：
 - [Go SSH 包文档](https://pkg.go.dev/golang.org/x/crypto/ssh)
 - [Go `crypto/cipher` 文档：AES-GCM AEAD](https://pkg.go.dev/crypto/cipher)
 - [Go YAML v3 包文档](https://pkg.go.dev/go.yaml.in/yaml/v3)
-- [SQLite 官方文档：适用场景与并发边界](https://www.sqlite.org/whentouse.html)
+- [NIST Role Based Access Control](https://csrc.nist.gov/Projects/role-based-access-control/faqs)
+- [PostgreSQL 17 Constraints](https://www.postgresql.org/docs/17/ddl-constraints.html)
+- [PostgreSQL 17 Explicit Locking](https://www.postgresql.org/docs/17/explicit-locking.html)
+- [Docker Compose startup order](https://docs.docker.com/compose/how-tos/startup-order/)
+- [Uber Go Style Guide](https://github.com/uber-go/guide/blob/master/style.md)
 - [ModelScope 官方文档：模型下载](https://www.modelscope.cn/docs/models/download)
 - [Hugging Face Hub 官方文档：下载文件](https://huggingface.co/docs/huggingface_hub/en/guides/download)
 - [Hugging Face Hub 官方文档：CLI 命令](https://huggingface.co/docs/huggingface_hub/en/package_reference/cli)
