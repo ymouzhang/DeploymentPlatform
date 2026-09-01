@@ -8,5 +8,7 @@
 **/.dp-model-upload-*.tar.gz
 **/.dp-model-deploy-*/
 **/.dp-model-trash-*/
+**/.dp-tools/
+/test/models/
 __pycache__/
 *.pyc

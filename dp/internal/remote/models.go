@@ -2,6 +2,8 @@ package remote
 
 import (
 	"archive/tar"
+	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -13,21 +15,26 @@ import (
 	"math"
 	"os"
 	"path"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"DP/internal/domain"
 
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 const modelMarker = ".dp-model.json"
 
+type ModelValidationProgress func(bytesRead, totalBytes int64)
+
 type ModelArchiveInspection struct {
-	SHA256          string
-	ExpandedSize    int64
-	FileCount       int64
-	StripCommonRoot bool
+	SHA256          string `json:"sha256"`
+	ExpandedSize    int64  `json:"expanded_size"`
+	FileCount       int64  `json:"file_count"`
+	StripCommonRoot bool   `json:"strip_common_root"`
 }
 
 func ModelUploadRemotePath(targetDir, uploadID string) string {
@@ -172,23 +179,269 @@ func (e *Executor) RemoveModelUpload(ctx context.Context, env domain.Environment
 	return err
 }
 
-func (e *Executor) InspectModelArchive(ctx context.Context, env domain.Environment, password []byte, remotePath string, maxExpanded int64) (ModelArchiveInspection, error) {
+func (e *Executor) InspectModelArchive(ctx context.Context, env domain.Environment, password []byte, remotePath string, maxExpanded int64, progress ModelValidationProgress, emit EmitFunc) (ModelArchiveInspection, error) {
 	client, _, err := e.connect(ctx, env, password)
 	if err != nil {
 		return ModelArchiveInspection{}, err
 	}
 	defer client.Close()
-	sftpClient, err := sftp.NewClient(client)
+	sftpClient, err := sftp.NewClient(client, sftp.UseConcurrentReads(true), sftp.MaxConcurrentRequestsPerFile(256))
 	if err != nil {
 		return ModelArchiveInspection{}, err
 	}
 	defer sftpClient.Close()
+
+	validatorPath, toolErr := ensureRemoteModelValidator(ctx, client, sftpClient, env, emit)
+	if toolErr == nil {
+		inspection, validationErr, structured := runRemoteModelValidator(ctx, client, validatorPath, remotePath, maxExpanded, progress)
+		if validationErr == nil || structured {
+			return inspection, validationErr
+		}
+		toolErr = validationErr
+	}
+	if emit != nil {
+		emit("system", "目标机本地校验器不可用，回退到 SFTP 流式校验："+toolErr.Error())
+	}
+	return inspectModelArchiveViaSFTP(ctx, sftpClient, remotePath, maxExpanded, progress)
+}
+
+func inspectModelArchiveViaSFTP(ctx context.Context, sftpClient *sftp.Client, remotePath string, maxExpanded int64, progress ModelValidationProgress) (ModelArchiveInspection, error) {
 	file, err := sftpClient.Open(remotePath)
 	if err != nil {
 		return ModelArchiveInspection{}, fmt.Errorf("打开远端模型包失败: %w", err)
 	}
 	defer file.Close()
-	return inspectModelArchive(&contextReader{ctx: ctx, r: file}, maxExpanded)
+	info, err := file.Stat()
+	if err != nil {
+		return ModelArchiveInspection{}, err
+	}
+	pipeReader, pipeWriter := io.Pipe()
+	transferDone := make(chan error, 1)
+	go func() {
+		_, copyErr := file.WriteTo(pipeWriter)
+		_ = pipeWriter.CloseWithError(copyErr)
+		transferDone <- copyErr
+	}()
+	reader := &validatorProgressReader{r: &contextReader{ctx: ctx, r: pipeReader}, total: info.Size(), interval: time.Second, report: progress}
+	inspection, inspectErr := inspectModelArchive(reader, maxExpanded)
+	_ = pipeReader.CloseWithError(inspectErr)
+	transferErr := <-transferDone
+	if inspectErr != nil {
+		return inspection, inspectErr
+	}
+	if transferErr != nil {
+		return inspection, transferErr
+	}
+	reader.finish()
+	return inspection, nil
+}
+
+var localModelValidator struct {
+	sync.Once
+	path string
+	sha  string
+	size int64
+	err  error
+}
+
+func localModelValidatorInfo() (string, string, int64, error) {
+	localModelValidator.Do(func() {
+		localModelValidator.path, localModelValidator.err = os.Executable()
+		if localModelValidator.err != nil {
+			return
+		}
+		file, err := os.Open(localModelValidator.path)
+		if err != nil {
+			localModelValidator.err = err
+			return
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil {
+			localModelValidator.err = err
+			return
+		}
+		hash := sha256.New()
+		if _, err := io.Copy(hash, file); err != nil {
+			localModelValidator.err = err
+			return
+		}
+		localModelValidator.sha = hex.EncodeToString(hash.Sum(nil))
+		localModelValidator.size = info.Size()
+	})
+	return localModelValidator.path, localModelValidator.sha, localModelValidator.size, localModelValidator.err
+}
+
+func ensureRemoteModelValidator(ctx context.Context, client *ssh.Client, sftpClient *sftp.Client, env domain.Environment, emit EmitFunc) (string, error) {
+	targetArch, err := detectArch(client)
+	if err != nil {
+		return "", err
+	}
+	targetArch = normalizeLinuxArch(targetArch)
+	if targetArch != runtime.GOARCH {
+		return "", fmt.Errorf("目标机架构 %s 与 DP 架构 %s 不一致", targetArch, runtime.GOARCH)
+	}
+	localPath, localSHA, localSize, err := localModelValidatorInfo()
+	if err != nil {
+		return "", err
+	}
+	toolDir := path.Join(env.InstallDir, ".dp-tools")
+	if err := sftpClient.MkdirAll(toolDir); err != nil {
+		return "", fmt.Errorf("创建远端工具目录失败: %w", err)
+	}
+	_ = sftpClient.Chmod(toolDir, 0o700)
+	remotePath := path.Join(toolDir, "model-validator-"+localSHA[:16])
+	if info, statErr := sftpClient.Stat(remotePath); statErr == nil && info.Mode().IsRegular() && info.Size() == localSize {
+		remoteSHA, hashErr := hashRemoteFile(sftpClient, remotePath)
+		if hashErr == nil && remoteSHA == localSHA {
+			return remotePath, nil
+		}
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return "", statErr
+	}
+	if emit != nil {
+		emit("system", fmt.Sprintf("首次使用，正在上传目标机本地模型校验器（%d 字节）", localSize))
+	}
+	tempPath := remotePath + ".tmp-" + randomSuffix()
+	local, err := os.Open(localPath)
+	if err != nil {
+		return "", err
+	}
+	defer local.Close()
+	remoteFile, err := sftpClient.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
+	if err != nil {
+		return "", err
+	}
+	_, copyErr := io.Copy(remoteFile, &contextReader{ctx: ctx, r: local})
+	syncErr := remoteFile.Sync()
+	closeErr := remoteFile.Close()
+	if err := errors.Join(copyErr, syncErr, closeErr); err != nil {
+		_ = sftpClient.Remove(tempPath)
+		return "", err
+	}
+	if err := sftpClient.Chmod(tempPath, 0o700); err != nil {
+		_ = sftpClient.Remove(tempPath)
+		return "", err
+	}
+	if err := sftpClient.PosixRename(tempPath, remotePath); err != nil {
+		_ = sftpClient.Remove(tempPath)
+		return "", err
+	}
+	remoteSHA, err := hashRemoteFile(sftpClient, remotePath)
+	if err != nil || remoteSHA != localSHA {
+		_ = sftpClient.Remove(remotePath)
+		return "", fmt.Errorf("远端校验器摘要校验失败")
+	}
+	return remotePath, nil
+}
+
+func hashRemoteFile(client *sftp.Client, filename string) (string, error) {
+	file, err := client.Open(filename)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func normalizeLinuxArch(value string) string {
+	switch strings.TrimSpace(value) {
+	case "x86_64", "amd64":
+		return "amd64"
+	case "aarch64", "arm64":
+		return "arm64"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func runRemoteModelValidator(ctx context.Context, client *ssh.Client, validatorPath, archivePath string, maxExpanded int64, progress ModelValidationProgress) (ModelArchiveInspection, error, bool) {
+	session, err := client.NewSession()
+	if err != nil {
+		return ModelArchiveInspection{}, err, false
+	}
+	defer session.Close()
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return ModelArchiveInspection{}, err, false
+	}
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+	command := shellQuote(validatorPath) + " model-validator --archive " + shellQuote(archivePath) + " --max-expanded " + fmt.Sprintf("%d", maxExpanded)
+	if err := session.Start(command); err != nil {
+		return ModelArchiveInspection{}, err, false
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = session.Signal(ssh.SIGTERM)
+			_ = session.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
+
+	var inspection ModelArchiveInspection
+	var structuredErr error
+	gotResult := false
+	gotHello := false
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
+	for scanner.Scan() {
+		var event modelValidatorEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			return ModelArchiveInspection{}, fmt.Errorf("解析远端校验器输出失败: %w", err), false
+		}
+		switch event.Type {
+		case "hello":
+			if event.Protocol != modelValidatorProtocol {
+				return ModelArchiveInspection{}, fmt.Errorf("远端校验器协议版本不兼容: %d", event.Protocol), false
+			}
+			gotHello = true
+		case "progress":
+			if progress != nil {
+				progress(event.BytesRead, event.TotalBytes)
+			}
+		case "result":
+			if event.Inspection == nil {
+				return ModelArchiveInspection{}, errors.New("远端校验器结果为空"), false
+			}
+			inspection = *event.Inspection
+			gotResult = true
+		case "error":
+			structuredErr = &domain.AppError{Code: event.ErrorCode, Message: event.Message}
+		}
+	}
+	scanErr := scanner.Err()
+	waitErr := session.Wait()
+	if structuredErr != nil {
+		return ModelArchiveInspection{}, structuredErr, true
+	}
+	if scanErr != nil {
+		return ModelArchiveInspection{}, scanErr, false
+	}
+	if ctx.Err() != nil {
+		return ModelArchiveInspection{}, ctx.Err(), false
+	}
+	if waitErr != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = waitErr.Error()
+		}
+		return ModelArchiveInspection{}, errors.New(message), false
+	}
+	if !gotResult {
+		return ModelArchiveInspection{}, errors.New("远端校验器未返回结果"), false
+	}
+	if !gotHello {
+		return ModelArchiveInspection{}, errors.New("远端校验器未完成协议握手"), false
+	}
+	return inspection, nil, true
 }
 
 func inspectModelArchive(reader io.Reader, maxExpanded int64) (ModelArchiveInspection, error) {

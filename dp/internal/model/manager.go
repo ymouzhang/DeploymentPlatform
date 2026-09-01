@@ -418,7 +418,23 @@ func (m *Manager) run(task domain.ModelTask) {
 		if maxExpanded < 1<<30 && m.maxBytes >= 1<<30 {
 			maxExpanded = 1 << 30
 		}
-		inspection, err := m.remote.InspectModelArchive(ctx, env, password, upload.RemotePath, maxExpanded)
+		lastValidationPercent := 0
+		validationProgress := func(done, total int64) {
+			if total <= 0 {
+				return
+			}
+			percent := int(done * 100 / total)
+			if percent > 100 {
+				percent = 100
+			}
+			if percent < lastValidationPercent+5 && percent < 100 {
+				return
+			}
+			lastValidationPercent = percent
+			m.stage(&task, logger, "validate", 20+percent*30/100,
+				fmt.Sprintf("模型包校验进度 %d%%（%d / %d MiB）", percent, done>>20, total>>20))
+		}
+		inspection, err := m.remote.InspectModelArchive(ctx, env, password, upload.RemotePath, maxExpanded, validationProgress, emit)
 		if err == nil {
 			m.stage(&task, logger, "extract", 55, fmt.Sprintf("校验完成：%d 个文件，展开后 %d 字节", inspection.FileCount, inspection.ExpandedSize))
 			err = m.remote.DeployModelArchive(ctx, env, password, model, upload.ID, inspection, emit)

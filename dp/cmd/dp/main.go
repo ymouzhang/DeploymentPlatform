@@ -30,6 +30,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "model-validator" {
+		os.Exit(remote.RunModelValidatorCLI(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "DP startup failed:", err)
 		os.Exit(1)
