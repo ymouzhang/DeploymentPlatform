@@ -88,6 +88,26 @@ func (db *DB) FindOperationAuditRequest(ctx context.Context, operationID string)
 		ORDER BY occurred_at DESC, id DESC LIMIT 1`, operationID))
 }
 
+func (db *DB) HasRecentAuthorizationDenied(
+	ctx context.Context,
+	actorUserID string,
+	permission string,
+	since time.Time,
+) (bool, error) {
+	var exists bool
+	err := db.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM audit_events
+		WHERE action = 'authorization.denied'
+			AND actor_user_id = $1
+			AND changes->>'permission' = $2
+			AND occurred_at >= $3
+	)`, actorUserID, permission, since).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("query recent authorization denial: %w", err)
+	}
+	return exists, nil
+}
+
 func (db *DB) ListAuditEvents(ctx context.Context, filter domain.AuditFilter) ([]domain.AuditEvent, error) {
 	where, args := postgresAuditWhere(filter, true)
 	limit := filter.Limit

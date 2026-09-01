@@ -118,9 +118,9 @@
 | notification | `notification.read` | all | 查看风险通知 |
 | notification | `notification.update` | all | 标记已读和确认处理 |
 | communication | `communication.read` | own/all | 查看参与事项或全部事项 |
-| communication | `communication.create` | own/all | 创建通讯事项 |
+| communication | `communication.create` | all | 创建通讯事项 |
 | communication | `communication.reply` | own/all | 发送消息和标记已读 |
-| communication | `communication.manage` | own/all | 关闭或重新打开事项 |
+| communication | `communication.manage` | all | 关闭或重新打开事项 |
 
 登录、退出、查询本人、修改本人密码和管理本人其他会话属于认证自服务，不进入业务权限目录；仍须校验会话身份、同源和临时密码状态。
 
@@ -140,6 +140,8 @@
 - 系统至少保留一个启用且绑定 `super_admin` 的账号。
 - 不能移除当前用户自己的最后一个 `super_admin` 绑定。
 - 只有 `super_admin` 可以向其他账号授予或移除 `super_admin`。
+- 只有 `super_admin` 可以重置、禁用、强制下线或删除持有 `super_admin` 的账号，避免普通账号管理权限被用于接管超级管理员身份。
+- 被重新启用的账号必须已绑定至少一个角色；禁用账号可以暂时清空角色，以便完成离职或权限重建流程。
 - 自定义角色不能获得操作者自身最终权限之外的权限或更大的数据范围。
 
 ### 3.6 授权流程
@@ -158,6 +160,10 @@ flowchart LR
 ```
 
 路由注册必须声明权限键，不能在 Handler 中散落 `user.Role == ...`。资源加载器只负责解析资源归属，不承担业务修改。列表接口根据最终 scope 自动收窄查询：`all` 可选择指定 `owner_id` 或全部，`own` 强制当前用户 ID。
+
+已认证账号访问存在但超出自身 scope 的资源时统一返回 `403 FORBIDDEN`；只有资源本身不存在时返回
+`404 NOT_FOUND`。授权层不得用 404 隐藏越权结果，否则前端无法区分资源失效与权限不足，也无法形成准确的
+`authorization.denied` 审计。
 
 认证登录、退出、当前账号密码和本人会话属于账号自助端点，仅要求有效会话；`GET /api/v1/events` 是已认证用户的事件传输通道，不独立授予数据读取能力，服务端只向订阅者投递其已有权限范围内产生的事件。除此之外的业务路由必须在注册处声明一个权限键。
 
@@ -187,6 +193,10 @@ flowchart LR
 最后一个启用的 `super_admin`，或由非 `super_admin` 授予/移除 `super_admin`，返回
 `409 ROLE_PROTECTED`。角色和用户角色全量替换都在单个事务中完成，用户角色事务使用固定的
 advisory lock 串行化超级管理员不变量检查。
+
+禁用或删除账号也可能减少启用的 `super_admin`，因此必须与用户角色替换共用同一 advisory lock，并在
+持有目标账号行锁时重新计算剩余启用超级管理员。检查与写入处于同一事务；无论角色移除、账号禁用还是账号
+删除，都不能通过并发竞态绕过“至少一个启用 `super_admin`”约束。
 
 `GET /api/v1/auth/me` 返回角色摘要和最终权限：
 
@@ -354,6 +364,7 @@ flowchart LR
 - 路由和菜单以权限声明过滤，不再判断 `user.role === 'admin'`；
 - 新增“角色与权限”页面：角色列表、权限矩阵、角色成员和用户角色分配；
 - 账号页面由权限决定可见操作；角色选择支持多选；
+- 非 `super_admin` 查看超级管理员账号时，不显示重置密码、角色调整、禁用、强制下线和删除入口，角色选择器也不提供 `super_admin`；后端仍独立拒绝绕过前端的请求；
 - 全账号数据范围筛选只在对应权限 scope 为 `all` 时出现；
 - 无权操作不渲染，服务端返回 403 时仍展示明确提示；
 - 权限矩阵按资源分组，单元格展示未授权、own、all，避免直接编辑权限键文本。
@@ -362,10 +373,9 @@ flowchart LR
 
 新增审计动作：
 
-- `role.create`、`role.update`、`role.delete`；
-- `role.permission.update`；
+- `role.create`、`role.update`、`role.delete`，其中 `role.update` 的变更快照包含完整权限绑定；
 - `account.role.update`；
-- 因权限不足被拒绝的高风险写请求记录 `authorization.denied`，同一用户和权限短时间聚合，避免日志放大。
+- 因权限不足被拒绝的高风险写请求记录 `authorization.denied`，快照保留原请求动作和权限键；同一用户和权限在 30 秒窗口内只记录一次，避免日志放大。
 
 审计快照记录角色 key、权限 key、scope 和目标账号，不记录会话 Token、密码或完整请求体。角色变更和用户角色分配必须在同一数据库事务内保存业务数据；审计最终结果由现有统一审计链路记录。
 

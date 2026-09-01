@@ -44,6 +44,9 @@ func roleKeys(user domain.User) []string {
 
 func (a *API) requirePermission(permission access.Permission, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if metadata := auditMeta(r); metadata != nil {
+			metadata.changes["permission"] = string(permission)
+		}
 		user := currentUser(r)
 		if !user.Permissions.Allows(permission, user.ID, user.ID) {
 			a.writeError(w, r, domain.ErrForbidden)
@@ -214,7 +217,7 @@ func (a *API) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 	if target, err := a.store.GetUser(r.Context(), r.PathValue("id")); err == nil {
 		setAuditTarget(r, target, "user", target.ID, target.Username, map[string]any{"password_reset": true, "require_password_change": requireChange})
 	}
-	if err := a.auth.ResetPasswordWithPolicy(r.Context(), r.PathValue("id"), input.Password, requireChange); err != nil {
+	if err := a.auth.ResetPassword(r.Context(), currentUser(r), r.PathValue("id"), input.Password, requireChange); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -287,7 +290,7 @@ func (a *API) packageOwnerScope(r *http.Request, permission access.Permission) (
 		return user.ID, nil
 	}
 	if !user.Permissions.Allows(permission, user.ID, requested) {
-		return "", domain.ErrNotFound
+		return "", domain.ErrForbidden
 	}
 	if _, err := a.store.GetUser(r.Context(), requested); err != nil {
 		return "", err
@@ -302,7 +305,7 @@ func (a *API) createOwnerScope(r *http.Request, permission access.Permission) (s
 		return user.ID, nil
 	}
 	if !user.Permissions.Allows(permission, user.ID, requested) {
-		return "", domain.ErrNotFound
+		return "", domain.ErrForbidden
 	}
 	target, err := a.store.GetUser(r.Context(), requested)
 	if err != nil {
@@ -325,7 +328,7 @@ func (a *API) authorizeEnvironment(
 	}
 	user := currentUser(r)
 	if !user.Permissions.Allows(permission, user.ID, env.OwnerID) {
-		return domain.Environment{}, domain.ErrNotFound
+		return domain.Environment{}, domain.ErrForbidden
 	}
 	return env, nil
 }
@@ -336,14 +339,18 @@ func (a *API) authorizeOperation(r *http.Request, id string) (domain.Operation, 
 		return domain.Operation{}, err
 	}
 	user := currentUser(r)
-	if op.OwnerID != "" && user.Permissions.Allows(access.OperationRead, user.ID, op.OwnerID) {
+	scope, ok := user.Permissions.Scope(access.OperationRead)
+	if !ok {
+		return domain.Operation{}, domain.ErrForbidden
+	}
+	if scope == access.ScopeAll || scope == access.ScopeOwn && (op.OwnerID == user.ID || op.ActorUserID == user.ID) {
 		return op, nil
 	}
 	if op.OwnerID == "" {
 		_, err = a.authorizeEnvironment(r, op.EnvironmentID, access.OperationRead)
 		return op, err
 	}
-	return domain.Operation{}, domain.ErrNotFound
+	return domain.Operation{}, domain.ErrForbidden
 }
 
 func (a *API) requestIsHTTPS(r *http.Request) bool {

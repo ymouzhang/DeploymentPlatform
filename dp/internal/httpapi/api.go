@@ -123,9 +123,6 @@ func New(
 
 func (a *API) Handler(frontend fs.FS) http.Handler {
 	mux := http.NewServeMux()
-	protected := func(pattern string, permission access.Permission, handler http.HandlerFunc) {
-		mux.Handle(pattern, a.requirePermission(permission, handler))
-	}
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("POST /api/v1/auth/login", a.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
@@ -133,91 +130,105 @@ func (a *API) Handler(frontend fs.FS) http.Handler {
 	mux.HandleFunc("PUT /api/v1/auth/password", a.changePassword)
 	mux.HandleFunc("GET /api/v1/auth/sessions", a.listOwnSessions)
 	mux.HandleFunc("DELETE /api/v1/auth/sessions/{sessionId}", a.revokeOwnSession)
-	protected("GET /api/v1/users", access.AccountRead, a.listUsers)
-	protected("POST /api/v1/users", access.AccountCreate, a.createUser)
-	protected("PUT /api/v1/users/{id}/password", access.AccountUpdate, a.resetUserPassword)
-	protected("PUT /api/v1/users/{id}/status", access.AccountUpdate, a.updateUserStatus)
-	protected("GET /api/v1/users/{id}", access.AccountRead, a.getUserDetail)
-	protected("GET /api/v1/users/{id}/sessions", access.AccountRead, a.listUserSessions)
-	protected("DELETE /api/v1/users/{id}/sessions/{sessionId}", access.AccountUpdate, a.revokeUserSession)
-	protected("POST /api/v1/users/{id}/sessions/revoke", access.AccountUpdate, a.revokeUserSessions)
-	protected("POST /api/v1/users/{id}/transfer", access.AccountTransfer, a.transferUserResources)
-	protected("DELETE /api/v1/users/{id}", access.AccountDelete, a.deleteUser)
-	protected("GET /api/v1/permissions", access.RoleRead, a.listPermissions)
-	protected("GET /api/v1/roles", access.RoleRead, a.listRoles)
-	protected("POST /api/v1/roles", access.RoleCreate, a.createRole)
-	protected("GET /api/v1/roles/{id}", access.RoleRead, a.getRole)
-	protected("PUT /api/v1/roles/{id}", access.RoleUpdate, a.updateRole)
-	protected("DELETE /api/v1/roles/{id}", access.RoleDelete, a.deleteRole)
-	protected("PUT /api/v1/users/{id}/roles", access.AccountAssignRoles, a.replaceUserRoles)
-	protected("GET /api/v1/service-types", access.PackageRead, a.serviceTypes)
-	protected("GET /api/v1/packages", access.PackageRead, a.listPackages)
-	protected("GET /api/v1/environments", access.EnvironmentRead, a.listEnvironments)
-	protected("POST /api/v1/environments", access.EnvironmentWrite, a.createEnvironment)
-	protected("PUT /api/v1/environments/{id}", access.EnvironmentWrite, a.updateEnvironment)
-	protected("DELETE /api/v1/environments/{id}", access.EnvironmentDelete, a.deleteEnvironment)
-	protected("POST /api/v1/environments/validate", access.EnvironmentValidate, a.validateDraftEnvironment)
-	protected("POST /api/v1/environments/{id}/validate", access.EnvironmentValidate, a.validateSavedEnvironment)
-	protected("GET /api/v1/environments/export", access.EnvironmentExport, a.exportEnvironments)
-	protected("POST /api/v1/environments/import", access.EnvironmentImport, a.importEnvironments)
-	protected("PUT /api/v1/environments/{id}/tags", access.TagWrite, a.replaceEnvironmentTags)
-	protected("GET /api/v1/tags", access.TagRead, a.listResourceTags)
-	protected("POST /api/v1/tags", access.TagWrite, a.createResourceTag)
-	protected("PUT /api/v1/tags/{id}", access.TagWrite, a.updateResourceTag)
-	protected("DELETE /api/v1/tags/{id}", access.TagWrite, a.deleteResourceTag)
-	protected("GET /api/v1/service-types/{type}/package", access.PackageRead, a.getPackage)
-	protected("PUT /api/v1/service-types/{type}/package", access.PackageWrite, a.uploadPackage)
-	protected("DELETE /api/v1/service-types/{type}/package", access.PackageDelete, a.deletePackage)
-	protected("GET /api/v1/service-types/{type}/package/versions", access.PackageRead, a.listPackageVersions)
-	protected("PUT /api/v1/service-types/{type}/package/versions/{versionId}/current", access.PackageWrite, a.activatePackageVersion)
-	protected("DELETE /api/v1/service-types/{type}/package/versions/{versionId}", access.PackageDelete, a.deletePackageVersion)
-	protected("GET /api/v1/services", access.ServiceRead, a.listServices)
-	protected("GET /api/v1/services/{id}/config", access.ServiceConfigRead, a.getServiceConfig)
-	protected("PUT /api/v1/services/{id}/config", access.ServiceConfigWrite, a.updateServiceConfig)
-	protected("POST /api/v1/services/{id}/config/preview", access.ServiceConfigWrite, a.previewServiceConfig)
-	protected("GET /api/v1/services/{id}/config/revisions", access.ServiceConfigRead, a.listServiceConfigRevisions)
-	protected("GET /api/v1/services/{id}/config/revisions/{revisionId}", access.ServiceConfigRead, a.getServiceConfigRevision)
-	protected("POST /api/v1/services/{id}/config/revisions/{revisionId}/rollback", access.ServiceConfigWrite, a.rollbackServiceConfigRevision)
-	protected("POST /api/v1/services/{id}/install", access.ServiceInstall, a.startAction(domain.ActionInstall))
-	protected("POST /api/v1/services/{id}/start", access.ServiceStart, a.startAction(domain.ActionStart))
-	protected("POST /api/v1/services/{id}/stop", access.ServiceStop, a.startAction(domain.ActionStop))
-	protected("POST /api/v1/services/{id}/reset", access.ServiceReset, a.startAction(domain.ActionReset))
-	protected("POST /api/v1/services/{id}/health-check", access.ServiceHealth, a.checkHealth)
-	protected("GET /api/v1/services/{id}/logs/stream", access.ServiceLogRead, a.streamServiceLogs)
-	protected("GET /api/v1/models", access.ModelRead, a.listModels)
-	protected("GET /api/v1/models/{id}", access.ModelRead, a.getModel)
-	protected("POST /api/v1/model-uploads", access.ModelUpload, a.createModelUpload)
-	protected("HEAD /api/v1/model-uploads/{id}", access.ModelUpload, a.headModelUpload)
-	protected("PATCH /api/v1/model-uploads/{id}", access.ModelUpload, a.patchModelUpload)
-	protected("POST /api/v1/model-uploads/{id}/complete", access.ModelUpload, a.completeModelUpload)
-	protected("DELETE /api/v1/model-uploads/{id}", access.ModelUpload, a.cancelModelUpload)
-	protected("POST /api/v1/models/{id}/retry", access.ModelUpload, a.retryModel)
-	protected("DELETE /api/v1/models/{id}", access.ModelDelete, a.deleteModel)
-	protected("GET /api/v1/model-tasks/{id}", access.ModelRead, a.getModelTask)
-	protected("GET /api/v1/model-tasks/{id}/events", access.ModelRead, a.modelTaskEvents)
-	protected("GET /api/v1/operations/{id}", access.OperationRead, a.getOperation)
-	protected("GET /api/v1/operations/{id}/events", access.OperationRead, a.operationEvents)
-	protected("GET /api/v1/operations", access.OperationRead, a.listOperations)
-	protected("GET /api/v1/admin/dashboard", access.DashboardRead, a.adminDashboard)
-	protected("GET /api/v1/notifications/summary", access.NotificationRead, a.notificationSummary)
-	protected("GET /api/v1/notifications", access.NotificationRead, a.listNotifications)
-	protected("PUT /api/v1/notifications/{id}/read", access.NotificationUpdate, a.markNotificationRead)
-	protected("PUT /api/v1/notifications/{id}/resolve", access.NotificationUpdate, a.resolveNotification)
-	protected("GET /api/v1/communications/summary", access.CommunicationRead, a.communicationSummary)
 	mux.HandleFunc("GET /api/v1/events", a.realtimeEvents)
-	protected("GET /api/v1/communications", access.CommunicationRead, a.listCommunications)
-	protected("POST /api/v1/communications", access.CommunicationCreate, a.createCommunication)
-	protected("GET /api/v1/communications/{id}", access.CommunicationRead, a.getCommunication)
-	protected("PUT /api/v1/communications/{id}/read", access.CommunicationReply, a.markCommunicationRead)
-	protected("POST /api/v1/communications/{id}/messages", access.CommunicationReply, a.sendCommunicationMessage)
-	protected("POST /api/v1/communications/{id}/close", access.CommunicationManage, a.closeCommunication)
-	protected("POST /api/v1/communications/{id}/reopen", access.CommunicationManage, a.reopenCommunication)
-	protected("GET /api/v1/audit-events/summary", access.AuditRead, a.auditSummary)
-	protected("GET /api/v1/audit-events/export", access.AuditExport, a.exportAuditEvents)
-	protected("GET /api/v1/audit-events/{id}", access.AuditRead, a.getAuditEvent)
-	protected("GET /api/v1/audit-events", access.AuditRead, a.listAuditEvents)
+	for _, route := range a.protectedRoutes() {
+		mux.Handle(route.pattern, a.requirePermission(route.permission, route.handler))
+	}
 	mux.Handle("/", spaHandler(frontend))
 	return a.recoverMiddleware(a.requestMiddleware(a.originMiddleware(a.authMiddleware(a.auditMiddleware(mux)))))
+}
+
+type protectedRoute struct {
+	pattern    string
+	permission access.Permission
+	handler    http.HandlerFunc
+}
+
+func (a *API) protectedRoutes() []protectedRoute {
+	return []protectedRoute{
+		{"GET /api/v1/users", access.AccountRead, a.listUsers},
+		{"POST /api/v1/users", access.AccountCreate, a.createUser},
+		{"PUT /api/v1/users/{id}/password", access.AccountUpdate, a.resetUserPassword},
+		{"PUT /api/v1/users/{id}/status", access.AccountUpdate, a.updateUserStatus},
+		{"GET /api/v1/users/{id}", access.AccountRead, a.getUserDetail},
+		{"GET /api/v1/users/{id}/sessions", access.AccountRead, a.listUserSessions},
+		{"DELETE /api/v1/users/{id}/sessions/{sessionId}", access.AccountUpdate, a.revokeUserSession},
+		{"POST /api/v1/users/{id}/sessions/revoke", access.AccountUpdate, a.revokeUserSessions},
+		{"POST /api/v1/users/{id}/transfer", access.AccountTransfer, a.transferUserResources},
+		{"DELETE /api/v1/users/{id}", access.AccountDelete, a.deleteUser},
+		{"GET /api/v1/permissions", access.RoleRead, a.listPermissions},
+		{"GET /api/v1/roles", access.RoleRead, a.listRoles},
+		{"POST /api/v1/roles", access.RoleCreate, a.createRole},
+		{"GET /api/v1/roles/{id}", access.RoleRead, a.getRole},
+		{"PUT /api/v1/roles/{id}", access.RoleUpdate, a.updateRole},
+		{"DELETE /api/v1/roles/{id}", access.RoleDelete, a.deleteRole},
+		{"PUT /api/v1/users/{id}/roles", access.AccountAssignRoles, a.replaceUserRoles},
+		{"GET /api/v1/service-types", access.PackageRead, a.serviceTypes},
+		{"GET /api/v1/packages", access.PackageRead, a.listPackages},
+		{"GET /api/v1/environments", access.EnvironmentRead, a.listEnvironments},
+		{"POST /api/v1/environments", access.EnvironmentWrite, a.createEnvironment},
+		{"PUT /api/v1/environments/{id}", access.EnvironmentWrite, a.updateEnvironment},
+		{"DELETE /api/v1/environments/{id}", access.EnvironmentDelete, a.deleteEnvironment},
+		{"POST /api/v1/environments/validate", access.EnvironmentValidate, a.validateDraftEnvironment},
+		{"POST /api/v1/environments/{id}/validate", access.EnvironmentValidate, a.validateSavedEnvironment},
+		{"GET /api/v1/environments/export", access.EnvironmentExport, a.exportEnvironments},
+		{"POST /api/v1/environments/import", access.EnvironmentImport, a.importEnvironments},
+		{"PUT /api/v1/environments/{id}/tags", access.TagWrite, a.replaceEnvironmentTags},
+		{"GET /api/v1/tags", access.TagRead, a.listResourceTags},
+		{"POST /api/v1/tags", access.TagWrite, a.createResourceTag},
+		{"PUT /api/v1/tags/{id}", access.TagWrite, a.updateResourceTag},
+		{"DELETE /api/v1/tags/{id}", access.TagWrite, a.deleteResourceTag},
+		{"GET /api/v1/service-types/{type}/package", access.PackageRead, a.getPackage},
+		{"PUT /api/v1/service-types/{type}/package", access.PackageWrite, a.uploadPackage},
+		{"DELETE /api/v1/service-types/{type}/package", access.PackageDelete, a.deletePackage},
+		{"GET /api/v1/service-types/{type}/package/versions", access.PackageRead, a.listPackageVersions},
+		{"PUT /api/v1/service-types/{type}/package/versions/{versionId}/current", access.PackageWrite, a.activatePackageVersion},
+		{"DELETE /api/v1/service-types/{type}/package/versions/{versionId}", access.PackageDelete, a.deletePackageVersion},
+		{"GET /api/v1/services", access.ServiceRead, a.listServices},
+		{"GET /api/v1/services/{id}/config", access.ServiceConfigRead, a.getServiceConfig},
+		{"PUT /api/v1/services/{id}/config", access.ServiceConfigWrite, a.updateServiceConfig},
+		{"POST /api/v1/services/{id}/config/preview", access.ServiceConfigWrite, a.previewServiceConfig},
+		{"GET /api/v1/services/{id}/config/revisions", access.ServiceConfigRead, a.listServiceConfigRevisions},
+		{"GET /api/v1/services/{id}/config/revisions/{revisionId}", access.ServiceConfigRead, a.getServiceConfigRevision},
+		{"POST /api/v1/services/{id}/config/revisions/{revisionId}/rollback", access.ServiceConfigWrite, a.rollbackServiceConfigRevision},
+		{"POST /api/v1/services/{id}/install", access.ServiceInstall, a.startAction(domain.ActionInstall)},
+		{"POST /api/v1/services/{id}/start", access.ServiceStart, a.startAction(domain.ActionStart)},
+		{"POST /api/v1/services/{id}/stop", access.ServiceStop, a.startAction(domain.ActionStop)},
+		{"POST /api/v1/services/{id}/reset", access.ServiceReset, a.startAction(domain.ActionReset)},
+		{"POST /api/v1/services/{id}/health-check", access.ServiceHealth, a.checkHealth},
+		{"GET /api/v1/services/{id}/logs/stream", access.ServiceLogRead, a.streamServiceLogs},
+		{"GET /api/v1/models", access.ModelRead, a.listModels},
+		{"GET /api/v1/models/{id}", access.ModelRead, a.getModel},
+		{"POST /api/v1/model-uploads", access.ModelUpload, a.createModelUpload},
+		{"HEAD /api/v1/model-uploads/{id}", access.ModelUpload, a.headModelUpload},
+		{"PATCH /api/v1/model-uploads/{id}", access.ModelUpload, a.patchModelUpload},
+		{"POST /api/v1/model-uploads/{id}/complete", access.ModelUpload, a.completeModelUpload},
+		{"DELETE /api/v1/model-uploads/{id}", access.ModelUpload, a.cancelModelUpload},
+		{"POST /api/v1/models/{id}/retry", access.ModelUpload, a.retryModel},
+		{"DELETE /api/v1/models/{id}", access.ModelDelete, a.deleteModel},
+		{"GET /api/v1/model-tasks/{id}", access.ModelRead, a.getModelTask},
+		{"GET /api/v1/model-tasks/{id}/events", access.ModelRead, a.modelTaskEvents},
+		{"GET /api/v1/operations/{id}", access.OperationRead, a.getOperation},
+		{"GET /api/v1/operations/{id}/events", access.OperationRead, a.operationEvents},
+		{"GET /api/v1/operations", access.OperationRead, a.listOperations},
+		{"GET /api/v1/admin/dashboard", access.DashboardRead, a.adminDashboard},
+		{"GET /api/v1/notifications/summary", access.NotificationRead, a.notificationSummary},
+		{"GET /api/v1/notifications", access.NotificationRead, a.listNotifications},
+		{"PUT /api/v1/notifications/{id}/read", access.NotificationUpdate, a.markNotificationRead},
+		{"PUT /api/v1/notifications/{id}/resolve", access.NotificationUpdate, a.resolveNotification},
+		{"GET /api/v1/communications/summary", access.CommunicationRead, a.communicationSummary},
+		{"GET /api/v1/communications", access.CommunicationRead, a.listCommunications},
+		{"POST /api/v1/communications", access.CommunicationCreate, a.createCommunication},
+		{"GET /api/v1/communications/{id}", access.CommunicationRead, a.getCommunication},
+		{"PUT /api/v1/communications/{id}/read", access.CommunicationReply, a.markCommunicationRead},
+		{"POST /api/v1/communications/{id}/messages", access.CommunicationReply, a.sendCommunicationMessage},
+		{"POST /api/v1/communications/{id}/close", access.CommunicationManage, a.closeCommunication},
+		{"POST /api/v1/communications/{id}/reopen", access.CommunicationManage, a.reopenCommunication},
+		{"GET /api/v1/audit-events/summary", access.AuditRead, a.auditSummary},
+		{"GET /api/v1/audit-events/export", access.AuditExport, a.exportAuditEvents},
+		{"GET /api/v1/audit-events/{id}", access.AuditRead, a.getAuditEvent},
+		{"GET /api/v1/audit-events", access.AuditRead, a.listAuditEvents},
+	}
 }
 
 func (a *API) healthz(w http.ResponseWriter, r *http.Request) {
@@ -386,8 +397,14 @@ func (a *API) validateDraftEnvironment(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	result, err := a.environments.ValidateDraft(r.Context(), currentUser(r).ID, input)
-	setAuditTarget(r, currentUser(r), "environment", "", input.Name, map[string]any{"ip": input.IP, "service_type": input.ServiceType})
+	ownerID, err := a.createOwnerScope(r, access.EnvironmentValidate)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	result, err := a.environments.ValidateDraft(r.Context(), ownerID, input)
+	owner, _ := a.store.GetUser(r.Context(), ownerID)
+	setAuditTarget(r, owner, "environment", "", input.Name, map[string]any{"ip": input.IP, "service_type": input.ServiceType})
 	if err != nil {
 		setAuditOutcome(r, "failure", "VALIDATION_FAILED")
 	}
@@ -445,12 +462,18 @@ func (a *API) importEnvironments(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	result, err := a.environments.Import(r.Context(), currentUser(r).ID, document)
+	ownerID, err := a.createOwnerScope(r, access.EnvironmentImport)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	setAuditTarget(r, currentUser(r), "environment", "", "批量导入环境", map[string]any{"created": result.Created, "overwritten": result.Overwritten, "total": result.Total})
+	result, err := a.environments.Import(r.Context(), ownerID, document)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	owner, _ := a.store.GetUser(r.Context(), ownerID)
+	setAuditTarget(r, owner, "environment", "", "批量导入环境", map[string]any{"created": result.Created, "overwritten": result.Overwritten, "total": result.Total})
 	writeData(w, http.StatusOK, result)
 }
 

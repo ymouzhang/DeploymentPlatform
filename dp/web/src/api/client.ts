@@ -142,13 +142,13 @@ export const api = {
   updateTag: (id: string, input: { group_name: string; value: string }) =>
     request<ResourceTag>(`/api/v1/tags/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
   deleteTag: (id: string) => request(`/api/v1/tags/${id}`, { method: 'DELETE' }),
-  validateDraft: (input: EnvironmentInput) =>
-    validationRequest('/api/v1/environments/validate', input),
+  validateDraft: (input: EnvironmentInput, ownerId?: string) =>
+    validationRequest(withOwner('/api/v1/environments/validate', ownerId), input),
   validateEnvironment: (id: string) =>
     validationRequest(`/api/v1/environments/${id}/validate`),
-  importEnvironments: (document: unknown) =>
+  importEnvironments: (document: unknown, ownerId?: string) =>
     request<{ created: number; overwritten: number; total: number }>(
-      '/api/v1/environments/import',
+      withOwner('/api/v1/environments/import', ownerId),
       { method: 'POST', body: JSON.stringify(document) },
     ),
   listServiceTypes: (ownerId?: string) => request<ServiceTypeInfo[]>(withOwner('/api/v1/service-types', ownerId)),

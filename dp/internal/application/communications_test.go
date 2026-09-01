@@ -49,7 +49,7 @@ func TestCommunicationLifecycleAndIsolation(t *testing.T) {
 	if err != nil || len(thread.Resources) != 3 || len(thread.Messages) != 1 {
 		t.Fatalf("thread=%+v err=%v", thread, err)
 	}
-	if _, err := service.Get(ctx, other, thread.ID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := service.Get(ctx, other, thread.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("other user must not see communication: %v", err)
 	}
 	summary, _ := service.Summary(ctx, user)

@@ -72,6 +72,7 @@ cp scripts/dp.sh "${bundle_dir}/dp.sh"
 cp deploy/README.md "${bundle_dir}/README.md"
 sed \
   -e "s|^DP_IMAGE=.*$|DP_IMAGE=${image_tag}|" \
+  -e "s|^DP_POSTGRES_IMAGE=.*$|DP_POSTGRES_IMAGE=${postgres_image}|" \
   -e "s|^DP_PLATFORM=.*$|DP_PLATFORM=${platform}|" \
   .env.example > "${bundle_dir}/.env.example"
 chmod +x "${bundle_dir}/dp.sh"

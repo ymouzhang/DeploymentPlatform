@@ -123,7 +123,7 @@ func TestForcedPasswordChangeAndPreciseSessionRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.ResetPasswordWithPolicy(ctx, user.ID, "temporary-password", true); err != nil {
+	if err := auth.ResetPassword(ctx, admin, user.ID, "temporary-password", true); err != nil {
 		t.Fatal(err)
 	}
 	forced, firstToken, _, err := auth.LoginWithContext(ctx, user.Username, "temporary-password", "192.0.2.2", "first-browser")
@@ -158,4 +158,45 @@ func TestForcedPasswordChangeAndPreciseSessionRevocation(t *testing.T) {
 	if err != nil || updated.MustChangePassword {
 		t.Fatalf("password flag was not cleared: user=%+v err=%v admin=%s", updated, err, admin.Username)
 	}
+}
+
+func TestNonSuperAdminCannotMutateSuperAdminAccount(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenPostgres(t)
+	auth := NewAuthService(db, time.Hour)
+	superAdmin, err := auth.CreateUser(ctx, "security-super", "super-password", []access.RoleRef{
+		testutil.RoleRef(t, access.RoleSuperAdmin),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	platformAdmin, err := auth.CreateUser(ctx, "security-platform", "platform-password", []access.RoleRef{
+		testutil.RoleRef(t, access.RolePlatformAdmin),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertProtected := func(name string, action func() error) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			var appErr *domain.AppError
+			if err := action(); !errors.As(err, &appErr) || appErr.Code != "USER_PROTECTED" {
+				t.Fatalf("error = %v, want USER_PROTECTED", err)
+			}
+		})
+	}
+	assertProtected("reset password", func() error {
+		return auth.ResetPassword(ctx, platformAdmin, superAdmin.ID, "replacement-password", true)
+	})
+	assertProtected("revoke sessions", func() error {
+		return auth.RevokeSessions(ctx, platformAdmin, superAdmin.ID)
+	})
+	assertProtected("disable", func() error {
+		_, err := auth.UpdateEnabled(ctx, platformAdmin, superAdmin.ID, false)
+		return err
+	})
+	assertProtected("delete", func() error {
+		return auth.DeleteUser(ctx, platformAdmin, superAdmin.ID)
+	})
 }

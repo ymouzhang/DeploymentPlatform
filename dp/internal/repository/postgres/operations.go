@@ -173,6 +173,11 @@ func (db *DB) ListOperations(ctx context.Context, filter domain.OperationFilter)
 	if filter.OwnerID != "" {
 		add("o.owner_id = $%d", filter.OwnerID)
 	}
+	if filter.SubjectID != "" {
+		args = append(args, filter.SubjectID)
+		position := len(args)
+		where = append(where, fmt.Sprintf("(o.owner_id = $%d OR o.actor_user_id = $%d)", position, position))
+	}
 	if filter.Action != "" {
 		add("o.action = $%d", filter.Action)
 	}

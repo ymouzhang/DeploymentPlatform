@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -172,13 +173,43 @@ func (db *DB) UpdateUserPasswordAndRevokeSessions(
 }
 
 func (db *DB) UpdateUserEnabled(ctx context.Context, id string, enabled bool) (domain.User, error) {
-	command, err := db.pool.Exec(ctx, `UPDATE users SET enabled = $1, updated_at = $2 WHERE id = $3`,
-		enabled, time.Now().UTC(), id)
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
+		return domain.User{}, fmt.Errorf("begin update user status: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, _roleAssignmentLockID); err != nil {
+		return domain.User{}, fmt.Errorf("lock role assignments: %w", err)
+	}
+
+	var currentEnabled bool
+	err = tx.QueryRow(ctx, `SELECT enabled FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&currentEnabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.User{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("lock user status: %w", err)
+	}
+	if !currentEnabled && enabled {
+		var hasRole bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_roles WHERE user_id = $1)`, id).Scan(&hasRole); err != nil {
+			return domain.User{}, fmt.Errorf("check user roles before enable: %w", err)
+		}
+		if !hasRole {
+			return domain.User{}, fmt.Errorf("enabled user requires a role: %w", access.ErrInvalidInput)
+		}
+	}
+	if currentEnabled && !enabled {
+		if err := ensureEnabledSuperAdminRemains(ctx, tx, id); err != nil {
+			return domain.User{}, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET enabled = $1, updated_at = $2 WHERE id = $3`,
+		enabled, time.Now().UTC(), id); err != nil {
 		return domain.User{}, fmt.Errorf("update user status: %w", err)
 	}
-	if command.RowsAffected() == 0 {
-		return domain.User{}, domain.ErrNotFound
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, fmt.Errorf("commit user status: %w", err)
 	}
 	return db.GetUser(ctx, id)
 }
@@ -194,12 +225,65 @@ func (db *DB) UserBusinessCounts(ctx context.Context, id string) (packages, envi
 }
 
 func (db *DB) DeleteUser(ctx context.Context, id string) error {
-	command, err := db.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin delete user: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, _roleAssignmentLockID); err != nil {
+		return fmt.Errorf("lock role assignments: %w", err)
+	}
+	var enabled bool
+	err = tx.QueryRow(ctx, `SELECT enabled FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock user before delete: %w", err)
+	}
+	if enabled {
+		if err := ensureEnabledSuperAdminRemains(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	command, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
 		return mapUserWriteError("delete user", err)
 	}
 	if command.RowsAffected() == 0 {
 		return domain.ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete user: %w", err)
+	}
+	return nil
+}
+
+func ensureEnabledSuperAdminRemains(ctx context.Context, tx pgx.Tx, excludedUserID string) error {
+	var isSuperAdmin bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id
+		WHERE ur.user_id = $1 AND r.key = $2
+	)`, excludedUserID, access.RoleSuperAdmin).Scan(&isSuperAdmin)
+	if err != nil {
+		return fmt.Errorf("check super administrator role: %w", err)
+	}
+	if !isSuperAdmin {
+		return nil
+	}
+	var remaining int
+	err = tx.QueryRow(ctx, `SELECT count(DISTINCT u.id)
+		FROM users u
+		JOIN user_roles ur ON ur.user_id = u.id
+		JOIN roles r ON r.id = ur.role_id
+		WHERE u.enabled AND r.key = $1 AND u.id <> $2`, access.RoleSuperAdmin, excludedUserID).
+		Scan(&remaining)
+	if err != nil {
+		return fmt.Errorf("count remaining super administrators: %w", err)
+	}
+	if remaining == 0 {
+		return fmt.Errorf("last enabled super administrator: %w", access.ErrProtected)
 	}
 	return nil
 }

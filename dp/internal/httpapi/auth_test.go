@@ -49,7 +49,19 @@ func TestForcedPasswordChangeMiddlewareBlocksBusinessAPI(t *testing.T) {
 	}
 }
 
-func TestEnvironmentAuthorizationHidesOtherOwners(t *testing.T) {
+func TestAuthenticationMiddlewareRejectsMissingSession(t *testing.T) {
+	api := &API{log: slog.Default()}
+	called := false
+	handler := api.authMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/packages", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if called || response.Code != http.StatusUnauthorized {
+		t.Fatalf("business API called=%v status=%d", called, response.Code)
+	}
+}
+
+func TestEnvironmentAuthorizationRejectsOtherOwners(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenPostgres(t)
 	owner, err := db.CreateUser(ctx, testutil.User(t, "owner", access.RoleOperator, true))
@@ -68,8 +80,15 @@ func TestEnvironmentAuthorizationHidesOtherOwners(t *testing.T) {
 	other.Permissions = access.Grants{access.ServiceRead: access.ScopeOwn}
 	request := httptest.NewRequest("GET", "/api/v1/services/"+env.ID+"/config", nil)
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: other}))
-	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-owner error=%v", err)
+	} else if status, _, _, _ := classifyHTTPError(err); status != http.StatusForbidden {
+		t.Fatalf("cross-owner status=%d", status)
+	}
+	if _, err := api.authorizeEnvironment(request, domain.NewID(), access.ServiceRead); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing environment error=%v", err)
+	} else if status, _, _, _ := classifyHTTPError(err); status != http.StatusNotFound {
+		t.Fatalf("missing environment status=%d", status)
 	}
 	admin := other
 	admin.Permissions = access.Grants{access.ServiceRead: access.ScopeAll}
@@ -92,7 +111,7 @@ func TestPackageOwnerScopeAllowsOrdinaryUserOwnID(t *testing.T) {
 
 	otherRequest := httptest.NewRequest("GET", "/api/v1/service-types/demo/package?owner_id=user-2", nil)
 	otherRequest = otherRequest.WithContext(context.WithValue(otherRequest.Context(), authContextKey{}, authenticated{User: user}))
-	if _, err := api.packageOwnerScope(otherRequest, access.PackageRead); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := api.packageOwnerScope(otherRequest, access.PackageRead); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-owner error=%v", err)
 	}
 }

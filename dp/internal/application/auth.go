@@ -189,6 +189,9 @@ func (s *AuthService) RevokeSessions(ctx context.Context, actor domain.User, id 
 	if target.ID == actor.ID {
 		return &domain.AppError{Code: "USER_PROTECTED", Message: "不能强制下线当前登录账号"}
 	}
+	if err := authorizePrivilegedAccountMutation(actor, target); err != nil {
+		return err
+	}
 	return s.store.DeleteUserSessions(ctx, id)
 }
 
@@ -214,7 +217,11 @@ func (s *AuthService) RevokeUserSession(ctx context.Context, actor domain.User, 
 	if actor.ID == userID && currentSessionID == sessionID {
 		return &domain.AppError{Code: "USER_PROTECTED", Message: "不能从账号管理撤销当前会话，请使用个人会话入口"}
 	}
-	if _, err := s.store.GetUser(ctx, userID); err != nil {
+	target, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if err := authorizePrivilegedAccountMutation(actor, target); err != nil {
 		return err
 	}
 	return s.store.DeleteUserSessionByID(ctx, userID, sessionID)
@@ -271,15 +278,21 @@ func (s *AuthService) CreateUserBy(
 	return user, err
 }
 
-func (s *AuthService) ResetPassword(ctx context.Context, id, password string) error {
-	return s.ResetPasswordWithPolicy(ctx, id, password, false)
-}
-
-func (s *AuthService) ResetPasswordWithPolicy(ctx context.Context, id, password string, mustChange bool) error {
+func (s *AuthService) ResetPassword(
+	ctx context.Context,
+	actor domain.User,
+	id string,
+	password string,
+	mustChange bool,
+) error {
 	if err := validatePassword(password); err != nil {
 		return err
 	}
-	if _, err := s.store.GetUser(ctx, id); err != nil {
+	target, err := s.store.GetUser(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := authorizePrivilegedAccountMutation(actor, target); err != nil {
 		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -297,7 +310,16 @@ func (s *AuthService) UpdateEnabled(ctx context.Context, actor domain.User, id s
 	if !enabled && (target.IsInitialAdmin || target.ID == actor.ID) {
 		return domain.User{}, &domain.AppError{Code: "USER_PROTECTED", Message: "初始管理员和当前登录账号不能被禁用"}
 	}
+	if err := authorizePrivilegedAccountMutation(actor, target); err != nil {
+		return domain.User{}, err
+	}
 	updated, err := s.store.UpdateUserEnabled(ctx, id, enabled)
+	if errors.Is(err, access.ErrProtected) {
+		return domain.User{}, &domain.AppError{Code: "USER_PROTECTED", Message: "系统必须保留至少一个启用的超级管理员"}
+	}
+	if errors.Is(err, access.ErrInvalidInput) {
+		return domain.User{}, domain.FieldError("enabled", "启用账号前必须至少分配一个角色")
+	}
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -317,6 +339,9 @@ func (s *AuthService) DeleteUser(ctx context.Context, actor domain.User, id stri
 	if target.IsInitialAdmin || target.ID == actor.ID {
 		return &domain.AppError{Code: "USER_PROTECTED", Message: "初始管理员和当前登录账号不能被删除"}
 	}
+	if err := authorizePrivilegedAccountMutation(actor, target); err != nil {
+		return err
+	}
 	packages, environments, err := s.store.UserBusinessCounts(ctx, id)
 	if err != nil {
 		return err
@@ -324,7 +349,27 @@ func (s *AuthService) DeleteUser(ctx context.Context, actor domain.User, id stri
 	if packages > 0 || environments > 0 {
 		return &domain.AppError{Code: "USER_IN_USE", Message: "该账号仍有安装包或环境，请先清理业务数据"}
 	}
-	return s.store.DeleteUser(ctx, id)
+	err = s.store.DeleteUser(ctx, id)
+	if errors.Is(err, access.ErrProtected) {
+		return &domain.AppError{Code: "USER_PROTECTED", Message: "系统必须保留至少一个启用的超级管理员"}
+	}
+	return err
+}
+
+func authorizePrivilegedAccountMutation(actor, target domain.User) error {
+	if hasRole(target, access.RoleSuperAdmin) && !hasRole(actor, access.RoleSuperAdmin) {
+		return &domain.AppError{Code: "USER_PROTECTED", Message: "只有超级管理员可以修改超级管理员账号"}
+	}
+	return nil
+}
+
+func hasRole(user domain.User, roleKey string) bool {
+	for _, role := range user.Roles {
+		if role.Key == roleKey {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeUsername(username string) (string, error) {

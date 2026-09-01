@@ -138,6 +138,7 @@ paths:
   /users/{id}/password:
     put:
       operationId: resetUserPassword
+      description: Requires account.update. Only a super_admin may reset another super_admin account.
       parameters:
         - $ref: "#/components/parameters/UserId"
       requestBody:
@@ -158,6 +159,7 @@ paths:
   /users/{id}/status:
     put:
       operationId: updateUserStatus
+      description: Requires account.update. Enabling requires at least one role; only a super_admin may change another super_admin account.
       parameters:
         - $ref: "#/components/parameters/UserId"
       requestBody:
@@ -179,6 +181,7 @@ paths:
                 $ref: "#/components/schemas/UserResponse"
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
   /users/{id}:
     get:
       operationId: getUserDetail
@@ -194,6 +197,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: deleteUser
+      description: Requires account.delete. Only a super_admin may delete another super_admin account, and one enabled super_admin must remain.
       parameters:
         - $ref: "#/components/parameters/UserId"
       responses:
@@ -204,6 +208,7 @@ paths:
   /users/{id}/sessions/revoke:
     post:
       operationId: revokeUserSessions
+      description: Requires account.update. Only a super_admin may force another super_admin offline.
       parameters:
         - $ref: "#/components/parameters/UserId"
       responses:
@@ -227,6 +232,7 @@ paths:
   /users/{id}/sessions/{sessionId}:
     delete:
       operationId: revokeUserSession
+      description: Requires account.update. Only a super_admin may revoke another super_admin session.
       parameters:
         - $ref: "#/components/parameters/UserId"
         - $ref: "#/components/parameters/SessionId"
@@ -262,6 +268,7 @@ paths:
   /users/{id}/roles:
     put:
       operationId: replaceUserRoles
+      description: Requires account.assign_roles. Super-admin assignment changes are restricted to super_admin and one enabled super_admin must remain.
       parameters:
         - $ref: "#/components/parameters/UserId"
       requestBody:
@@ -499,6 +506,8 @@ paths:
   /environments/validate:
     post:
       operationId: validateDraftEnvironment
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
       requestBody:
         required: true
         content:
@@ -545,6 +554,8 @@ paths:
   /environments/import:
     post:
       operationId: importEnvironments
+      parameters:
+        - $ref: "#/components/parameters/OwnerId"
       requestBody:
         required: true
         content:
@@ -1157,7 +1168,7 @@ paths:
         - $ref: "#/components/parameters/AuditTo"
         - { name: actor_id, in: query, schema: { type: string, format: uuid } }
         - { name: owner_id, in: query, schema: { type: string, format: uuid } }
-        - { name: category, in: query, schema: { type: string, enum: [authentication, account, package, environment, service, communication, audit] } }
+        - { name: category, in: query, schema: { type: string, enum: [authentication, authorization, account, package, environment, service, model, communication, audit] } }
         - { name: action, in: query, schema: { type: string } }
         - { name: outcome, in: query, schema: { type: string, enum: [success, failure, denied] } }
         - { name: source_ip, in: query, schema: { type: string } }
@@ -2251,7 +2262,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         occurred_at: { type: string, format: date-time }
-        category: { type: string, enum: [authentication, account, package, environment, service, model, communication, audit] }
+        category: { type: string, enum: [authentication, authorization, account, package, environment, service, model, communication, audit] }
         action: { type: string }
         outcome: { type: string, enum: [success, failure, denied] }
         risk_level: { type: string, enum: [normal, high] }

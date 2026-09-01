@@ -1,6 +1,6 @@
 # DP 前后端架构设计
 
-> 文档状态：RBAC/PostgreSQL 重构中
+> 文档状态：RBAC/PostgreSQL 重构已完成
 > 依据：[PRD](./prd.md)
 > 重构基线：[RBAC 与 PostgreSQL 重构设计](./rbac-postgresql-refactor.md)
 > 路线图：[管理员产品优化路线图](./admin-product-optimization.md)
@@ -696,7 +696,8 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 - `communication_resource_refs` 保存 `package/environment/service` 资源引用及创建时快照。安装包使用账号与服务类型作为稳定业务键，环境和服务使用环境 ID，但服务引用保留服务语义。
 
 通讯表不对账号表设置强外键，改为保存账号 ID 与用户名快照，确保删除账号不会破坏通讯历史；PostgreSQL
-`004_communication_rbac_baseline.sql` 删除 `target_user_id` 的账号外键，`005`/`006` 增加用户与角色快照；
+`004_communication_rbac_baseline.sql` 删除 `target_user_id` 的账号外键，`005`/`006` 增加用户与角色快照，
+`007` 将创建、关闭和重开事项收紧为全局权限并移除遗留的 own scope 绑定；
 事项、消息、收件人和资源引用之间使用级联外键保证内部一致性。消息正文不进入审计或结构化应用日志。资源引用不保存密码、配置正文、远程日志、会话信息或安装包内容。
 
 通讯列表先读取当前页事项，再按事项 ID 集合一次性批量读取资源引用并在内存分组，避免随页大小增长的逐事项查询。
@@ -709,7 +710,7 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 
 前端使用独立的 `/communications` 消息中心，不复用风险通知中心。获得 `communication.read` 的账号显示导航，展开时显示未读数、折叠时显示提示点；顶栏快捷入口保留数字徽标。所有已完成强制改密的登录账号建立一个 `/events` SSE 连接，并保留 30 秒轮询作为兜底。列表、时间线、资源快照与状态操作均通过 React Query 独立缓存，发送、已读、关闭、重新打开和实时事件同时失效列表、相关详情和摘要缓存。
 
-本功能由 PostgreSQL `001_initial.sql` 建表并由 `004`–`006` 收紧 RBAC 与快照字段。应用服务执行权限、长度和资源数量校验，存储层在事务内再次执行目标账号、资源归属和事项状态校验。生命周期、own/all 隔离、跨账号资源拒绝、独立未读、关闭后拒绝回复和重新打开标记均由 PostgreSQL 集成测试覆盖。
+本功能由 PostgreSQL `001_initial.sql` 建表并由 `004`–`007` 收紧 RBAC、全局动作范围与快照字段。应用服务执行权限、长度和资源数量校验，存储层在事务内再次执行目标账号、资源归属和事项状态校验。生命周期、own/all 隔离、跨账号资源拒绝、独立未读、关闭后拒绝回复和重新打开标记均由 PostgreSQL 集成测试覆盖。
 
 协调者指拥有对应 `communication.*` 权限且 scope 为 `all` 的账号：只有
 `communication.create:all` 可主动创建事项，只有 `communication.manage:all` 可关闭或重新打开；目标账号以

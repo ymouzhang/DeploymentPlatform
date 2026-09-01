@@ -2,6 +2,26 @@ package access
 
 import "testing"
 
+func TestDefinitionsAreUniqueAndValid(t *testing.T) {
+	t.Parallel()
+	seenKeys := make(map[Permission]struct{})
+	seenActions := make(map[string]struct{})
+	for _, definition := range Definitions() {
+		if definition.Key == "" || definition.Resource == "" || definition.Action == "" || definition.Description == "" {
+			t.Fatalf("incomplete definition: %+v", definition)
+		}
+		if _, exists := seenKeys[definition.Key]; exists {
+			t.Fatalf("duplicate permission key %q", definition.Key)
+		}
+		seenKeys[definition.Key] = struct{}{}
+		action := definition.Resource + "." + definition.Action
+		if _, exists := seenActions[action]; exists {
+			t.Fatalf("duplicate resource action %q", action)
+		}
+		seenActions[action] = struct{}{}
+	}
+}
+
 func TestMergeUsesStrongestScope(t *testing.T) {
 	t.Parallel()
 	grants, err := Merge(

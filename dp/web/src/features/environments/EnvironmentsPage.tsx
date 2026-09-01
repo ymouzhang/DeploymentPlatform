@@ -125,7 +125,7 @@ export function EnvironmentsPage() {
   })
 
   const validateDraftMutation = useMutation({
-    mutationFn: api.validateDraft,
+    mutationFn: (input: EnvironmentInput) => api.validateDraft(input, environmentWriteAll ? createOwner : undefined),
     onSuccess: setValidation,
     onError: (error: Error) => message.error(error.message),
   })
@@ -141,7 +141,7 @@ export function EnvironmentsPage() {
   })
 
   const importMutation = useMutation({
-    mutationFn: api.importEnvironments,
+    mutationFn: (document: unknown) => api.importEnvironments(document, hasAll('environment.import') ? ownerId : undefined),
     onSuccess: (result) => {
       message.success(`导入完成：新增 ${result.created}，覆盖 ${result.overwritten}`)
       void queryClient.invalidateQueries({ queryKey: ['environments'] })

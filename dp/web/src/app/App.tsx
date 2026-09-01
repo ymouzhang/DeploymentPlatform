@@ -21,12 +21,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { AuthContext, canAccess, hasAllAccess } from './AuthContext'
-import type { Permission, User } from '../types'
+import type { Permission } from '../types'
 import { LoginPage } from '../features/auth/LoginPage'
 import { communicationKeys } from '../features/communications/queryKeys'
 import { RealtimeEvents } from '../realtime/RealtimeEvents'
 import { HeaderMessageEntry, SidebarMessageIcon, SidebarMessageLabel } from '../features/communications/MessageEntrypoints'
 import { ModelUploadProvider } from '../features/models/ModelUploadContext'
+import { firstAllowedPath } from './navigation'
 
 const { Header, Sider, Content } = Layout
 const EnvironmentsPage = lazy(() =>
@@ -58,24 +59,6 @@ const scopedPagePermissions: Partial<Record<string, Permission>> = {
   '/environments': 'environment.read',
   '/models': 'model.read',
   '/services': 'service.read',
-}
-
-const pageOrder: Array<[string, Permission]> = [
-  ['/dashboard', 'dashboard.read'],
-  ['/packages', 'package.read'],
-  ['/environments', 'environment.read'],
-  ['/models', 'model.read'],
-  ['/services', 'service.read'],
-  ['/communications', 'communication.read'],
-	['/roles', 'role.read'],
-  ['/users', 'account.read'],
-  ['/operations', 'operation.read'],
-  ['/audit', 'audit.read'],
-  ['/notifications', 'notification.read'],
-]
-
-function firstAllowedPath(user: User) {
-  return pageOrder.find(([, permission]) => canAccess(user, permission))?.[0] ?? '/forbidden'
 }
 
 function ForbiddenPage() {

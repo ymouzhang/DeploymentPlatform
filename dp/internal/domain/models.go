@@ -344,11 +344,12 @@ type Operation struct {
 }
 
 type OperationFilter struct {
-	ActorID, OwnerID, Action, Status, Keyword string
-	From, To, CursorTime                      *time.Time
-	CursorID                                  string
-	TagIDs                                    []string
-	Limit                                     int
+	ActorID, OwnerID, SubjectID string
+	Action, Status, Keyword     string
+	From, To, CursorTime        *time.Time
+	CursorID                    string
+	TagIDs                      []string
+	Limit                       int
 }
 
 type ModelStatus string

@@ -3,6 +3,7 @@ name: dp
 services:
   postgres:
     image: ${DP_POSTGRES_IMAGE:-postgres:17-alpine}
+    platform: ${DP_PLATFORM:-linux/amd64}
     restart: unless-stopped
     environment:
       POSTGRES_DB: "${DP_POSTGRES_DB:-dp}"
@@ -38,6 +39,7 @@ services:
       DP_ADMIN_PASSWORD: "${DP_ADMIN_PASSWORD:?请在 .env 中设置 DP_ADMIN_PASSWORD}"
       DP_DATABASE_URL: "postgres://${DP_POSTGRES_USER:-dp}:${DP_POSTGRES_PASSWORD}@postgres:5432/${DP_POSTGRES_DB:-dp}?sslmode=disable"
       DP_SESSION_TTL: "${DP_SESSION_TTL:-24h}"
+      DP_STALE_ACCOUNT_DAYS: "${DP_STALE_ACCOUNT_DAYS:-90}"
       DP_DATA_DIR: /app/data
       DP_LISTEN_ADDR: 0.0.0.0:30199
       DP_HEALTH_INTERVAL: "${DP_HEALTH_INTERVAL:-10s}"

@@ -87,6 +87,56 @@ type Definition struct {
 	Scoped      bool       `json:"scoped"`
 }
 
+// Definitions returns the immutable application permission catalog. PostgreSQL
+// seeds and HTTP route declarations are verified against this catalog in tests.
+func Definitions() []Definition {
+	return []Definition{
+		{Key: DashboardRead, Resource: "dashboard", Action: "read", Description: "查看管理总览"},
+		{Key: AccountRead, Resource: "account", Action: "read", Description: "查看账号和会话"},
+		{Key: AccountCreate, Resource: "account", Action: "create", Description: "创建账号"},
+		{Key: AccountUpdate, Resource: "account", Action: "update", Description: "修改账号安全状态"},
+		{Key: AccountDelete, Resource: "account", Action: "delete", Description: "删除账号"},
+		{Key: AccountAssignRoles, Resource: "account", Action: "assign_roles", Description: "分配用户角色"},
+		{Key: AccountTransfer, Resource: "account", Action: "transfer", Description: "交接账号资源"},
+		{Key: RoleRead, Resource: "role", Action: "read", Description: "查看角色和权限"},
+		{Key: RoleCreate, Resource: "role", Action: "create", Description: "创建角色"},
+		{Key: RoleUpdate, Resource: "role", Action: "update", Description: "修改角色和权限绑定"},
+		{Key: RoleDelete, Resource: "role", Action: "delete", Description: "删除角色"},
+		{Key: PackageRead, Resource: "package", Action: "read", Description: "查看安装包", Scoped: true},
+		{Key: PackageWrite, Resource: "package", Action: "write", Description: "上传和更新安装包", Scoped: true},
+		{Key: PackageDelete, Resource: "package", Action: "delete", Description: "删除安装包", Scoped: true},
+		{Key: EnvironmentRead, Resource: "environment", Action: "read", Description: "查看环境", Scoped: true},
+		{Key: EnvironmentWrite, Resource: "environment", Action: "write", Description: "创建和修改环境", Scoped: true},
+		{Key: EnvironmentDelete, Resource: "environment", Action: "delete", Description: "删除环境", Scoped: true},
+		{Key: EnvironmentValidate, Resource: "environment", Action: "validate", Description: "校验 SSH 环境", Scoped: true},
+		{Key: EnvironmentImport, Resource: "environment", Action: "import", Description: "导入环境", Scoped: true},
+		{Key: EnvironmentExport, Resource: "environment", Action: "export", Description: "导出环境", Scoped: true},
+		{Key: TagRead, Resource: "tag", Action: "read", Description: "查看标签", Scoped: true},
+		{Key: TagWrite, Resource: "tag", Action: "write", Description: "管理标签", Scoped: true},
+		{Key: ModelRead, Resource: "model", Action: "read", Description: "查看模型", Scoped: true},
+		{Key: ModelUpload, Resource: "model", Action: "upload", Description: "上传和重试模型", Scoped: true},
+		{Key: ModelDelete, Resource: "model", Action: "delete", Description: "删除模型", Scoped: true},
+		{Key: ServiceRead, Resource: "service", Action: "read", Description: "查看服务", Scoped: true},
+		{Key: ServiceConfigRead, Resource: "service", Action: "config.read", Description: "查看服务配置", Scoped: true},
+		{Key: ServiceConfigWrite, Resource: "service", Action: "config.write", Description: "修改服务配置", Scoped: true},
+		{Key: ServiceInstall, Resource: "service", Action: "install", Description: "安装服务", Scoped: true},
+		{Key: ServiceStart, Resource: "service", Action: "start", Description: "启动服务", Scoped: true},
+		{Key: ServiceStop, Resource: "service", Action: "stop", Description: "停止服务", Scoped: true},
+		{Key: ServiceReset, Resource: "service", Action: "reset", Description: "重置服务", Scoped: true},
+		{Key: ServiceHealth, Resource: "service", Action: "health", Description: "手动检查服务健康", Scoped: true},
+		{Key: ServiceLogRead, Resource: "service", Action: "log.read", Description: "查看服务日志", Scoped: true},
+		{Key: OperationRead, Resource: "operation", Action: "read", Description: "查看操作和日志", Scoped: true},
+		{Key: AuditRead, Resource: "audit", Action: "read", Description: "查看审计日志"},
+		{Key: AuditExport, Resource: "audit", Action: "export", Description: "导出审计日志"},
+		{Key: NotificationRead, Resource: "notification", Action: "read", Description: "查看风险通知"},
+		{Key: NotificationUpdate, Resource: "notification", Action: "update", Description: "处理风险通知"},
+		{Key: CommunicationRead, Resource: "communication", Action: "read", Description: "查看通讯事项", Scoped: true},
+		{Key: CommunicationCreate, Resource: "communication", Action: "create", Description: "创建通讯事项"},
+		{Key: CommunicationReply, Resource: "communication", Action: "reply", Description: "回复和标记通讯已读", Scoped: true},
+		{Key: CommunicationManage, Resource: "communication", Action: "manage", Description: "关闭和重新打开通讯"},
+	}
+}
+
 type Grant struct {
 	Permission Permission `json:"permission"`
 	Scope      Scope      `json:"scope"`

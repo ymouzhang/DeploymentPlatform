@@ -210,16 +210,11 @@ func (db *DB) GetCommunication(
 	actor domain.User,
 	id string,
 ) (domain.Communication, error) {
-	scope, ok := actor.Permissions.Scope(access.CommunicationRead)
-	if !ok {
-		return domain.Communication{}, domain.ErrForbidden
+	if _, err := db.communicationTarget(ctx, actor, id); err != nil {
+		return domain.Communication{}, err
 	}
 	query := communicationSelect + ` WHERE t.id = $2`
 	args := []any{actor.ID, id}
-	if scope != access.ScopeAll {
-		query += ` AND t.target_user_id = $3`
-		args = append(args, actor.ID)
-	}
 	item, err := scanPostgresCommunication(db.pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		return domain.Communication{}, err
@@ -426,7 +421,7 @@ func (db *DB) communicationTarget(ctx context.Context, actor domain.User, id str
 	}
 	scope, ok := actor.Permissions.Scope(access.CommunicationRead)
 	if !ok || scope != access.ScopeAll && actor.ID != target.ID {
-		return domain.User{}, domain.ErrNotFound
+		return domain.User{}, domain.ErrForbidden
 	}
 	return target, nil
 }
@@ -449,7 +444,7 @@ func postgresCommunicationTargetTx(
 	}
 	scope, ok := actor.Permissions.Scope(access.CommunicationReply)
 	if !ok || scope != access.ScopeAll && actor.ID != target.ID {
-		return domain.User{}, "", domain.ErrNotFound
+		return domain.User{}, "", domain.ErrForbidden
 	}
 	return target, status, nil
 }

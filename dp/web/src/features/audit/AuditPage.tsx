@@ -163,13 +163,14 @@ function AuditDetail({ event, onOpenOperation }: { event: AuditEvent; onOpenOper
 }
 
 const categoryOptions = [
-  { value: 'authentication', label: '认证安全' }, { value: 'account', label: '账号管理' },
+  { value: 'authentication', label: '认证安全' }, { value: 'authorization', label: '授权管理' }, { value: 'account', label: '账号管理' },
   { value: 'package', label: '安装包' }, { value: 'environment', label: '环境' },
   { value: 'service', label: '服务' }, { value: 'model', label: '模型' }, { value: 'communication', label: '用户通讯' }, { value: 'audit', label: '审计' },
 ]
 
 const actions: Record<string, string> = {
   'auth.login': '账号登录', 'auth.logout': '退出登录', 'auth.password.change': '修改本人密码', 'auth.session.revoke': '撤销本人会话',
+  'authorization.denied': '权限请求被拒绝', 'role.create': '创建角色', 'role.update': '修改角色', 'role.delete': '删除角色', 'account.role.update': '调整账号角色',
   'account.create': '新增账号', 'account.password.reset': '重置账号密码', 'account.enable': '启用账号', 'account.disable': '禁用账号', 'account.delete': '删除账号', 'account.session.revoke': '撤销指定会话', 'account.sessions.revoke': '强制全部下线',
   'package.upload': '上传安装包', 'package.replace': '替换安装包', 'package.note.update': '修改安装包备注', 'package.delete': '删除安装包',
   'package.version.activate': '切换安装包版本', 'package.version.delete': '删除安装包版本',

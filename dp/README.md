@@ -82,7 +82,7 @@ export DP_DATA_DIR="./data"
 ./bin/dp
 ```
 
-默认监听 `127.0.0.1:8080`。生产环境应通过内网/VPN 访问，并在反向代理层启用 HTTPS。
+Compose 默认将 DP 发布到宿主机 `0.0.0.0:30199`，可通过 `DP_HTTP_PORT` 修改宿主机端口。生产环境应通过内网/VPN 控制访问范围，并在反向代理层启用 HTTPS。
 
 ## Docker Compose 部署
 
@@ -119,6 +119,8 @@ DP_PLATFORM=linux/arm64 ./scripts/build-package.sh arm64-v1.0.0
 ```
 
 构建过程会在 Docker 中安装依赖、执行前后端测试、编译程序、构建运行镜像，并生成：
+
+如通过 `DP_POSTGRES_IMAGE` 指定内部镜像仓库或定制 PostgreSQL 镜像，打包脚本会将该镜像及其完整名称同步写入离线包的 `.env.example`；DP 与 PostgreSQL 镜像均按 `DP_PLATFORM` 生成或拉取。
 
 在跨架构构建中，测试和前端构建使用构建主机的原生架构执行，Go 程序再交叉编译为 `DP_PLATFORM` 指定的目标架构；因此在 x86_64 主机生成 ARM64 包时不依赖 QEMU 执行 Vitest，最终镜像及其中的 `dp` 二进制仍为 ARM64。
 

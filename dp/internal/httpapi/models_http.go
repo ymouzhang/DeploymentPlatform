@@ -267,7 +267,7 @@ func (a *API) modelTaskEvents(w http.ResponseWriter, r *http.Request) {
 func (a *API) authorizeOwner(r *http.Request, ownerID string, permission access.Permission) error {
 	user := currentUser(r)
 	if !user.Permissions.Allows(permission, user.ID, ownerID) {
-		return domain.ErrNotFound
+		return domain.ErrForbidden
 	}
 	return nil
 }

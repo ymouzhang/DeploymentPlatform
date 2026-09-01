@@ -110,7 +110,7 @@ func (a *API) authorizeResourceTag(r *http.Request, id string) (domain.ResourceT
 	}
 	user := currentUser(r)
 	if !user.Permissions.Allows(access.TagWrite, user.ID, item.OwnerID) {
-		return domain.ResourceTag{}, domain.ErrNotFound
+		return domain.ResourceTag{}, domain.ErrForbidden
 	}
 	return item, nil
 }

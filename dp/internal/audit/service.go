@@ -24,6 +24,7 @@ type Repository interface {
 	DeleteResolvedNotificationsBefore(context.Context, time.Time, int) (int64, error)
 	DeleteTerminalOperationsBefore(context.Context, time.Time, int) ([]string, error)
 	FindOperationAuditRequest(context.Context, string) (domain.AuditEvent, error)
+	HasRecentAuthorizationDenied(context.Context, string, string, time.Time) (bool, error)
 	HasRecentLoginThrottleAudit(context.Context, string, string, time.Time) (bool, error)
 	ListStaleUsers(context.Context, time.Time) ([]domain.User, error)
 	ResolveNotificationByDedupeKey(context.Context, string, string, time.Time) error
@@ -64,6 +65,20 @@ func NewService(db Repository, retentionDays int, log *slog.Logger) *Service {
 
 func (s *Service) Record(ctx context.Context, event domain.AuditEvent) {
 	event.UserAgent = truncate(event.UserAgent, 512)
+	if event.Action == "authorization.denied" && event.ActorUserID != "" {
+		permission, _ := event.Changes["permission"].(string)
+		if permission != "" {
+			recent, err := s.store.HasRecentAuthorizationDenied(
+				ctx,
+				event.ActorUserID,
+				permission,
+				time.Now().UTC().Add(-30*time.Second),
+			)
+			if err == nil && recent {
+				return
+			}
+		}
+	}
 	if event.Action == "auth.login" && event.ErrorCode == "LOGIN_THROTTLED" {
 		recent, err := s.store.HasRecentLoginThrottleAudit(ctx, event.ActorUsername, event.SourceIP, time.Now().UTC().Add(-30*time.Second))
 		if err == nil && recent {

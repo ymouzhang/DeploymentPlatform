@@ -80,6 +80,47 @@ func TestAuditEndpointRejectsOrdinaryUser(t *testing.T) {
 	}
 }
 
+func TestAuthorizationDeniedAuditIsSanitizedAndAggregated(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenPostgres(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditService := audit.NewService(db, 180, logger)
+	api := &API{audit: auditService, log: logger}
+	user, err := db.CreateUser(ctx, testutil.User(t, "denied-operator", access.RoleOperator, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.Permissions = access.Grants{}
+	handler := api.auditMiddleware(api.requirePermission(access.RoleCreate, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})))
+	for range 2 {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/roles", strings.NewReader(`{"name":"secret"}`))
+		request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: user}))
+		request = request.WithContext(context.WithValue(request.Context(), requestIDKey, domain.NewID()))
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	}
+	from, to := time.Now().Add(-time.Minute), time.Now().Add(time.Minute)
+	events, err := db.ListAuditEvents(ctx, domain.AuditFilter{Action: "authorization.denied", From: &from, To: &to, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("denied events=%+v", events)
+	}
+	changes := events[0].Changes
+	if changes["permission"] != string(access.RoleCreate) || changes["requested_action"] != "role.create" || changes["path"] != "/api/v1/roles" {
+		t.Fatalf("denied changes=%+v", changes)
+	}
+	if strings.Contains(string(mustJSON(t, changes)), "secret") {
+		t.Fatalf("denied audit leaked request body: %+v", changes)
+	}
+}
+
 func TestCSVCellPreventsFormulaInjection(t *testing.T) {
 	for _, value := range []string{"=cmd", "+1", "-1", "@SUM(A1)"} {
 		if got := csvCell(value); !strings.HasPrefix(got, "'") {

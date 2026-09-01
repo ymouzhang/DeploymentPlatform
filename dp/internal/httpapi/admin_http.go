@@ -88,7 +88,20 @@ func (a *API) transferUserResources(w http.ResponseWriter, r *http.Request) {
 func (a *API) listOperations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := domain.OperationFilter{ActorID: q.Get("actor_id"), OwnerID: q.Get("owner_id"), Action: q.Get("action"), Status: q.Get("status"), Keyword: strings.TrimSpace(q.Get("keyword")), Limit: 50}
-	tagIDs, tagErr := a.visibleTagIDs(r, filter.OwnerID, access.OperationRead)
+	user := currentUser(r)
+	scope, ok := user.Permissions.Scope(access.OperationRead)
+	if !ok {
+		a.writeError(w, r, domain.ErrForbidden)
+		return
+	}
+	tagOwnerID := filter.OwnerID
+	if scope == access.ScopeOwn {
+		filter.ActorID = ""
+		filter.OwnerID = ""
+		filter.SubjectID = user.ID
+		tagOwnerID = user.ID
+	}
+	tagIDs, tagErr := a.visibleTagIDs(r, tagOwnerID, access.OperationRead)
 	if tagErr != nil {
 		a.writeError(w, r, tagErr)
 		return

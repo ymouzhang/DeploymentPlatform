@@ -79,6 +79,13 @@ func (a *API) auditMiddleware(next http.Handler) http.Handler {
 		if metadata.outcome != "" {
 			outcome = metadata.outcome
 		}
+		requestedAction := firstNonEmpty(metadata.action, action)
+		if outcome == "denied" && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			category = "authorization"
+			metadata.action = "authorization.denied"
+			metadata.changes["requested_action"] = requestedAction
+			metadata.changes["path"] = r.URL.Path
+		}
 		actor := metadata.actor
 		if actor.ID == "" {
 			actor = currentUser(r)
@@ -121,6 +128,14 @@ func auditAction(method, path string) (category, action, targetType string, ok b
 		return "authentication", "auth.session.revoke", "session", true
 	case method == http.MethodPost && path == "/api/v1/users":
 		return "account", "account.create", "user", true
+	case method == http.MethodPost && path == "/api/v1/roles":
+		return "authorization", "role.create", "role", true
+	case method == http.MethodPut && strings.HasPrefix(path, "/api/v1/roles/"):
+		return "authorization", "role.update", "role", true
+	case method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/roles/"):
+		return "authorization", "role.delete", "role", true
+	case method == http.MethodPut && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/roles"):
+		return "authorization", "account.role.update", "user", true
 	case method == http.MethodPost && path == "/api/v1/communications":
 		return "communication", "communication.create", "communication", true
 	case method == http.MethodPut && strings.HasPrefix(path, "/api/v1/communications/") && strings.HasSuffix(path, "/read"):
@@ -230,7 +245,11 @@ func setAuditTarget(r *http.Request, owner domain.User, targetType, id, label st
 		metadata.ownerID, metadata.ownerUsername = owner.ID, owner.Username
 		metadata.targetType, metadata.targetID, metadata.targetLabel = targetType, id, label
 		if changes != nil {
+			permission := metadata.changes["permission"]
 			metadata.changes = changes
+			if permission != nil {
+				metadata.changes["permission"] = permission
+			}
 		}
 	}
 }
