@@ -42,7 +42,7 @@ func (s *CommunicationService) Create(ctx context.Context, actor domain.User, in
 	input.Title = strings.TrimSpace(input.Title)
 	input.Content = strings.TrimSpace(input.Content)
 	if input.TargetUserID == "" {
-		return domain.Communication{}, domain.FieldError("target_user_id", "请选择目标普通账号")
+		return domain.Communication{}, domain.FieldError("target_user_id", "请选择目标协作账号")
 	}
 	if length := utf8.RuneCountInString(input.Title); length < 1 || length > 100 {
 		return domain.Communication{}, domain.FieldError("title", "标题长度必须为 1–100 个字符")

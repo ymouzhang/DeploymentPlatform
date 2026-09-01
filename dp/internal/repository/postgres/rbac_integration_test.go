@@ -3,22 +3,18 @@ package postgres
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"DP/internal/access"
+	"DP/internal/testdb"
 	"github.com/google/uuid"
 )
 
 func TestRBACRepositoryIntegration(t *testing.T) {
-	databaseURL := os.Getenv("DP_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DP_TEST_DATABASE_URL is not set")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	db, err := Open(ctx, databaseURL)
+	db, err := Open(ctx, testdb.PostgresURL(t))
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

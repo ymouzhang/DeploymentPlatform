@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: DP API
-  version: 1.10.0
-  description: Deployment Platform HTTP API with local-account authentication and owner isolation
+  version: 2.0.0
+  description: Deployment Platform HTTP API with PostgreSQL-backed Core RBAC and own/all resource scopes
 servers:
   - url: /api/v1
 security:
@@ -13,7 +13,7 @@ paths:
       security: []
       servers: [{ url: / }]
       operationId: getHealth
-      description: Checks SQLite access and data-directory writability.
+      description: Checks PostgreSQL access and data-directory writability.
       responses:
         "200":
           description: DP is ready
@@ -110,7 +110,7 @@ paths:
       operationId: listUsers
       responses:
         "200":
-          description: User list; admin only
+          description: User list; requires account.read
           content:
             application/json:
               schema:
@@ -186,7 +186,7 @@ paths:
         - $ref: "#/components/parameters/UserId"
       responses:
         "200":
-          description: User detail and resource/activity summary; admin only
+          description: User detail and resource/activity summary; requires account.read
           content:
             application/json:
               schema: { $ref: "#/components/schemas/UserDetailResponse" }
@@ -218,7 +218,7 @@ paths:
         - $ref: "#/components/parameters/UserId"
       responses:
         "200":
-          description: Active sessions for the target user; admin only
+          description: Active sessions for the target user; requires account.read
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SessionListResponse" }
@@ -231,7 +231,7 @@ paths:
         - $ref: "#/components/parameters/UserId"
         - $ref: "#/components/parameters/SessionId"
       responses:
-        "200": { description: Target session revoked; admin only }
+        "200": { description: Target session revoked; requires account.update }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -256,6 +256,99 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TransferResultResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /users/{id}/roles:
+    put:
+      operationId: replaceUserRoles
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReplaceUserRolesInput" }
+      responses:
+        "200": { description: User role bindings replaced atomically }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /permissions:
+    get:
+      operationId: listPermissions
+      responses:
+        "200":
+          description: Immutable permission catalog
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PermissionListResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /roles:
+    get:
+      operationId: listRoles
+      responses:
+        "200":
+          description: System and custom roles
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleListResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRoleInput" }
+      responses:
+        "201":
+          description: Custom role created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /roles/{id}:
+    get:
+      operationId: getRole
+      parameters:
+        - $ref: "#/components/parameters/RoleId"
+      responses:
+        "200":
+          description: Role detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateRole
+      parameters:
+        - $ref: "#/components/parameters/RoleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateRoleInput" }
+      responses:
+        "200":
+          description: Custom role and grants replaced atomically
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    delete:
+      operationId: deleteRole
+      parameters:
+        - $ref: "#/components/parameters/RoleId"
+      responses:
+        "200": { description: Unused custom role deleted }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -820,7 +913,7 @@ paths:
   /operations:
     get:
       operationId: listOperations
-      description: Cursor-paginated global operation center; admin only.
+      description: Cursor-paginated operation center scoped by operation.read.
       parameters:
         - $ref: "#/components/parameters/OwnerId"
         - $ref: "#/components/parameters/TagIds"
@@ -854,12 +947,12 @@ paths:
   /admin/dashboard:
     get:
       operationId: getAdminDashboard
-      description: Tag filters affect only environment, service, SSH-validation and operation metrics. Account, package, security, notification and communication data remain global; communication unread state is scoped to the current administrator.
+      description: Tag filters affect only environment, service, SSH-validation and operation metrics. Other metrics keep their permission scope; communication unread state is scoped to the current account.
       parameters:
         - $ref: "#/components/parameters/TagIds"
       responses:
         "200":
-          description: Administrator overview metrics, the current administrator's recent unread communications, and recent actionable risk notifications
+          description: Permission-scoped overview metrics, the current account's recent unread communications, and recent actionable risk notifications
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AdminDashboardResponse" }
@@ -869,7 +962,7 @@ paths:
       operationId: getNotificationSummary
       responses:
         "200":
-          description: Shared administrator notification counters
+          description: Permission-scoped notification counters
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NotificationSummaryResponse" }
@@ -940,7 +1033,7 @@ paths:
     get:
       operationId: listCommunications
       parameters:
-        - { name: target_user_id, in: query, description: Admin-only target-user filter, schema: { type: string, format: uuid } }
+        - { name: target_user_id, in: query, description: Target-user filter available with communication.read all scope, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [open, closed] } }
         - { name: unread, in: query, schema: { type: boolean } }
         - { name: keyword, in: query, schema: { type: string, maxLength: 100 } }
@@ -961,7 +1054,7 @@ paths:
             schema: { $ref: "#/components/schemas/CommunicationCreateInput" }
       responses:
         "201":
-          description: Communication created atomically; admin only
+          description: Communication created atomically; requires communication.create
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
@@ -1029,7 +1122,7 @@ paths:
             schema: { $ref: "#/components/schemas/CommunicationStateInput" }
       responses:
         "200":
-          description: Communication closed and target user notified; admin only
+          description: Communication closed and target user notified; requires communication.manage
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
@@ -1048,7 +1141,7 @@ paths:
             schema: { $ref: "#/components/schemas/CommunicationStateInput" }
       responses:
         "200":
-          description: Communication reopened with an immutable marker and target-user notification; admin only
+          description: Communication reopened with an immutable marker and target-user notification; requires communication.manage
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CommunicationDetailResponse" }
@@ -1058,7 +1151,7 @@ paths:
   /audit-events:
     get:
       operationId: listAuditEvents
-      description: Cursor-paginated audit events; admin only.
+      description: Cursor-paginated audit events; requires audit.read.
       parameters:
         - $ref: "#/components/parameters/AuditFrom"
         - $ref: "#/components/parameters/AuditTo"
@@ -1081,7 +1174,7 @@ paths:
   /audit-events/summary:
     get:
       operationId: getAuditSummary
-      description: Audit totals for the selected filter; admin only.
+      description: Audit totals for the selected filter; requires audit.read.
       parameters:
         - $ref: "#/components/parameters/AuditFrom"
         - $ref: "#/components/parameters/AuditTo"
@@ -1099,7 +1192,7 @@ paths:
   /audit-events/export:
     get:
       operationId: exportAuditEvents
-      description: Exports at most 31 days and the configured row limit as UTF-8 CSV; admin only.
+      description: Exports at most 31 days and the configured row limit as UTF-8 CSV; requires audit.export.
       parameters:
         - $ref: "#/components/parameters/AuditFrom"
         - $ref: "#/components/parameters/AuditTo"
@@ -1120,7 +1213,7 @@ paths:
   /audit-events/{id}:
     get:
       operationId: getAuditEvent
-      description: Gets a sanitized audit event and records the detail view; admin only.
+      description: Gets a sanitized audit event and records the detail view; requires audit.read.
       parameters:
         - name: id
           in: path
@@ -1260,6 +1353,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    RoleId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     SessionId:
       name: sessionId
       in: path
@@ -1274,7 +1372,7 @@ components:
       name: owner_id
       in: query
       required: false
-      description: Admin-only owner filter/target. Ordinary users are always scoped to themselves.
+      description: Owner filter/target available only when the route permission resolves to all scope; own scope is forced to the current account.
       schema: { type: string, format: uuid }
     TagIds:
       name: tag_id
@@ -1332,7 +1430,7 @@ components:
     CreateUserInput:
       type: object
       additionalProperties: false
-      required: [username, password, role]
+      required: [username, password, role_ids]
       properties:
         username:
           type: string
@@ -1340,14 +1438,96 @@ components:
           maxLength: 32
           pattern: "^[a-z0-9][a-z0-9._-]{2,31}$"
         password: { type: string, minLength: 8, maxLength: 128 }
-        role: { type: string, enum: [admin, user] }
+        role_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    ReplaceUserRolesInput:
+      type: object
+      additionalProperties: false
+      required: [role_ids]
+      properties:
+        role_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    PermissionDefinition:
+      type: object
+      additionalProperties: false
+      required: [key, resource, action, description, scoped]
+      properties:
+        key: { type: string, pattern: "^[a-z][a-z0-9_.-]+$" }
+        resource: { type: string }
+        action: { type: string }
+        description: { type: string }
+        scoped: { type: boolean }
+    RoleGrant:
+      type: object
+      additionalProperties: false
+      required: [permission, scope]
+      properties:
+        permission: { type: string, pattern: "^[a-z][a-z0-9_.-]+$" }
+        scope: { type: string, enum: [own, all] }
+    RoleRef:
+      type: object
+      additionalProperties: false
+      required: [id, key, name]
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string }
+        name: { type: string }
+    Role:
+      type: object
+      additionalProperties: false
+      required: [id, key, name, description, system, grants, member_count]
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string, pattern: "^[a-z][a-z0-9_-]{1,62}$" }
+        name: { type: string }
+        description: { type: string }
+        system: { type: boolean }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/RoleGrant" }
+        member_count: { type: integer, minimum: 0 }
+    CreateRoleInput:
+      type: object
+      additionalProperties: false
+      required: [key, name, description, grants]
+      properties:
+        key: { type: string, pattern: "^[a-z][a-z0-9_-]{1,62}$" }
+        name: { type: string, minLength: 1, maxLength: 64 }
+        description: { type: string, maxLength: 255 }
+        grants:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/RoleGrant" }
+    UpdateRoleInput:
+      type: object
+      additionalProperties: false
+      required: [name, description, grants]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        description: { type: string, maxLength: 255 }
+        grants:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/RoleGrant" }
     User:
       type: object
-      required: [id, username, role, enabled, must_change_password, is_initial_admin, created_at, updated_at]
+      required: [id, username, roles, permissions, enabled, must_change_password, is_initial_admin, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
-        role: { type: string, enum: [admin, user] }
+        roles:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RoleRef" }
+        permissions:
+          type: object
+          additionalProperties: { type: string, enum: [own, all] }
         enabled: { type: boolean }
         must_change_password: { type: boolean, description: When true, only self lookup, self password change, and logout are permitted until the account owner changes the temporary password. Always true for a newly initialized admin or newly created account. }
         is_initial_admin: { type: boolean }
@@ -1361,6 +1541,25 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/User"
+    PermissionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/PermissionDefinition" }
+    RoleResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/Role" }
+    RoleListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
     Session:
       type: object
       required: [id, source_ip, user_agent, created_at, last_seen_at, expires_at, current]
@@ -1406,21 +1605,25 @@ components:
         content: { type: string, maxLength: 5000, description: Optional close/reopen explanation }
     CommunicationRecipient:
       type: object
-      required: [user_id, username, role]
+      required: [user_id, username, roles]
       properties:
         user_id: { type: string, format: uuid }
         username: { type: string }
-        role: { type: string, enum: [admin, user] }
+        roles:
+          type: array
+          items: { type: string }
         read_at: { type: [string, "null"], format: date-time }
     CommunicationMessage:
       type: object
-      required: [id, type, sender_username, sender_role, content, created_at, recipients]
+      required: [id, type, sender_username, sender_roles, content, created_at, recipients]
       properties:
         id: { type: string, format: uuid }
         type: { type: string, enum: [admin_message, user_receipt, system_closed, system_reopened] }
         sender_user_id: { type: [string, "null"], format: uuid }
         sender_username: { type: string }
-        sender_role: { type: string, enum: [admin, user] }
+        sender_roles:
+          type: array
+          items: { type: string }
         content: { type: string }
         created_at: { type: string, format: date-time }
         recipients:
@@ -1637,7 +1840,7 @@ components:
       type: object
       required: [schema_version, environments]
       properties:
-        schema_version: { type: integer, enum: [1, 2], description: Exports use 2; imports retain v1 compatibility. }
+        schema_version: { type: integer, enum: [2], description: Both export and import require schema v2. }
         exported_at: { type: string, format: date-time }
         environments:
           type: array
@@ -2033,18 +2236,18 @@ components:
                 unhealthy_installed_services: { type: integer }
                 high_risk_audits_24h: { type: integer }
                 unread_notifications: { type: integer }
-                unread_communications: { type: integer, description: Unread communication messages for the current administrator }
+                unread_communications: { type: integer, description: Unread communication messages for the current account }
             communications:
               type: array
               maxItems: 5
-              description: Most recently updated communication threads containing unread messages for the current administrator
+              description: Most recently updated communication threads containing unread messages for the current account
               items: { $ref: "#/components/schemas/Communication" }
             notifications:
               type: array
               items: { $ref: "#/components/schemas/Notification" }
     AuditEvent:
       type: object
-      required: [id, occurred_at, category, action, outcome, risk_level, actor_username, request_id]
+      required: [id, occurred_at, category, action, outcome, risk_level, actor_username, actor_roles, request_id]
       properties:
         id: { type: string, format: uuid }
         occurred_at: { type: string, format: date-time }
@@ -2054,7 +2257,9 @@ components:
         risk_level: { type: string, enum: [normal, high] }
         actor_user_id: { type: string, format: uuid }
         actor_username: { type: string }
-        actor_role: { type: string, enum: [admin, user] }
+        actor_roles:
+          type: array
+          items: { type: string }
         owner_id: { type: string, format: uuid }
         owner_username: { type: string }
         target_type: { type: string }
@@ -2116,7 +2321,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     Forbidden:
-      description: Administrator role required
+      description: The authenticated account lacks the route permission or required resource scope
       content:
         application/json:
           schema:

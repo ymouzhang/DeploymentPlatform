@@ -48,11 +48,7 @@ func (db *DB) CreateAuditEvent(ctx context.Context, event domain.AuditEvent) (do
 	if event.RiskLevel == "" {
 		event.RiskLevel = "normal"
 	}
-	roles := event.ActorRoles
-	if len(roles) == 0 && event.ActorRole != "" {
-		roles = []string{event.ActorRole}
-	}
-	roleJSON, err := json.Marshal(roles)
+	roleJSON, err := json.Marshal(event.ActorRoles)
 	if err != nil {
 		return domain.AuditEvent{}, fmt.Errorf("encode audit roles: %w", err)
 	}
@@ -79,7 +75,6 @@ func (db *DB) CreateAuditEvent(ctx context.Context, event domain.AuditEvent) (do
 	if err != nil {
 		return domain.AuditEvent{}, fmt.Errorf("insert audit event: %w", err)
 	}
-	event.ActorRoles = roles
 	return event, nil
 }
 
@@ -264,9 +259,6 @@ func scanPostgresAuditEvent(row interface{ Scan(...any) error }) (domain.AuditEv
 	}
 	if err := json.Unmarshal(roleJSON, &item.ActorRoles); err != nil {
 		return domain.AuditEvent{}, fmt.Errorf("decode audit roles: %w", err)
-	}
-	if len(item.ActorRoles) > 0 {
-		item.ActorRole = item.ActorRoles[0]
 	}
 	if err := json.Unmarshal(changesJSON, &item.Changes); err != nil {
 		return domain.AuditEvent{}, fmt.Errorf("decode audit changes: %w", err)

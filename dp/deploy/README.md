@@ -31,9 +31,15 @@
 ./dp.sh restart
 ./dp.sh stop
 ./dp.sh down
+./dp.sh backup
+./dp.sh restore backups/<备份目录>
 ```
 
-`down` 只删除容器和网络，不删除 `data/`。
+`down` 只删除容器和网络，不删除 `data/` 或 PostgreSQL 持久卷。
+
+`backup` 默认在 `backups/` 下生成带时间戳的目录，目录中包含 PostgreSQL 自定义格式转储、
+`data/` 归档、`.env` 副本和 SHA-256 校验文件。`restore` 会覆盖当前数据库与 `data/`，因此要求
+DP 和 PostgreSQL 容器均已停止，并要求输入目标目录名进行确认；恢复后再执行 `./dp.sh start`。
 
 ## 必须备份
 
@@ -41,7 +47,7 @@
 - PostgreSQL 持久卷：包含账号、RBAC、资源和审计等业务数据；应使用 `pg_dump` 定期备份。
 - `data/`：包含安装包、模型任务文件和操作日志，不再保存数据库。
 
-升级前请同时备份这两项。迁移到另一台服务器时，将它们与部署文件一起复制。
+升级前请同时备份这三项。迁移到另一台服务器时，将完整备份目录与部署文件一起复制。
 
 `.env` 中可通过 `DP_PACKAGE_VERSION_RETENTION` 设置每个服务类型的安装包版本保留目标数量，通过 `DP_OPERATION_RETENTION_DAYS` 和 `DP_NOTIFICATION_RETENTION_DAYS` 设置终态操作日志及已处理通知的保留天数，通过 `DP_STALE_ACCOUNT_DAYS` 设置长期未登录账号提醒阈值（默认 90 天）。当前或被环境引用的安装包版本、运行中操作和未处理通知不会被自动清理。
 

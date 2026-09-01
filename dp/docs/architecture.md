@@ -432,9 +432,9 @@ data/                         # 运行时生成，不提交 Git
 | --- | --- | --- |
 | `scope_key` | TEXT PK | `username:<规范化用户名>` 或 `ip:<来源 IP>` |
 | `failure_count` | INTEGER | 当前 10 分钟窗口内失败次数 |
-| `window_started_at` | TEXT | 当前统计窗口开始时间 |
-| `blocked_until` | TEXT | 当前退避截止时间 |
-| `updated_at` | TEXT | 最近更新，用于清理过期状态 |
+| `window_started_at` | TIMESTAMPTZ | 当前统计窗口开始时间 |
+| `blocked_until` | TIMESTAMPTZ | 当前退避截止时间 |
+| `updated_at` | TIMESTAMPTZ | 最近更新，用于清理过期状态 |
 
 登录前先同时检查用户名和来源 IP 两个键，任一键仍在退避期即返回统一的 `LOGIN_THROTTLED`。失败后在 PostgreSQL 事务内更新两个键，第 5 次起按 `30s × 2^(失败次数-5)` 退避并封顶 15 分钟；成功后删除两个键。状态持久化避免应用重启绕过限流，超过 24 小时未更新的状态由后台任务清理。同一用户名和来源 IP 的限流拒绝在 30 秒内聚合为一条审计，避免攻击流量反向放大审计表。
 
@@ -442,25 +442,25 @@ data/                         # 运行时生成，不提交 Git
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID |
-| `owner_id` | TEXT FK | 所属账号 |
+| `id` | UUID PK | 环境 ID |
+| `owner_id` | UUID FK | 所属账号 |
 | `name` | TEXT | 环境名称 |
-| `ip` | TEXT | 规范化后的 IPv4/IPv6 |
+| `ip` | INET | 规范化后的 IPv4/IPv6 |
 | `ssh_user` | TEXT | SSH 用户 |
 | `ssh_port` | INTEGER | 1–65535 |
 | `ssh_password_enc` | TEXT | `enc:v1:<base64>` 密文 |
 | `install_dir` | TEXT | 远端绝对路径 |
 | `service_type` | TEXT | 动态服务类型标识 |
 | `note` | TEXT | 可选备注，最长 200 字符，无备注为空串 |
-| `installed` | INTEGER | 是否安装成功 |
-| `installed_at` | TEXT NULL | RFC 3339 UTC 时间 |
+| `installed` | BOOLEAN | 是否安装成功 |
+| `installed_at` | TIMESTAMPTZ NULL | 安装完成时间 |
 | `installed_package_sha256` | TEXT NULL | 实际安装的包版本 |
 | `health_port` | INTEGER NULL | 安装时从配置提取的端口 |
 | `host_key_fingerprint` | TEXT NULL | 首次信任的 SSH 主机指纹 |
 | `arch` | TEXT | 服务器架构，SSH 执行 `uname -m` 采集（TrimSpace），未采集为空串 |
-| `last_validation_at` | TEXT NULL | 最近 SSH 校验时间 |
-| `created_at` | TEXT | 创建时间 |
-| `updated_at` | TEXT | 更新时间 |
+| `last_validation_at` | TIMESTAMPTZ NULL | 最近 SSH 校验时间 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | 更新时间 |
 
 唯一索引：
 
@@ -474,17 +474,17 @@ UNIQUE(owner_id, ip, service_type)
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `owner_id` | TEXT PK/FK | 所属账号 |
+| `owner_id` | UUID PK/FK | 所属账号 |
 | `service_type` | TEXT PK | 账号内的服务类型 |
-| `current_version_id` | TEXT FK | 当前版本 ID |
+| `current_version_id` | UUID FK | 当前版本 ID |
 | `original_filename` | TEXT | 当前版本上传文件名快照 |
 | `storage_path` | TEXT | 当前版本相对路径快照 |
 | `sha256` | TEXT | 当前版本摘要快照 |
-| `size_bytes` | INTEGER | 当前版本文件大小快照 |
+| `size_bytes` | BIGINT | 当前版本文件大小快照 |
 | `config_port` | INTEGER | 当前版本配置模板默认端口快照 |
 | `note` | TEXT | 当前版本备注快照 |
-| `uploaded_at` | TEXT | 当前版本上传时间快照 |
-| `updated_at` | TEXT | 当前指针或备注更新时间 |
+| `uploaded_at` | TIMESTAMPTZ | 当前版本上传时间快照 |
+| `updated_at` | TIMESTAMPTZ | 当前指针或备注更新时间 |
 
 主键为 `(owner_id, service_type)`。该表是服务类型和当前版本的快速读取投影，完整历史保存在 `package_versions`。
 
@@ -492,20 +492,20 @@ UNIQUE(owner_id, ip, service_type)
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID 版本 ID |
-| `owner_id` | TEXT | 上传时所属账号快照，参与账号内权限判断 |
+| `id` | UUID PK | 版本 ID |
+| `owner_id` | UUID FK | 上传时所属账号，参与账号内权限判断 |
 | `service_type` | TEXT | 账号内服务类型 |
 | `original_filename` | TEXT | 用户上传文件名 |
 | `storage_path` | TEXT | `packages/<owner-id>/<service-type>/versions/<version-id>.tar.gz` |
 | `sha256` | TEXT | 文件 SHA-256；同账号、服务类型、摘要唯一 |
-| `size_bytes` | INTEGER | 文件大小 |
+| `size_bytes` | BIGINT | 文件大小 |
 | `config_port` | INTEGER | 模板默认端口 |
 | `config_format` | TEXT | `json` 或 `yaml` |
 | `config_path` | TEXT | 去除公共根目录后的配置相对路径 |
 | `note` | TEXT | 版本备注 |
-| `uploaded_by` | TEXT | 上传账号 ID 快照 |
+| `uploaded_by` | UUID | 上传账号 ID 快照 |
 | `uploaded_by_username` | TEXT | 上传用户名快照 |
-| `uploaded_at` | TEXT | 上传时间 |
+| `uploaded_at` | TIMESTAMPTZ | 上传时间 |
 
 版本文件创建后不可覆盖。上传完成后在同一数据库事务中插入版本并更新 `packages.current_version_id`；文件写入失败不修改数据库，数据库提交失败删除新文件。相同 SHA-256 重复上传返回冲突，管理员可直接将已有版本设为当前版本。切换前重新检查目标文件存在，并要求配置格式、配置路径与当前版本一致。
 
@@ -515,13 +515,13 @@ UNIQUE(owner_id, ip, service_type)
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `environment_id` | TEXT PK/FK | 对应服务器上的服务实例 |
+| `environment_id` | UUID PK/FK | 对应服务器上的服务实例 |
 | `content` | TEXT | JSON 或 YAML 配置原文 |
 | `format` | TEXT | `json` 或 `yaml` |
 | `path` | TEXT | 解压后的相对配置路径 |
 | `port` | INTEGER | 从当前实例配置解析出的健康检查端口 |
-| `updated_at` | TEXT | 最后保存时间 |
-| `current_revision_id` | TEXT FK | 当前配置修订 ID；兼容迁移前数据时可为空 |
+| `updated_at` | TIMESTAMPTZ | 最后保存时间 |
+| `current_revision_id` | UUID FK NULL | 当前配置修订 ID；尚未保存实例配置时为空 |
 
 配置以 `environment_id` 隔离，归属从环境继承，而环境由 `UNIQUE(owner_id, ip, service_type)` 唯一确定。没有独立记录时读取同一账号的安装包配置作为模板；首次保存或安装时固化为实例配置。
 
@@ -529,17 +529,17 @@ UNIQUE(owner_id, ip, service_type)
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID 修订 ID |
-| `environment_id` | TEXT FK | 服务实例，环境删除时级联删除 |
+| `id` | UUID PK | 修订 ID |
+| `environment_id` | UUID FK | 服务实例，环境删除时级联删除 |
 | `content` | TEXT | 配置原文，仅通过配置权限接口读取 |
 | `format` | TEXT | `json` 或 `yaml` |
 | `path` | TEXT | 配置相对路径 |
 | `port` | INTEGER | 解析出的服务端口 |
 | `source` | TEXT | `manual` 或 `rollback` |
-| `restored_from_id` | TEXT NULL | 回滚来源修订 ID，不建立级联关系 |
-| `created_by` | TEXT | 操作者 ID 快照 |
+| `restored_from_id` | UUID NULL | 回滚来源修订 ID，不建立级联关系 |
+| `created_by` | UUID | 操作者 ID 快照 |
 | `created_by_username` | TEXT | 操作者用户名快照 |
-| `created_at` | TEXT | 创建时间 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
 
 每次有效保存插入不可变修订，并在同一事务中更新 `service_configs` 当前投影；内容完全相同时直接返回当前配置，不创建修订。回滚读取目标修订内容，执行与普通保存相同的格式校验和远端原子写入，再创建来源为 `rollback` 的新修订。审计仅记录修订 ID、来源、端口及内容摘要，不记录配置正文。
 
@@ -549,9 +549,9 @@ UNIQUE(owner_id, ip, service_type)
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID |
-| `environment_id` | TEXT | 目标环境 |
-| `request_id` | TEXT | 创建操作的 HTTP 请求 ID，与发起和完成审计关联 |
+| `id` | UUID PK | 操作 ID |
+| `environment_id` | UUID | 目标环境快照 ID |
+| `request_id` | UUID | 创建操作的 HTTP 请求 ID，与发起和完成审计关联 |
 | `action` | TEXT | `install/start/stop/reset` |
 | `status` | TEXT | `queued/running/succeeded/failed/timed_out/interrupted` |
 | `stage` | TEXT | 当前阶段 |
@@ -559,9 +559,9 @@ UNIQUE(owner_id, ip, service_type)
 | `error_code` | TEXT NULL | 稳定错误码 |
 | `error_message` | TEXT NULL | 可展示错误摘要 |
 | `log_path` | TEXT | JSONL 日志相对路径 |
-| `created_at` | TEXT | 创建时间 |
-| `started_at` | TEXT NULL | 开始时间 |
-| `finished_at` | TEXT NULL | 结束时间 |
+| `created_at` | TIMESTAMPTZ | 创建时间 |
+| `started_at` | TIMESTAMPTZ NULL | 开始时间 |
+| `finished_at` | TIMESTAMPTZ NULL | 结束时间 |
 
 详细日志不逐行写 PostgreSQL，而是追加到：
 
@@ -581,26 +581,26 @@ data/operations/<operation-id>.jsonl
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID，作为稳定事件标识和游标组成部分 |
-| `occurred_at` | TEXT | 服务端生成的 RFC 3339 UTC 时间 |
+| `id` | UUID PK | 稳定事件标识和游标组成部分 |
+| `occurred_at` | TIMESTAMPTZ | 服务端生成的事件时间 |
 | `category` | TEXT | `authentication/account/package/environment/service/audit` |
 | `action` | TEXT | 稳定事件名，例如 `account.disable`、`service.install.requested` |
 | `outcome` | TEXT | `success/failure/denied` |
 | `risk_level` | TEXT | `normal/high`，由后端按事件类型确定，不接受客户端传入 |
-| `actor_user_id` | TEXT NULL | 已认证操作账号 ID；登录失败等匿名事件为空，不设外键 |
+| `actor_user_id` | UUID NULL | 已认证操作账号 ID；登录失败等匿名事件为空，不设外键 |
 | `actor_username` | TEXT | 事件发生时的用户名快照；匿名登录事件保存规范化后的尝试用户名 |
-| `actor_role` | TEXT | 事件发生时的角色快照；匿名事件为空 |
-| `owner_id` | TEXT NULL | 目标资源所属账号 ID 快照，不设外键 |
+| `actor_role_keys` | JSONB | 事件发生时的角色 key 快照数组；匿名事件为空数组 |
+| `owner_id` | UUID NULL | 目标资源所属账号 ID 快照，不设外键 |
 | `owner_username` | TEXT | 目标资源所属账号名称快照 |
 | `target_type` | TEXT | `user/package/environment/service/audit_export` 等 |
 | `target_id` | TEXT | 资源 ID；安装包使用稳定的账号 ID 与服务类型组合标识 |
 | `target_label` | TEXT | 可读资源快照，例如环境名称或服务类型 |
-| `request_id` | TEXT | HTTP 请求 ID；后台异步完成事件沿用发起事件的关联 ID |
-| `operation_id` | TEXT NULL | 关联远程生命周期操作 ID |
-| `source_ip` | TEXT | 可信来源 IP |
+| `request_id` | UUID | HTTP 请求 ID；后台异步完成事件沿用发起事件的关联 ID |
+| `operation_id` | UUID NULL | 关联远程生命周期操作 ID |
+| `source_ip` | INET | 可信来源 IP |
 | `user_agent` | TEXT | 截断后的 User-Agent，不超过 512 字符 |
 | `error_code` | TEXT | 失败或拒绝的稳定错误码，成功为空 |
-| `changes_json` | TEXT | 经过字段白名单生成的脱敏变更摘要，不保存通用请求体 |
+| `changes` | JSONB | 经过字段白名单生成的脱敏变更摘要，不保存通用请求体 |
 
 索引至少包含：
 
@@ -630,8 +630,8 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID |
-| `created_at` | TEXT | 事件发生时间 |
+| `id` | UUID PK | 通知 ID |
+| `created_at` | TIMESTAMPTZ | 事件发生时间 |
 | `risk_level` | TEXT | `normal/high` |
 | `category` | TEXT | `security/account/resource/operation/system` |
 | `title` | TEXT | 简短标题 |
@@ -639,15 +639,15 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 | `target_type` | TEXT | 目标类型快照 |
 | `target_id` | TEXT | 目标 ID 快照 |
 | `target_label` | TEXT | 目标名称快照 |
-| `owner_id` | TEXT NULL | 资源所属账号快照 |
+| `owner_id` | UUID NULL | 资源所属账号快照 |
 | `owner_username` | TEXT | 所属账号名称快照 |
-| `operation_id` | TEXT NULL | 关联操作 ID |
+| `operation_id` | UUID NULL | 关联操作 ID |
 | `dedupe_key` | TEXT | 未处理事项的稳定去重键；普通无需去重的通知为空串 |
 | `link` | TEXT | 站内相对跳转地址，由后端白名单生成 |
-| `read_at` | TEXT NULL | 首次标记已读时间 |
-| `read_by` | TEXT NULL | 标记已读的管理员 ID |
-| `resolved_at` | TEXT NULL | 确认处理时间 |
-| `resolved_by` | TEXT NULL | 确认处理的管理员 ID |
+| `read_at` | TIMESTAMPTZ NULL | 首次标记已读时间 |
+| `read_by` | UUID NULL | 标记已读的账号 ID |
+| `resolved_at` | TIMESTAMPTZ NULL | 确认处理时间 |
+| `resolved_by` | UUID NULL | 确认处理的账号 ID |
 
 通知不保存密码、配置正文或远端日志。通知状态是管理员团队共享状态，更新使用单条原子 SQL；重复标记已读或已处理保持幂等。数据库建立“非空 `dedupe_key` 且 `resolved_at IS NULL`”的部分唯一索引，所有需要去重的创建流程使用单条插入并将唯一冲突视为已有事项，避免并发竞态。
 
@@ -669,49 +669,49 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | UUID |
-| `owner_id` | TEXT FK | 标签所属账号 |
+| `id` | UUID PK | 标签 ID |
+| `owner_id` | UUID FK | 标签所属账号 |
 | `group_name` | TEXT | 分组，规范化后 1–32 字符 |
 | `value` | TEXT | 标签值，规范化后 1–32 字符 |
-| `deleted_at` | TEXT NULL | 删除时间；软删除后不再用于新关联，但保留稳定 ID 供历史操作筛选 |
-| `created_at` / `updated_at` | TEXT | RFC 3339 UTC 时间 |
+| `deleted_at` | TIMESTAMPTZ NULL | 删除时间；软删除后不再用于新关联，但保留稳定 ID 供历史操作筛选 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | 创建和更新时间 |
 
-使用仅覆盖 `deleted_at IS NULL` 的唯一索引 `(owner_id, group_name COLLATE NOCASE, value COLLATE NOCASE)` 防止有效标签出现大小写不同的重复组合，并允许删除后重新创建同名标签。`environment_tags(environment_id, tag_id)` 保存环境多对多关联，两个外键均级联删除。应用层在同一事务中验证环境与标签 `owner_id` 相同，数据库触发器同时作为防御性约束。
+使用仅覆盖 `deleted_at IS NULL` 的唯一索引 `(owner_id, lower(group_name), lower(value))` 防止有效标签出现大小写不同的重复组合，并允许删除后重新创建同名标签。`environment_tags(environment_id, tag_id)` 保存环境多对多关联，两个外键均级联删除。应用层在同一事务中验证环境与标签 `owner_id` 相同，数据库触发器同时作为防御性约束。
 
 `operation_tags(operation_id, tag_id, group_name, value)` 保存操作发起时的标签稳定 ID 和文本快照，不建立到标签字典的外键。删除标签时先解除环境关联，再软删除标签字典记录；历史筛选仍可使用既有 `tag_id`，展示始终使用快照文本。这样标签改名、删除、环境交接或环境删除不会改变历史操作。创建操作记录与复制标签快照在同一事务中完成。
 
 环境查询按重复的 `tag_id` 参数进行交集筛选；服务复用环境查询结果。操作中心按 `operation_tags.tag_id` 使用同样的交集语义，确保标签改名后稳定 ID 的历史筛选结果不漂移。任何标签条件生效前仍先应用 owner 权限范围。
 
-资源交接事务在更新环境 owner 前，先为目标账号按大小写不敏感的“分组 + 值”查找或创建标签，再替换待交接环境的关联；源标签字典保留。环境导出 schema v2 保存标签文本而不是标签 ID，导入时在目标账号内解析为本地 ID，避免跨实例 ID 耦合；schema v1 继续兼容并视为无标签。
+资源交接事务在更新环境 owner 前，先为目标账号按大小写不敏感的“分组 + 值”查找或创建标签，再替换待交接环境的关联；源标签字典保留。环境导出 schema v2 保存标签文本而不是标签 ID，导入时在目标账号内解析为本地 ID，避免跨实例 ID 耦合；schema v1 直接拒绝，不做兼容转换。
 
 账号删除已经要求安装包和环境数量为零；删除事务会同时清理该账号剩余的有效或软删除标签字典。`operation_tags` 没有标签外键，因此历史操作快照继续保留。
 
-### 6.12 管理员与用户通讯
+### 6.12 协作通讯
 
 通讯使用四张表，独立于系统风险通知：
 
-- `communication_threads` 保存事项、唯一目标普通账号快照、`open/closed` 状态、创建/关闭信息、重新打开次数及最近重新打开信息。
+- `communication_threads` 保存事项、唯一目标账号快照、`open/closed` 状态、创建/关闭信息、重新打开次数及最近重新打开信息。
 - `communication_messages` 保存不可变消息，类型为 `admin_message`、`user_receipt`、`system_closed` 或 `system_reopened`，并保存发送账号和角色快照。
-- `communication_message_recipients` 以 `(message_id, recipient_user_id)` 为联合主键，保存收件账号快照和 `read_at`；用户回执发送时为当时全部启用管理员建立独立收件记录。
+- `communication_message_recipients` 以 `(message_id, recipient_user_id)` 为联合主键，保存收件账号、角色 key 快照和 `read_at`；回执发送时为当时全部具有 `communication.read:all` 的启用账号建立独立收件记录。
 - `communication_resource_refs` 保存 `package/environment/service` 资源引用及创建时快照。安装包使用账号与服务类型作为稳定业务键，环境和服务使用环境 ID，但服务引用保留服务语义。
 
 通讯表不对账号表设置强外键，改为保存账号 ID 与用户名快照，确保删除账号不会破坏通讯历史；PostgreSQL
-初始 schema 中遗留的 `communication_threads.target_user_id` 账号外键由后续 migration 显式移除。事项、消息、
-收件人和资源引用之间使用级联外键保证内部一致性。消息正文不进入审计或结构化应用日志。资源引用不保存密码、配置正文、远程日志、会话信息或安装包内容。
+`004_communication_rbac_baseline.sql` 删除 `target_user_id` 的账号外键，`005`/`006` 增加用户与角色快照；
+事项、消息、收件人和资源引用之间使用级联外键保证内部一致性。消息正文不进入审计或结构化应用日志。资源引用不保存密码、配置正文、远程日志、会话信息或安装包内容。
 
 通讯列表先读取当前页事项，再按事项 ID 集合一次性批量读取资源引用并在内存分组，避免随页大小增长的逐事项查询。
 
-创建事项在一个事务中完成目标账号校验、全部资源归属校验、事项、资源引用、首条消息和用户收件记录。回复、关闭和重新打开在事务内使用条件更新重新检查状态：关闭只允许 `open → closed`，重新打开只允许 `closed → open`，消息追加只允许 `open`。这样用户回复与管理员关闭并发时只允许一个合法顺序，不产生关闭后的回执。
+创建事项在一个事务中完成目标账号校验、全部资源归属校验、事项、资源引用、首条消息和收件记录。回复、关闭和重新打开在事务内使用条件更新重新检查状态：关闭只允许 `open → closed`，重新打开只允许 `closed → open`，消息追加只允许 `open`。这样回执与协调者关闭并发时只允许一个合法顺序，不产生关闭后的回执。
 
-打开详情通过显式 `PUT /communications/{id}/read` 标记当前账号作为收件人的全部未读消息；读取列表和详情本身不改变状态。未读摘要直接按当前账号的未读收件行聚合。所有管理员能查询完整事项，但管理员只能标记自己的收件记录，不共享已读状态。
+打开详情通过显式 `PUT /communications/{id}/read` 标记当前账号作为收件人的全部未读消息；读取列表和详情本身不改变状态。未读摘要直接按当前账号的未读收件行聚合。具有 `communication.read:all` 的账号能查询完整事项，但只能标记自己的收件记录，不共享已读状态。
 
-列表按 `(updated_at, id)` 使用稳定游标。普通账号的查询始终增加 `target_user_id = current_user`；管理员可按目标账号和状态筛选，所有账号均可按当前账号是否有未读收件消息筛选。正文只按纯文本返回和渲染，标题最多 100 字符、正文最多 5000 字符、单事项最多 50 个资源。
+列表按 `(updated_at, id)` 使用稳定游标。`communication.read:own` 强制 `target_user_id = current_user`；`all` 可按目标账号和状态筛选。所有账号均可按当前账号是否有未读收件消息筛选。正文只按纯文本返回和渲染，标题最多 100 字符、正文最多 5000 字符、单事项最多 50 个资源。
 
-前端使用独立的 `/communications` 消息中心，不复用仅管理员可见的风险通知中心。消息中心对全部账号显示为侧边栏一级导航，展开时显示未读数、折叠时在图标上显示未读提示点；顶栏快捷入口在有未读时切换为高对比强调样式并保留数字徽标。所有已完成强制改密的登录账号建立一个 `/events` SSE 连接，并保留 30 秒轮询作为兜底。列表、时间线、资源快照与状态操作均通过 React Query 独立缓存，发送、已读、关闭、重新打开和实时事件同时失效列表、相关详情和摘要缓存。
+前端使用独立的 `/communications` 消息中心，不复用风险通知中心。获得 `communication.read` 的账号显示导航，展开时显示未读数、折叠时显示提示点；顶栏快捷入口保留数字徽标。所有已完成强制改密的登录账号建立一个 `/events` SSE 连接，并保留 30 秒轮询作为兜底。列表、时间线、资源快照与状态操作均通过 React Query 独立缓存，发送、已读、关闭、重新打开和实时事件同时失效列表、相关详情和摘要缓存。
 
-本功能由迁移 `012_communications.sql` 建表，应用服务统一执行角色、长度和资源数量校验，存储层在事务内再次执行目标账号、资源归属和事项状态校验。生命周期、普通账号隔离、跨账号资源拒绝、按管理员独立未读、关闭后拒绝回复和重新打开标记已有自动化测试覆盖；OpenAPI 契约、全量 Go 测试、竞态检查、静态检查、前端类型检查、组件测试和生产构建作为交付验收项。
+本功能由 PostgreSQL `001_initial.sql` 建表并由 `004`–`006` 收紧 RBAC 与快照字段。应用服务执行权限、长度和资源数量校验，存储层在事务内再次执行目标账号、资源归属和事项状态校验。生命周期、own/all 隔离、跨账号资源拒绝、独立未读、关闭后拒绝回复和重新打开标记均由 PostgreSQL 集成测试覆盖。
 
-RBAC 重构后，上述“管理员”指拥有对应 `communication.*` 权限且 scope 为 `all` 的账号：只有
+协调者指拥有对应 `communication.*` 权限且 scope 为 `all` 的账号：只有
 `communication.create:all` 可主动创建事项，只有 `communication.manage:all` 可关闭或重新打开；目标账号以
 `communication.read/reply:own` 查看和回执。内置 `operator` 不获得 create/manage，避免普通运维账号越权向其他
 账号发起或管理事项。
@@ -734,9 +734,9 @@ RBAC 重构后，上述“管理员”指拥有对应 `communication.*` 权限�
 
 变更类型为 `created`、`message`、`read`、`closed` 或 `reopened`。事务提交并成功读取响应模型后，由应用服务发布：
 
-- 创建、管理员消息、关闭和重新打开：目标普通账号及当时全部启用管理员。
-- 用户回执：目标普通账号及当时全部启用管理员；目标账号也接收事件，以同步该账号的其他标签页和会话。
-- 已读：执行已读操作的账号及全部启用管理员，用于同步同账号其他标签页并刷新管理员看到的用户已读状态。
+- 创建、协调消息、关闭和重新打开：目标账号及当时全部具有 `communication.read:all` 的启用账号。
+- 用户回执：目标账号及当时全部具有 `communication.read:all` 的启用账号；目标账号也接收事件，以同步其他标签页和会话。
+- 已读：执行已读操作的账号及全部具有 `communication.read:all` 的启用账号，用于同步已读状态。
 
 HTTP 层提供单一 `GET /events` SSE。连接建立时先发送 `sync` 事件，浏览器据此刷新摘要、列表和当前已缓存详情；随后发送 `communication.changed`。每 15 秒发送 heartbeat 并重新验证当前会话，账号禁用、密码修改、退出或会话撤销后连接最迟在一个心跳周期内关闭。响应设置 `Cache-Control: no-cache, no-transform` 和 `X-Accel-Buffering: no`。
 
@@ -776,7 +776,7 @@ HTTP 层提供单一 `GET /events` SSE。连接建立时先发送 `sync` 事件�
 设计规则：
 
 - 不导出数据库内部 UUID、创建时间、备注和操作历史。
-- schema v2 导出标签文本组合，不导出本地标签 UUID；导入继续兼容 schema v1，v1 按无标签处理。
+- schema v2 导出标签文本组合，不导出本地标签 UUID；导入只接受 schema v2。
 - 导出安装状态、健康端口和主机指纹，以便另一套后台正确管理已安装服务。
 - 不导出安装包；目标后台仍需单独上传对应服务类型的包。
 - 导入以 `owner_id + ip + service_type` 执行 upsert，导入数据默认属于发起请求的当前账号。
@@ -1134,16 +1134,16 @@ data: {"status":"failed","stage":"script","exit_code":1}
 | `PUT` | `/auth/password` | 校验旧密码并修改本人密码，随后使其他会话失效 |
 | `GET` | `/auth/sessions` | 获取本人有效会话明细 |
 | `DELETE` | `/auth/sessions/{sessionId}` | 撤销本人指定会话；撤销当前会话时清除 Cookie |
-| `GET` | `/users` | 管理员获取账号列表 |
-| `POST` | `/users` | 管理员新增账号；服务端固定将分配密码标记为首次登录必须修改的临时密码 |
-| `PUT` | `/users/{id}/password` | 管理员重置密码、设置强制改密并使该账号会话失效 |
-| `PUT` | `/users/{id}/status` | 管理员启用或禁用账号 |
-| `DELETE` | `/users/{id}` | 管理员删除无业务数据的账号 |
-| `GET` | `/users/{id}` | 管理员获取账号详情与资源盘点 |
-| `GET` | `/users/{id}/sessions` | 管理员获取目标账号有效会话明细 |
-| `DELETE` | `/users/{id}/sessions/{sessionId}` | 管理员撤销目标账号指定会话 |
-| `POST` | `/users/{id}/sessions/revoke` | 管理员强制撤销目标账号全部会话 |
-| `POST` | `/users/{id}/transfer` | 管理员将目标账号全部业务资源原子交接给启用账号 |
+| `GET` | `/users` | 具有 `account.read` 的账号获取账号列表 |
+| `POST` | `/users` | 具有 `account.create` 的账号新增账号并分配一个或多个角色；服务端固定将密码标记为首次登录必须修改 |
+| `PUT` | `/users/{id}/password` | 具有 `account.update` 的账号重置密码、设置强制改密并使目标会话失效 |
+| `PUT` | `/users/{id}/status` | 具有 `account.update` 的账号启用或禁用目标账号 |
+| `DELETE` | `/users/{id}` | 具有 `account.delete` 的账号删除无业务数据的账号 |
+| `GET` | `/users/{id}` | 具有 `account.read` 的账号获取详情与资源盘点 |
+| `GET` | `/users/{id}/sessions` | 具有 `account.read` 的账号获取目标账号有效会话明细 |
+| `DELETE` | `/users/{id}/sessions/{sessionId}` | 具有 `account.update` 的账号撤销目标会话 |
+| `POST` | `/users/{id}/sessions/revoke` | 具有 `account.update` 的账号撤销目标账号全部会话 |
+| `POST` | `/users/{id}/transfer` | 具有 `account.transfer` 的账号原子交接目标账号全部业务资源 |
 | `PUT` | `/users/{id}/roles` | 具有 `account.assign_roles` 的账号更新目标用户角色 |
 | `GET` | `/permissions` | 具有 `role.read` 的账号查看固定权限目录 |
 | `GET` | `/roles` | 具有 `role.read` 的账号查看角色 |
@@ -1159,6 +1159,10 @@ data: {"status":"failed","stage":"script","exit_code":1}
 和“至少一个启用超级管理员”不变量，不能仅依赖前端确认框。
 
 账号不存在或密码错误时统一返回相同的用户名或密码错误。用户名或来源 IP 进入退避期时返回 `429 LOGIN_THROTTLED`；用户名和密码校验正确但账号被禁用时返回 `403 ACCOUNT_DISABLED`，登录页面明确提示“账号已被禁用”，这样只向已掌握正确凭据的请求者展示账号状态。初始化管理员和所有新建账号在持久化时固定设置 `must_change_password=1`；创建接口不接受调用方覆盖该字段。`must_change_password` 为真时，认证中间件仅放行 `/auth/me`、`/auth/password` 和 `/auth/logout`，其他接口返回 `403 PASSWORD_CHANGE_REQUIRED`。账号本人使用当前临时密码修改成功后清除标记、撤销全部会话并返回登录页。账号与会话列表不返回密码哈希、Token 或 Token 摘要。账号管理接口禁止禁用或删除初始管理员和当前登录账号；删除仍有业务数据的账号返回 `409 USER_IN_USE`。资源交接遇到运行中操作或目标唯一键冲突返回 `409 TRANSFER_CONFLICT`，消息明确区分运行中操作、目标账号状态和目标资源冲突，但不暴露凭据或配置内容。
+
+外部契约不存在二元角色兼容字段：用户只返回 `roles` 和 `permissions`，通讯参与者及消息分别使用
+`roles`、`sender_roles`，审计使用 `actor_roles`。禁止重新引入单值 `role`、`sender_role` 或
+`actor_role`；系统不读取 SQLite 文件，也不提供旧库迁移入口。
 
 ### 12.2 环境
 
@@ -1290,20 +1294,20 @@ CSV 导出复用相同筛选参数，不接受 `cursor` 和 `limit`。建议首�
 | `PUT` | `/notifications/{id}/read` | 幂等标记通知已读 |
 | `PUT` | `/notifications/{id}/resolve` | 幂等确认通知已处理，同时自动标记已读 |
 
-管理员接口全部在后端执行角色校验。通知跳转地址只允许系统生成的 `/dashboard`、`/users`、`/packages`、`/environments`、`/services`、`/operations` 和 `/audit` 相对路径，前端不得执行服务端返回的外部 URL。
+上述接口全部在后端执行对应权限与 scope 校验。通知跳转地址只允许系统生成的 `/dashboard`、`/users`、`/packages`、`/environments`、`/services`、`/operations` 和 `/audit` 相对路径，前端不得执行服务端返回的外部 URL。
 
-### 12.7 管理员与用户通讯
+### 12.7 协作通讯
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/communications/summary` | 获取当前账号独立的通讯未读消息数 |
-| `GET` | `/communications` | 游标分页查询可见事项；管理员可按目标账号筛选，普通账号固定本人 |
-| `POST` | `/communications` | 管理员向一个启用普通账号创建事项并关联资源 |
+| `GET` | `/communications` | 游标分页查询可见事项；`all` 可按目标账号筛选，`own` 固定本人 |
+| `POST` | `/communications` | 具有 `communication.create:all` 的账号向启用账号创建事项并关联资源 |
 | `GET` | `/communications/{id}` | 获取事项、消息、收件状态和资源快照 |
 | `PUT` | `/communications/{id}/read` | 幂等标记当前账号在事项内收到的消息已读 |
-| `POST` | `/communications/{id}/messages` | 管理员追加消息，或目标用户在开启事项内发送回执 |
-| `POST` | `/communications/{id}/close` | 管理员关闭事项并生成用户未读状态消息 |
-| `POST` | `/communications/{id}/reopen` | 管理员重新打开事项并生成明确标记 |
+| `POST` | `/communications/{id}/messages` | 协调者追加消息，或目标账号在开启事项内发送回执 |
+| `POST` | `/communications/{id}/close` | 具有 `communication.manage:all` 的账号关闭事项 |
+| `POST` | `/communications/{id}/reopen` | 具有 `communication.manage:all` 的账号重新打开事项 |
 
 普通账号访问他人事项统一返回 `404`；用户向关闭事项回复返回 `409 COMMUNICATION_CLOSED`。重复关闭和重新打开分别返回 `COMMUNICATION_ALREADY_CLOSED` 与 `COMMUNICATION_ALREADY_OPEN`。目标账号不可用返回 `409 COMMUNICATION_TARGET_DISABLED`，跨账号、无效或超过数量的资源引用返回 `422 COMMUNICATION_RESOURCE_INVALID`。
 
@@ -1468,7 +1472,7 @@ Docker 部署约定：
 - 缺少 `audit.read/export` 的审计接口全部返回 403；可信代理 IP 解析、伪造转发头、保留期清理和 CSV 公式注入防护测试。
 - 管理总览指标口径、权限与 scope 校验、操作中心组合筛选与游标分页测试。
 - 资源交接的运行中操作、同名安装包和环境唯一键冲突测试；安装包不可变文件路径保持不变，数据库失败无部分交接，历史操作归属快照保持不变。
-- 标签账号隔离、大小写唯一性、跨账号关联拒绝、环境标签原子替换、删除解关联、资源交接映射、v1/v2 导入兼容及多标签交集筛选测试。
+- 标签账号隔离、大小写唯一性、跨账号关联拒绝、环境标签原子替换、删除解关联、资源交接映射、schema v2 导入及多标签交集筛选测试。
 - 操作标签快照在标签改名、删除和环境删除后仍可查询；管理总览标签筛选只改变文档声明的资源指标。
 - 通知触发规则、连续健康检查去重、未读/处理幂等状态、普通账号越权和系统磁盘告警测试。
 - 通讯实时事件按目标账号及启用管理员精准发布，无关账号隔离，重复收件人去重，慢订阅者断开并清理。

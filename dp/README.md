@@ -52,6 +52,7 @@ U49iorlwGTL+1Yob4mtDp7GBC7MuEN/9BZruRV5URzM=
 export DP_MASTER_KEY="<上一步生成的值>"
 export DP_ADMIN_USERNAME="admin"
 export DP_ADMIN_PASSWORD="<至少 8 位的初始管理员密码>"
+export DP_DATABASE_URL="postgres://dp:<密码>@127.0.0.1:5432/dp?sslmode=disable"
 make dev-backend
 ```
 
@@ -95,7 +96,8 @@ export DP_DATA_DIR="./data"
 
 脚本首次运行会创建 `.env`、生成独立的 32 字节主密钥和随机初始管理员密码、创建 `data/`，随后通过
 Docker Compose 构建并启动服务。访问 `http://<服务器IP>:30199`。
-从无账号版本升级且已有 `.env` 时，脚本会保留原配置并自动追加、打印一次随机初始管理员密码；首次登录后应立即修改密码。
+本版本不兼容旧 SQLite 配置；已有 `.env` 缺少 PostgreSQL 凭据时脚本会拒绝启动，需按
+`.env.example` 创建新配置。首次登录后应立即修改随机初始管理员密码。
 
 常用命令：
 
@@ -105,6 +107,8 @@ Docker Compose 构建并启动服务。访问 `http://<服务器IP>:30199`。
 ./scripts/dp.sh restart
 ./scripts/dp.sh stop
 ./scripts/dp.sh down
+./scripts/dp.sh backup
+./scripts/dp.sh restore backups/<备份目录>
 ```
 
 ### 一键编译并生成离线部署包

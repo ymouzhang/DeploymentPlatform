@@ -2,22 +2,18 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"DP/internal/access"
 	"DP/internal/domain"
+	"DP/internal/testdb"
 )
 
 func TestAuthRepositoryIntegration(t *testing.T) {
-	databaseURL := os.Getenv("DP_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DP_TEST_DATABASE_URL is not set")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	db, err := Open(ctx, databaseURL)
+	db, err := Open(ctx, testdb.PostgresURL(t))
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
@@ -40,7 +36,7 @@ func TestAuthRepositoryIntegration(t *testing.T) {
 
 	user, err := db.CreateUser(ctx, domain.User{
 		Username: "integration-user", PasswordHash: "hash",
-		Roles: []access.RoleRef{{ID: "00000000-0000-4000-8000-000000000103", Key: access.RoleOperator}},
+		Roles:   []access.RoleRef{{ID: "00000000-0000-4000-8000-000000000103", Key: access.RoleOperator}},
 		Enabled: true, CreatedBy: admin.ID,
 	})
 	if err != nil {

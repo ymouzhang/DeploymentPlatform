@@ -3,41 +3,36 @@ package application
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"DP/internal/access"
 	"DP/internal/domain"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestAuthLifecycle(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	auth := NewAuthService(db, time.Hour)
 	if err := auth.InitializeAdmin(ctx, "Admin", "initial-password"); err != nil {
 		t.Fatal(err)
 	}
 	admin, token, _, err := auth.Login(ctx, "admin", "initial-password")
-	if err != nil || admin.Role != domain.RoleAdmin || !admin.MustChangePassword {
+	if err != nil || len(admin.Roles) != 1 || admin.Roles[0].Key != access.RoleSuperAdmin || !admin.MustChangePassword {
 		t.Fatalf("login: user=%+v err=%v", admin, err)
 	}
 	if got, err := auth.Authenticate(ctx, token); err != nil || got.ID != admin.ID {
 		t.Fatalf("authenticate: user=%+v err=%v", got, err)
 	}
-	user, err := auth.CreateUser(ctx, "operator", "operator-password", []access.RoleRef{{ID: "operator", Key: access.RoleOperator}})
+	user, err := auth.CreateUser(ctx, "operator", "operator-password", []access.RoleRef{testutil.RoleRef(t, access.RoleOperator)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !user.MustChangePassword {
 		t.Fatal("new ordinary account must require a first-login password change")
 	}
-	createdAdmin, err := auth.CreateUser(ctx, "second-admin", "second-admin-password", []access.RoleRef{{ID: "platform-admin", Key: access.RolePlatformAdmin}})
+	createdAdmin, err := auth.CreateUser(ctx, "second-admin", "second-admin-password", []access.RoleRef{testutil.RoleRef(t, access.RolePlatformAdmin)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +62,7 @@ func TestAuthLifecycle(t *testing.T) {
 
 func TestPasswordChangeRevokesSessions(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	auth := NewAuthService(db, time.Hour)
 	if err := auth.InitializeAdmin(ctx, "admin", "initial-password"); err != nil {
 		t.Fatal(err)
@@ -100,11 +91,7 @@ func TestPasswordChangeRevokesSessions(t *testing.T) {
 
 func TestLoginThrottleUsesUsernameAndSourceIP(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	auth := NewAuthService(db, time.Hour)
 	if err := auth.InitializeAdmin(ctx, "admin", "initial-password"); err != nil {
 		t.Fatal(err)
@@ -114,7 +101,7 @@ func TestLoginThrottleUsesUsernameAndSourceIP(t *testing.T) {
 			t.Fatalf("failure %d: %v", i+1, err)
 		}
 	}
-	_, _, _, err = auth.LoginWithContext(ctx, "unknown", "wrong-password", "192.0.2.10", "test")
+	_, _, _, err := auth.LoginWithContext(ctx, "unknown", "wrong-password", "192.0.2.10", "test")
 	var appErr *domain.AppError
 	if !errors.As(err, &appErr) || appErr.Code != "LOGIN_THROTTLED" {
 		t.Fatalf("shared IP should be throttled, got %v", err)
@@ -123,11 +110,7 @@ func TestLoginThrottleUsesUsernameAndSourceIP(t *testing.T) {
 
 func TestForcedPasswordChangeAndPreciseSessionRevocation(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	auth := NewAuthService(db, time.Hour)
 	if err := auth.InitializeAdmin(ctx, "admin", "initial-password"); err != nil {
 		t.Fatal(err)
@@ -136,7 +119,7 @@ func TestForcedPasswordChangeAndPreciseSessionRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := auth.CreateUser(ctx, "operator", "operator-password", []access.RoleRef{{ID: "operator", Key: access.RoleOperator}})
+	user, err := auth.CreateUser(ctx, "operator", "operator-password", []access.RoleRef{testutil.RoleRef(t, access.RoleOperator)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -467,7 +467,7 @@ func communicationTargetUser(ctx context.Context, tx pgx.Tx, id string) (domain.
 		FROM users u WHERE u.id = $1 FOR SHARE`, id, access.CommunicationRead).
 		Scan(&target.ID, &target.Username, &enabled, &hasOwn, &hasAll)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!enabled || !hasOwn || hasAll) {
-		return domain.User{}, &domain.AppError{Code: "COMMUNICATION_TARGET_DISABLED", Message: "目标普通账号不存在或未启用"}
+		return domain.User{}, &domain.AppError{Code: "COMMUNICATION_TARGET_DISABLED", Message: "目标协作账号不存在、未启用或权限范围不适用"}
 	}
 	if err != nil {
 		return domain.User{}, fmt.Errorf("query communication target user: %w", err)
@@ -561,9 +561,17 @@ func insertPostgresCommunicationRecipient(
 	messageID string,
 	recipient domain.User,
 ) error {
-	_, err := tx.Exec(ctx, `INSERT INTO communication_message_recipients
-		(message_id, recipient_user_id, recipient_username) VALUES ($1, $2, $3)`,
-		messageID, recipient.ID, recipient.Username)
+	roles := make([]string, 0, len(recipient.Roles))
+	for _, role := range recipient.Roles {
+		roles = append(roles, role.Key)
+	}
+	roleJSON, err := json.Marshal(roles)
+	if err != nil {
+		return fmt.Errorf("encode communication recipient roles: %w", err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO communication_message_recipients
+		(message_id, recipient_user_id, recipient_username, recipient_role_keys)
+		VALUES ($1, $2, $3, $4::jsonb)`, messageID, recipient.ID, recipient.Username, roleJSON)
 	if err != nil {
 		return fmt.Errorf("insert communication recipient: %w", err)
 	}
@@ -572,12 +580,18 @@ func insertPostgresCommunicationRecipient(
 
 func insertEnabledCommunicationAdministrators(ctx context.Context, tx pgx.Tx, messageID string) error {
 	_, err := tx.Exec(ctx, `INSERT INTO communication_message_recipients
-		(message_id, recipient_user_id, recipient_username)
-		SELECT DISTINCT $1, u.id, u.username
-		FROM users u JOIN user_roles ur ON ur.user_id = u.id
-		JOIN role_permissions rp ON rp.role_id = ur.role_id
-		JOIN permissions p ON p.id = rp.permission_id
-		WHERE u.enabled AND p.key = $2 AND rp.scope = 'all'`, messageID, access.CommunicationRead)
+		(message_id, recipient_user_id, recipient_username, recipient_role_keys)
+		SELECT $1::uuid, u.id, u.username,
+			COALESCE((SELECT jsonb_agg(r.key ORDER BY r.key)
+				FROM user_roles snapshot_ur JOIN roles r ON r.id = snapshot_ur.role_id
+				WHERE snapshot_ur.user_id = u.id), '[]'::jsonb)
+		FROM users u
+		WHERE u.enabled AND EXISTS (
+			SELECT 1 FROM user_roles ur
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = u.id AND p.key = $2 AND rp.scope = 'all'
+		)`, messageID, access.CommunicationRead)
 	if err != nil {
 		return fmt.Errorf("insert communication administrator recipients: %w", err)
 	}
@@ -620,7 +634,7 @@ func (db *DB) communicationMessageRecipients(
 	actor domain.User,
 	messageID string,
 ) ([]domain.CommunicationRecipient, error) {
-	query := `SELECT recipient_user_id::text, recipient_username, read_at
+	query := `SELECT recipient_user_id::text, recipient_username, recipient_role_keys, read_at
 		FROM communication_message_recipients WHERE message_id = $1`
 	args := []any{messageID}
 	scope, ok := actor.Permissions.Scope(access.CommunicationRead)
@@ -640,9 +654,13 @@ func (db *DB) communicationMessageRecipients(
 	items := make([]domain.CommunicationRecipient, 0)
 	for rows.Next() {
 		var item domain.CommunicationRecipient
+		var roleJSON []byte
 		var readAt sql.NullTime
-		if err := rows.Scan(&item.UserID, &item.Username, &readAt); err != nil {
+		if err := rows.Scan(&item.UserID, &item.Username, &roleJSON, &readAt); err != nil {
 			return nil, fmt.Errorf("scan communication recipient: %w", err)
+		}
+		if err := json.Unmarshal(roleJSON, &item.Roles); err != nil {
+			return nil, fmt.Errorf("decode communication recipient roles: %w", err)
 		}
 		if readAt.Valid {
 			item.ReadAt = &readAt.Time

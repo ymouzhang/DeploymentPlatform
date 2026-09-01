@@ -151,7 +151,7 @@ func (s *Service) CompleteOperation(ctx context.Context, operation domain.Operat
 	s.Record(ctx, domain.AuditEvent{
 		Category: requested.Category, Action: action, Outcome: outcome,
 		ActorUserID: requested.ActorUserID, ActorUsername: requested.ActorUsername,
-		ActorRole: requested.ActorRole, OwnerID: requested.OwnerID,
+		ActorRoles: requested.ActorRoles, OwnerID: requested.OwnerID,
 		OwnerUsername: requested.OwnerUsername, TargetType: requested.TargetType,
 		TargetID: requested.TargetID, TargetLabel: requested.TargetLabel,
 		RequestID: requested.RequestID, OperationID: operation.ID,

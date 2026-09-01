@@ -27,11 +27,10 @@ type ModelUploadContextValue = {
 }
 
 const ModelUploadContext = createContext<ModelUploadContextValue | null>(null)
-const legacyPendingKey = 'dp:model-upload:v1'
 
 function loadPending(storageKey: string): PendingModelUpload | null {
   try {
-    const value = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyPendingKey)
+    const value = localStorage.getItem(storageKey)
     return value ? JSON.parse(value) as PendingModelUpload : null
   } catch {
     return null
@@ -52,12 +51,6 @@ export function ModelUploadProvider({ userId, children }: { userId: string; chil
   const browserRequired = activity?.status === 'uploading' || activity?.status === 'pausing'
 
   useEffect(() => {
-    if (!initialPending || localStorage.getItem(storageKey)) return
-    localStorage.setItem(storageKey, JSON.stringify(initialPending))
-    localStorage.removeItem(legacyPendingKey)
-  }, [initialPending, storageKey])
-
-  useEffect(() => {
     if (!browserRequired) return
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault()
@@ -69,7 +62,6 @@ export function ModelUploadProvider({ userId, children }: { userId: string; chil
 
   const savePending = (session: PendingModelUpload | null) => {
     setPending(session)
-    localStorage.removeItem(legacyPendingKey)
     if (session) localStorage.setItem(storageKey, JSON.stringify(session))
     else localStorage.removeItem(storageKey)
   }

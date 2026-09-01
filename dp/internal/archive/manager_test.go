@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"DP/internal/access"
 	"DP/internal/domain"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestInspectValidPackage(t *testing.T) {
@@ -43,11 +44,7 @@ func TestInspectRejectsTraversal(t *testing.T) {
 func TestDeletePackage(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := NewManager(dataDir, 10<<20, db)
 
 	file := buildArchive(t, map[string]string{
@@ -99,16 +96,12 @@ func TestDeletePackage(t *testing.T) {
 func TestTransferOwnerPreservesImmutablePackageFile(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
+	db := testutil.OpenPostgres(t)
+	source, err := db.CreateUser(ctx, testutil.User(t, "source", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	source, err := db.CreateUser(ctx, domain.User{Username: "source", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	target, err := db.CreateUser(ctx, domain.User{Username: "target", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
+	target, err := db.CreateUser(ctx, testutil.User(t, "target", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,11 +152,7 @@ func TestTransferOwnerPreservesImmutablePackageFile(t *testing.T) {
 func TestPackageNote(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := NewManager(dataDir, 10<<20, db)
 
 	upload := func(note *string) {
@@ -226,11 +215,7 @@ func TestPackageNote(t *testing.T) {
 func TestPackageVersionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := NewManager(dataDir, 10<<20, db)
 	upload := func(marker string) domain.Package {
 		file := buildArchive(t, map[string]string{
@@ -250,34 +235,34 @@ func TestPackageVersionLifecycle(t *testing.T) {
 	}
 	first := upload("v1")
 	second := upload("v2")
-	versions, err := manager.ListVersions(ctx, store.InitialAdminID, "versioned")
+	versions, err := manager.ListVersions(ctx, domain.InitialAdminID, "versioned")
 	if err != nil || len(versions) != 2 {
 		t.Fatalf("versions=%+v err=%v", versions, err)
 	}
 	if versions[0].ID != second.CurrentVersionID || !versions[0].Current {
 		t.Fatalf("current=%+v", versions[0])
 	}
-	activated, err := manager.ActivateVersion(ctx, store.InitialAdminID, "versioned", first.CurrentVersionID)
+	activated, err := manager.ActivateVersion(ctx, domain.InitialAdminID, "versioned", first.CurrentVersionID)
 	if err != nil || activated.CurrentVersionID != first.CurrentVersionID || activated.SHA256 != first.SHA256 {
 		t.Fatalf("activated=%+v err=%v", activated, err)
 	}
-	if err := manager.DeleteVersion(ctx, store.InitialAdminID, "versioned", first.CurrentVersionID); appErrorCode(err) != "PACKAGE_VERSION_CURRENT" {
+	if err := manager.DeleteVersion(ctx, domain.InitialAdminID, "versioned", first.CurrentVersionID); appErrorCode(err) != "PACKAGE_VERSION_CURRENT" {
 		t.Fatalf("delete current err=%v", err)
 	}
-	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: store.InitialAdminID, Name: "installed", IP: "192.0.2.30", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/versioned", ServiceType: "versioned", Installed: true, InstalledPackageSHA256: second.SHA256})
+	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: domain.InitialAdminID, Name: "installed", IP: "192.0.2.30", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/versioned", ServiceType: "versioned", Installed: true, InstalledPackageSHA256: second.SHA256})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.DeleteVersion(ctx, store.InitialAdminID, "versioned", second.CurrentVersionID); appErrorCode(err) != "PACKAGE_VERSION_IN_USE" {
+	if err := manager.DeleteVersion(ctx, domain.InitialAdminID, "versioned", second.CurrentVersionID); appErrorCode(err) != "PACKAGE_VERSION_IN_USE" {
 		t.Fatalf("delete referenced err=%v", err)
 	}
 	if err := db.MarkUninstalled(ctx, env.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.DeleteVersion(ctx, store.InitialAdminID, "versioned", second.CurrentVersionID); err != nil {
+	if err := manager.DeleteVersion(ctx, domain.InitialAdminID, "versioned", second.CurrentVersionID); err != nil {
 		t.Fatal(err)
 	}
-	versions, _ = manager.ListVersions(ctx, store.InitialAdminID, "versioned")
+	versions, _ = manager.ListVersions(ctx, domain.InitialAdminID, "versioned")
 	if len(versions) != 1 {
 		t.Fatalf("versions after delete=%+v", versions)
 	}
@@ -286,11 +271,7 @@ func TestPackageVersionLifecycle(t *testing.T) {
 func TestReadConfigUsesPersistedVersionTemplate(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := NewManager(dataDir, 10<<20, db)
 	file := buildArchive(t, map[string]string{
 		"config/config.json": `{"port":8080,"template":true}`,
@@ -317,11 +298,7 @@ func TestReadConfigUsesPersistedVersionTemplate(t *testing.T) {
 func TestPackageVersionRetentionKeepsCurrentAndReferenced(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := NewManager(dataDir, 10<<20, db)
 	manager.ConfigureRetention(2)
 	for _, marker := range []string{"v1", "v2", "v3"} {
@@ -336,7 +313,7 @@ func TestPackageVersionRetentionKeepsCurrentAndReferenced(t *testing.T) {
 			t.Fatal(uploadErr)
 		}
 	}
-	versions, err := manager.ListVersions(ctx, store.InitialAdminID, "retained")
+	versions, err := manager.ListVersions(ctx, domain.InitialAdminID, "retained")
 	if err != nil || len(versions) != 2 {
 		t.Fatalf("versions=%+v err=%v", versions, err)
 	}

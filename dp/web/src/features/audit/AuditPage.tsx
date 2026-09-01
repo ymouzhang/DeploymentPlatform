@@ -114,7 +114,7 @@ export function AuditPage() {
         scroll={{ x: 1260 }}
         columns={[
           { title: '时间', dataIndex: 'occurred_at', width: 168, render: (value: string) => <span className="audit-time">{formatTime(value)}</span> },
-          { title: '操作账号', width: 138, render: (_, row) => <div><Typography.Text strong>{row.actor_username || '匿名'}</Typography.Text><div className="cell-caption">{row.actor_role ? roleLabel(row.actor_role) : '未认证'}</div></div> },
+          { title: '操作账号', width: 138, render: (_, row) => <div><Typography.Text strong>{row.actor_username || '匿名'}</Typography.Text><div className="cell-caption">{roleLabels(row.actor_roles)}</div></div> },
           { title: '事件', width: 210, render: (_, row) => <div><Typography.Text>{actionLabel(row.action)}</Typography.Text><div className="cell-caption">{categoryLabel(row.category)}</div></div> },
           { title: '操作对象', width: 300, render: (_, row) => <div className="table-stacked-cell"><Typography.Text ellipsis={{ tooltip: row.target_label || '-' }}>{row.target_label || '-'}</Typography.Text><Typography.Text type="secondary" className="cell-caption" ellipsis={{ tooltip: row.owner_username ? `所属：${row.owner_username}` : row.target_type || '-' }}>{row.owner_username ? `所属：${row.owner_username}` : row.target_type || '-'}</Typography.Text></div> },
           { title: '来源 IP', dataIndex: 'source_ip', width: 136, render: (value: string) => <span className="server-address">{value || '-'}</span> },
@@ -148,7 +148,7 @@ function AuditDetail({ event, onOpenOperation }: { event: AuditEvent; onOpenOper
   return <Space direction="vertical" size={20} style={{ width: '100%' }}>
     <Descriptions column={1} bordered size="small" items={[
       { key: 'time', label: '时间', children: formatTime(event.occurred_at) },
-      { key: 'actor', label: '操作账号', children: `${event.actor_username || '匿名'}${event.actor_role ? ` · ${roleLabel(event.actor_role)}` : ''}` },
+      { key: 'actor', label: '操作账号', children: `${event.actor_username || '匿名'}${event.actor_roles.length ? ` · ${event.actor_roles.map(roleLabel).join('、')}` : ''}` },
       { key: 'action', label: '事件', children: <Space><span>{actionLabel(event.action)}</span><OutcomeTag event={event} /></Space> },
       { key: 'target', label: '操作对象', children: event.target_label || '-' },
       { key: 'owner', label: '所属账号', children: event.owner_username || '-' },
@@ -196,7 +196,10 @@ function actionLabel(value: string) {
   return `${verbs[lifecycle[1]]}服务 · ${lifecycle[2] === 'requested' ? '已发起' : '已完成'}`
 }
 function categoryLabel(value: string) { return categoryOptions.find((item) => item.value === value)?.label ?? value }
-function roleLabel(value: string) { return value === 'admin' ? '管理员' : '普通账号' }
+function roleLabel(value: string) {
+  return ({ super_admin: '超级管理员', platform_admin: '平台管理员', operator: '运维人员', viewer: '只读用户' } as Record<string, string>)[value] ?? value
+}
+function roleLabels(values: string[]) { return values.length ? values.map(roleLabel).join('、') : '未认证' }
 function formatTime(value: string) { return new Date(value).toLocaleString('zh-CN', { hour12: false }) }
 function localDateTime(date: Date) {
   const offset = date.getTimezoneOffset() * 60000

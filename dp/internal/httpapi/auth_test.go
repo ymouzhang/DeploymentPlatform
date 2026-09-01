@@ -6,23 +6,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"DP/internal/access"
 	"DP/internal/application"
 	"DP/internal/domain"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestForcedPasswordChangeMiddlewareBlocksBusinessAPI(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	auth := application.NewAuthService(db, time.Hour)
 	if err := auth.InitializeAdmin(ctx, "admin", "initial-password"); err != nil {
 		t.Fatal(err)
@@ -56,16 +51,12 @@ func TestForcedPasswordChangeMiddlewareBlocksBusinessAPI(t *testing.T) {
 
 func TestEnvironmentAuthorizationHidesOtherOwners(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
+	db := testutil.OpenPostgres(t)
+	owner, err := db.CreateUser(ctx, testutil.User(t, "owner", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	owner, err := db.CreateUser(ctx, domain.User{Username: "owner", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := db.CreateUser(ctx, domain.User{Username: "other", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
+	other, err := db.CreateUser(ctx, testutil.User(t, "other", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,13 +67,13 @@ func TestEnvironmentAuthorizationHidesOtherOwners(t *testing.T) {
 	api := &API{store: db}
 	other.Permissions = access.Grants{access.ServiceRead: access.ScopeOwn}
 	request := httptest.NewRequest("GET", "/api/v1/services/"+env.ID+"/config", nil)
-	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, other))
+	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: other}))
 	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross-owner error=%v", err)
 	}
 	admin := other
 	admin.Permissions = access.Grants{access.ServiceRead: access.ScopeAll}
-	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, admin))
+	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: admin}))
 	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); err != nil {
 		t.Fatalf("admin access: %v", err)
 	}
@@ -93,14 +84,14 @@ func TestPackageOwnerScopeAllowsOrdinaryUserOwnID(t *testing.T) {
 	api := &API{}
 
 	ownRequest := httptest.NewRequest("GET", "/api/v1/service-types/demo/package?owner_id=user-1", nil)
-	ownRequest = ownRequest.WithContext(context.WithValue(ownRequest.Context(), authContextKey{}, user))
+	ownRequest = ownRequest.WithContext(context.WithValue(ownRequest.Context(), authContextKey{}, authenticated{User: user}))
 	ownerID, err := api.packageOwnerScope(ownRequest, access.PackageRead)
 	if err != nil || ownerID != user.ID {
 		t.Fatalf("own owner scope=%q err=%v", ownerID, err)
 	}
 
 	otherRequest := httptest.NewRequest("GET", "/api/v1/service-types/demo/package?owner_id=user-2", nil)
-	otherRequest = otherRequest.WithContext(context.WithValue(otherRequest.Context(), authContextKey{}, user))
+	otherRequest = otherRequest.WithContext(context.WithValue(otherRequest.Context(), authContextKey{}, authenticated{User: user}))
 	if _, err := api.packageOwnerScope(otherRequest, access.PackageRead); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross-owner error=%v", err)
 	}
@@ -108,16 +99,12 @@ func TestPackageOwnerScopeAllowsOrdinaryUserOwnID(t *testing.T) {
 
 func TestVisibleTagIDsRejectsCrossOwnerForOrdinaryUser(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
+	db := testutil.OpenPostgres(t)
+	owner, err := db.CreateUser(ctx, testutil.User(t, "tag-a", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	owner, err := db.CreateUser(ctx, domain.User{Username: "tag-a", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := db.CreateUser(ctx, domain.User{Username: "tag-b", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
+	other, err := db.CreateUser(ctx, testutil.User(t, "tag-b", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,11 +116,11 @@ func TestVisibleTagIDsRejectsCrossOwnerForOrdinaryUser(t *testing.T) {
 	other.Permissions = access.Grants{access.EnvironmentRead: access.ScopeOwn}
 	owner.Permissions = access.Grants{access.EnvironmentRead: access.ScopeOwn}
 	request := httptest.NewRequest("GET", "/api/v1/environments?tag_id="+tag.ID, nil)
-	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, other))
+	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: other}))
 	if _, err := api.visibleTagIDs(request, other.ID, access.EnvironmentRead); err == nil {
 		t.Fatal("expected cross-owner tag rejection")
 	}
-	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, owner))
+	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: owner}))
 	ids, err := api.visibleTagIDs(request, owner.ID, access.EnvironmentRead)
 	if err != nil || len(ids) != 1 || ids[0] != tag.ID {
 		t.Fatalf("ids=%v err=%v", ids, err)

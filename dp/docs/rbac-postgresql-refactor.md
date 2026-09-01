@@ -201,6 +201,13 @@ advisory lock 串行化超级管理员不变量检查。
 
 前端根据权限映射生成导航和操作入口；直接访问无权页面时显示 403 页面，不静默跳到其他页面。
 
+用户、通讯和审计的公开 JSON 只使用多角色字段：用户返回 `roles` 与 `permissions`，通讯快照返回
+`roles`/`sender_roles`，审计返回 `actor_roles`。本次不兼容重构不再输出或接收旧的单值
+`role`、`sender_role`、`actor_role`，也不提供字段别名或数据转换入口。
+
+同一原则适用于外围状态：环境导入只接受 schema v2，浏览器不读取旧模型上传 localStorage key，启动脚本
+不补写旧 `.env`。缺少当前 PostgreSQL、管理员或主密钥字段时直接拒绝并要求重新初始化配置。
+
 ## 4. PostgreSQL 数据设计
 
 ### 4.1 技术选型
@@ -333,6 +340,9 @@ flowchart LR
 - PostgreSQL 密码由 `dp.sh init` 生成并写入权限为 `0600` 的 `.env`；
 - `./data` 只保存安装包、模型任务元数据文件和操作日志，不再保存数据库；
 - PostgreSQL 使用独立持久卷；备份采用 `pg_dump`，恢复采用 `pg_restore/psql`；
+- 部署脚本提供 `backup [目录]` 和 `restore <目录>`。备份目录包含自定义格式数据库转储、`data/`
+  归档、`.env` 副本和校验文件；恢复仅允许在 DP/PostgreSQL 容器均已停止时执行，并在覆盖前要求
+  操作者输入明确确认。恢复完成后启动 Compose，由应用执行当前版本 migration；不支持导入 SQLite；
 - `/healthz` 同时检查 PostgreSQL 连通性，数据库不可用时返回 503；
 - 离线部署包必须同时包含 DP 镜像和 PostgreSQL 镜像，启动脚本逐一 `docker image load`。
 

@@ -3,39 +3,35 @@ package application
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 	"DP/internal/realtime"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestCommunicationLifecycleAndIsolation(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
+	db := testutil.OpenPostgres(t)
+	admin, err := db.InitializeAdmin(ctx, domain.InitialAdminID, "admin-one", "hash")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	admin, err := db.InitializeAdmin(ctx, store.InitialAdminID, "admin-one", "hash")
+	secondAdmin, err := db.CreateUser(ctx, testutil.User(t, "admin-two", access.RolePlatformAdmin, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondAdmin, err := db.CreateUser(ctx, domain.User{Username: "admin-two", PasswordHash: "hash", Role: domain.RoleAdmin, Enabled: true})
+	lateAdmin, err := db.CreateUser(ctx, testutil.User(t, "admin-late", access.RolePlatformAdmin, false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	lateAdmin, err := db.CreateUser(ctx, domain.User{Username: "admin-late", PasswordHash: "hash", Role: domain.RoleAdmin, Enabled: false})
+	user, err := db.CreateUser(ctx, testutil.User(t, "user-one", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := db.CreateUser(ctx, domain.User{Username: "user-one", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := db.CreateUser(ctx, domain.User{Username: "user-two", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
+	other, err := db.CreateUser(ctx, testutil.User(t, "user-two", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,15 +125,11 @@ func TestCommunicationLifecycleAndIsolation(t *testing.T) {
 
 func TestCommunicationRejectsOrdinaryCreationAndCrossOwnerResource(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	admin, _ := db.InitializeAdmin(ctx, store.InitialAdminID, "admin-test", "hash")
-	first, _ := db.CreateUser(ctx, domain.User{Username: "first-user", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
-	second, _ := db.CreateUser(ctx, domain.User{Username: "second-user", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
-	disabled, _ := db.CreateUser(ctx, domain.User{Username: "disabled-user", PasswordHash: "hash", Role: domain.RoleUser, Enabled: false})
+	db := testutil.OpenPostgres(t)
+	admin, _ := db.InitializeAdmin(ctx, domain.InitialAdminID, "admin-test", "hash")
+	first, _ := db.CreateUser(ctx, testutil.User(t, "first-user", access.RoleOperator, true))
+	second, _ := db.CreateUser(ctx, testutil.User(t, "second-user", access.RoleOperator, true))
+	disabled, _ := db.CreateUser(ctx, testutil.User(t, "disabled-user", access.RoleOperator, false))
 	environment, _ := db.CreateEnvironment(ctx, domain.Environment{OwnerID: second.ID, Name: "other", IP: "192.0.2.20", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/x", ServiceType: "demo"})
 	service := NewCommunicationService(db, nil)
 	input := domain.CommunicationCreateInput{TargetUserID: first.ID, Title: "标题", Content: "内容"}
@@ -152,7 +144,7 @@ func TestCommunicationRejectsOrdinaryCreationAndCrossOwnerResource(t *testing.T)
 	if _, err := service.Create(ctx, admin, input); communicationErrorCode(err) != "COMMUNICATION_TARGET_DISABLED" {
 		t.Fatalf("disabled target error=%v", err)
 	}
-	input.TargetUserID = store.NewID()
+	input.TargetUserID = domain.NewID()
 	if _, err := service.Create(ctx, admin, input); communicationErrorCode(err) != "COMMUNICATION_TARGET_DISABLED" {
 		t.Fatalf("missing target error=%v", err)
 	}
@@ -160,16 +152,12 @@ func TestCommunicationRejectsOrdinaryCreationAndCrossOwnerResource(t *testing.T)
 
 func TestCommunicationRealtimeEventsUseRecipientScope(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	admin, _ := db.InitializeAdmin(ctx, store.InitialAdminID, "event-admin", "hash")
-	secondAdmin, _ := db.CreateUser(ctx, domain.User{Username: "event-admin-two", PasswordHash: "hash", Role: domain.RoleAdmin, Enabled: true})
-	disabledAdmin, _ := db.CreateUser(ctx, domain.User{Username: "event-admin-disabled", PasswordHash: "hash", Role: domain.RoleAdmin, Enabled: false})
-	target, _ := db.CreateUser(ctx, domain.User{Username: "event-target", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
-	other, _ := db.CreateUser(ctx, domain.User{Username: "event-other", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
+	db := testutil.OpenPostgres(t)
+	admin, _ := db.InitializeAdmin(ctx, domain.InitialAdminID, "event-admin", "hash")
+	secondAdmin, _ := db.CreateUser(ctx, testutil.User(t, "event-admin-two", access.RolePlatformAdmin, true))
+	disabledAdmin, _ := db.CreateUser(ctx, testutil.User(t, "event-admin-disabled", access.RolePlatformAdmin, false))
+	target, _ := db.CreateUser(ctx, testutil.User(t, "event-target", access.RoleOperator, true))
+	other, _ := db.CreateUser(ctx, testutil.User(t, "event-other", access.RoleOperator, true))
 	hub := realtime.NewHub(16)
 	adminEvents := hub.Subscribe(admin.ID)
 	defer adminEvents.Close()

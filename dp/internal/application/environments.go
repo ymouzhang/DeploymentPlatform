@@ -253,8 +253,8 @@ type ImportResult struct {
 }
 
 func (s *EnvironmentService) Import(ctx context.Context, ownerID string, document ExportDocument) (ImportResult, error) {
-	if document.SchemaVersion != 1 && document.SchemaVersion != 2 {
-		return ImportResult{}, domain.FieldError("schema_version", "不支持该导入文件版本")
+	if document.SchemaVersion != 2 {
+		return ImportResult{}, domain.FieldError("schema_version", "导入文件必须使用 schema v2")
 	}
 	if len(document.Environments) == 0 {
 		return ImportResult{}, domain.FieldError("environments", "导入文件中没有环境信息")

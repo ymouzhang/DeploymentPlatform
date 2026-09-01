@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +13,7 @@ import (
 	"DP/internal/application"
 	"DP/internal/domain"
 	"DP/internal/realtime"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestRealtimeEventsStreamsSyncAndAccountEvent(t *testing.T) {
@@ -23,7 +22,7 @@ func TestRealtimeEventsStreamsSyncAndAccountEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{
-		User: domain.User{ID: "current-user", Role: domain.RoleUser, Enabled: true},
+		User: domain.User{ID: "current-user", Enabled: true},
 	}))
 	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "test-session"})
 	recorder := newSSERecorder()
@@ -49,11 +48,7 @@ func TestRealtimeEventsStreamsSyncAndAccountEvent(t *testing.T) {
 
 func TestRealtimeEventsRevalidatesRevokedSessionOnHeartbeat(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	auth := application.NewAuthService(db, time.Hour)
 	if err := auth.InitializeAdmin(ctx, "stream-admin", "initial-password"); err != nil {
 		t.Fatal(err)

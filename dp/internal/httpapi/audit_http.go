@@ -365,7 +365,7 @@ func (a *API) exportAuditEvents(w http.ResponseWriter, r *http.Request) {
 			events = events[:200]
 		}
 		for _, event := range events {
-			_ = writer.Write([]string{event.OccurredAt.Format(time.RFC3339), csvCell(event.ActorUsername), csvCell(event.ActorRole), csvCell(event.Action), csvCell(event.TargetLabel), csvCell(event.OwnerUsername), csvCell(event.SourceIP), event.Outcome, event.RiskLevel, csvCell(event.RequestID), csvCell(event.OperationID), csvCell(event.ErrorCode)})
+			_ = writer.Write([]string{event.OccurredAt.Format(time.RFC3339), csvCell(event.ActorUsername), csvCell(strings.Join(event.ActorRoles, "|")), csvCell(event.Action), csvCell(event.TargetLabel), csvCell(event.OwnerUsername), csvCell(event.SourceIP), event.Outcome, event.RiskLevel, csvCell(event.RequestID), csvCell(event.OperationID), csvCell(event.ErrorCode)})
 		}
 		if len(events) < 200 {
 			break

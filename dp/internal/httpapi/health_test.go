@@ -1,26 +1,20 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"DP/internal/health"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestHealthzReturnsMinimalJSON(t *testing.T) {
-	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.OpenPostgres(t)
 	api := &API{health: health.NewMonitor(db, dataDir, time.Minute)}
 	response := httptest.NewRecorder()
 	api.healthz(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -37,9 +31,7 @@ func TestHealthzReturnsMinimalJSON(t *testing.T) {
 	if body["status"] != "ok" || len(body) != 1 {
 		t.Fatalf("body = %#v", body)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
+	db.Close()
 
 	response = httptest.NewRecorder()
 	api.healthz(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))

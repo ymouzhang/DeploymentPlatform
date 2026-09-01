@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,17 +11,13 @@ import (
 	"DP/internal/domain"
 	"DP/internal/remote"
 	"DP/internal/security"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestManagerWaitsForCanceledOperation(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	cipher, err := security.NewPasswordCipher(make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +27,7 @@ func TestManagerWaitsForCanceledOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		OwnerID: store.InitialAdminID, Name: "test", IP: "192.0.2.40", SSHUser: "user", SSHPort: 22,
+		OwnerID: domain.InitialAdminID, Name: "test", IP: "192.0.2.40", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: encrypted, InstallDir: "/opt/demo", ServiceType: "demo", Installed: true,
 	})
 	if err != nil {

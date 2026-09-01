@@ -389,7 +389,7 @@ export type CommunicationMessageType = 'admin_message' | 'user_receipt' | 'syste
 export interface CommunicationRecipient {
   user_id: string
   username: string
-  role: 'admin' | 'user'
+  roles: string[]
   read_at?: string
 }
 
@@ -398,7 +398,7 @@ export interface CommunicationMessage {
   type: CommunicationMessageType
   sender_user_id?: string
   sender_username: string
-  sender_role: 'admin' | 'user'
+  sender_roles: string[]
   content: string
   created_at: string
   recipients: CommunicationRecipient[]
@@ -509,7 +509,7 @@ export interface AuditEvent {
   risk_level: 'normal' | 'high'
   actor_user_id?: string
   actor_username: string
-  actor_role?: string
+  actor_roles: string[]
   owner_id?: string
   owner_username?: string
   target_type?: string

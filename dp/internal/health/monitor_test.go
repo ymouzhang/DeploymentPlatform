@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"DP/internal/domain"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestCheckRequiresHTTP200AndOK(t *testing.T) {
@@ -96,17 +96,12 @@ func TestSnapshotMarksStaleResultUnknown(t *testing.T) {
 func TestHealthChecksDatabaseAndStorage(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.OpenPostgres(t)
 	monitor := NewMonitor(db, dataDir, time.Minute)
 	if result := monitor.Health(ctx); result.Status != "ok" {
 		t.Fatalf("health result = %#v", result)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
+	db.Close()
 	if result := monitor.Health(ctx); result.Status != "error" {
 		t.Fatalf("closed database result = %#v", result)
 	}
@@ -123,11 +118,7 @@ func TestHealthChecksDatabaseAndStorage(t *testing.T) {
 func TestHealthNotificationResolvesAfterRecovery(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	monitor := NewMonitor(db, dataDir, time.Minute)
 	env := domain.Environment{ID: "environment", Name: "service", Installed: true}
 	for range 3 {
@@ -153,13 +144,9 @@ func TestHealthNotificationResolvesAfterRecovery(t *testing.T) {
 func TestCheckAllClearsAndRemovesResults(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		Name: "reset", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
+		OwnerID: domain.InitialAdminID, Name: "reset", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
 		SSHPasswordEnc: "encrypted", InstallDir: "/opt/reset", ServiceType: "dp-demo",
 	})
 	if err != nil {

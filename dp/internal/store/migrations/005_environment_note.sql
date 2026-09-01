@@ -1,1 +1,0 @@
-ALTER TABLE environments ADD COLUMN note TEXT NOT NULL DEFAULT '';

@@ -47,6 +47,11 @@ func TestOpenAPIContractIsValidYAML(t *testing.T) {
 			t.Errorf("missing account-security path %s", path)
 		}
 	}
+	for _, path := range []string{"/permissions", "/roles", "/roles/{id}", "/users/{id}/roles"} {
+		if _, ok := header.Paths[path]; !ok {
+			t.Errorf("missing RBAC path %s", path)
+		}
+	}
 	for _, path := range []string{"/communications/summary", "/communications", "/communications/{id}", "/communications/{id}/read", "/communications/{id}/messages", "/communications/{id}/close", "/communications/{id}/reopen"} {
 		if _, ok := header.Paths[path]; !ok {
 			t.Errorf("missing communication path %s", path)
@@ -71,6 +76,16 @@ func TestOpenAPIContractIsValidYAML(t *testing.T) {
 	}
 	components, _ := contract["components"].(map[string]any)
 	schemas, _ := components["schemas"].(map[string]any)
+	userSchema, _ := schemas["User"].(map[string]any)
+	userProperties, _ := userSchema["properties"].(map[string]any)
+	if _, exists := userProperties["role"]; exists {
+		t.Error("User schema must not expose the removed single role field")
+	}
+	for _, field := range []string{"roles", "permissions"} {
+		if _, exists := userProperties[field]; !exists {
+			t.Errorf("User schema is missing %s", field)
+		}
+	}
 	operationIDs := map[string]bool{}
 	var walk func(any)
 	walk = func(value any) {

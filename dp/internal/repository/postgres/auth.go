@@ -7,7 +7,6 @@ import (
 	"math"
 	"time"
 
-	"DP/internal/access"
 	"DP/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -447,10 +446,6 @@ func (db *DB) populateUserAccess(ctx context.Context, user domain.User) (domain.
 	}
 	user.Roles = subject.Roles
 	user.Permissions = subject.Grants
-	user.Role = domain.RoleUser
-	if subject.HasRole(access.RoleSuperAdmin) || subject.HasRole(access.RolePlatformAdmin) {
-		user.Role = domain.RoleAdmin
-	}
 	return user, nil
 }
 

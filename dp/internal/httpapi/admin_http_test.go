@@ -7,13 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"DP/internal/access"
 	"DP/internal/application"
 	"DP/internal/domain"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestPermissionMiddlewareRejectsMissingBusinessGrants(t *testing.T) {
@@ -31,7 +30,7 @@ func TestPermissionMiddlewareRejectsMissingBusinessGrants(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, test.path, nil)
-			request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, user))
+			request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: user}))
 			recorder := httptest.NewRecorder()
 			handler := api.requirePermission(test.permission, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusNoContent)
@@ -46,16 +45,12 @@ func TestPermissionMiddlewareRejectsMissingBusinessGrants(t *testing.T) {
 
 func TestAdminDashboardIncludesCurrentAdministratorsUnreadCommunications(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "dp.db"))
+	db := testutil.OpenPostgres(t)
+	admin, err := db.InitializeAdmin(ctx, domain.InitialAdminID, "dashboard-admin", "hash")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	admin, err := db.InitializeAdmin(ctx, store.InitialAdminID, "dashboard-admin", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	user, err := db.CreateUser(ctx, domain.User{Username: "dashboard-user", PasswordHash: "hash", Role: domain.RoleUser, Enabled: true})
+	user, err := db.CreateUser(ctx, testutil.User(t, "dashboard-user", access.RoleOperator, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +65,7 @@ func TestAdminDashboardIncludesCurrentAdministratorsUnreadCommunications(t *test
 
 	api := &API{store: db, communications: communications, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard", nil)
-	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, admin))
+	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: admin}))
 	recorder := httptest.NewRecorder()
 	api.adminDashboard(recorder, request)
 	if recorder.Code != http.StatusOK {

@@ -6,34 +6,29 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"DP/internal/archive"
 	"DP/internal/domain"
 	"DP/internal/security"
-	"DP/internal/store"
+	"DP/internal/testutil"
 )
 
 func TestServiceConfigPreviewHistoryAndRollback(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := archive.NewManager(dataDir, 10<<20, db)
 	content := configArchive(t, `{"port":8080,"mode":"safe"}`)
 	if _, err := manager.Upload(ctx, "demo", "demo.tar.gz", bytes.NewReader(content), nil); err != nil {
 		t.Fatal(err)
 	}
-	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: store.InitialAdminID, Name: "test", IP: "192.0.2.20", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
+	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: domain.InitialAdminID, Name: "test", IP: "192.0.2.20", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := NewServiceConfigService(db, manager, nil, nil)
-	actor := domain.User{ID: store.InitialAdminID, Username: "admin", Role: domain.RoleAdmin}
+	actor := domain.User{ID: domain.InitialAdminID, Username: "admin"}
 	preview, err := service.Preview(ctx, env.ID, []byte(`{"port":8080,"mode":"safe"}`))
 	if err != nil || preview.Changed {
 		t.Fatalf("preview=%+v err=%v", preview, err)
@@ -75,11 +70,7 @@ func TestServiceConfigPreviewHistoryAndRollback(t *testing.T) {
 func TestPackageUpdateOnlyChangesInheritedServiceConfigs(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := archive.NewManager(dataDir, 10<<20, db)
 	firstPackage, err := manager.Upload(ctx, "demo", "v1.tar.gz", bytes.NewReader(configArchive(t, `{"port":8080,"version":1}`)), nil)
 	if err != nil {
@@ -87,7 +78,7 @@ func TestPackageUpdateOnlyChangesInheritedServiceConfigs(t *testing.T) {
 	}
 	createEnvironment := func(name, ip string) domain.Environment {
 		t.Helper()
-		env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: store.InitialAdminID, Name: name,
+		env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: domain.InitialAdminID, Name: name,
 			IP: ip, SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
 		if err != nil {
 			t.Fatal(err)
@@ -96,9 +87,9 @@ func TestPackageUpdateOnlyChangesInheritedServiceConfigs(t *testing.T) {
 	}
 	independent := createEnvironment("independent", "192.0.2.30")
 	inherited := createEnvironment("inherited", "192.0.2.31")
-	legacyInstalled := createEnvironment("legacy-installed", "192.0.2.32")
+	installedWithoutSavedConfig := createEnvironment("installed-without-saved-config", "192.0.2.32")
 	service := NewServiceConfigService(db, manager, nil, nil)
-	actor := domain.User{ID: store.InitialAdminID, Username: "admin", Role: domain.RoleAdmin}
+	actor := domain.User{ID: domain.InitialAdminID, Username: "admin"}
 	custom := `{"port":9090,"custom":true}`
 	if _, err := service.Update(ctx, independent.ID, []byte(custom), actor); err != nil {
 		t.Fatal(err)
@@ -106,7 +97,7 @@ func TestPackageUpdateOnlyChangesInheritedServiceConfigs(t *testing.T) {
 	if err := db.MarkInstalled(ctx, independent.ID, firstPackage.SHA256, 9090); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MarkInstalled(ctx, legacyInstalled.ID, firstPackage.SHA256, 8080); err != nil {
+	if err := db.MarkInstalled(ctx, installedWithoutSavedConfig.ID, firstPackage.SHA256, 8080); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := manager.Upload(ctx, "demo", "v2.tar.gz", bytes.NewReader(configArchive(t, `{"port":8081,"version":2}`)), nil); err != nil {
@@ -123,21 +114,17 @@ func TestPackageUpdateOnlyChangesInheritedServiceConfigs(t *testing.T) {
 		gotInherited.PackageChanged || gotInherited.PackageUpdated {
 		t.Fatalf("inherited config=%+v err=%v", gotInherited, err)
 	}
-	gotLegacy, err := service.Get(ctx, legacyInstalled.ID)
-	if err != nil || !gotLegacy.Inherited || gotLegacy.Content != `{"port":8080,"version":1}` ||
-		gotLegacy.PackageContent != `{"port":8081,"version":2}` || !gotLegacy.PackageChanged || !gotLegacy.PackageUpdated {
-		t.Fatalf("legacy installed config=%+v err=%v", gotLegacy, err)
+	gotInstalled, err := service.Get(ctx, installedWithoutSavedConfig.ID)
+	if err != nil || !gotInstalled.Inherited || gotInstalled.Content != `{"port":8080,"version":1}` ||
+		gotInstalled.PackageContent != `{"port":8081,"version":2}` || !gotInstalled.PackageChanged || !gotInstalled.PackageUpdated {
+		t.Fatalf("installed config=%+v err=%v", gotInstalled, err)
 	}
 }
 
 func TestServiceConfigRestoresRemoteWhenLocalCommitFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	dataDir := t.TempDir()
-	db, err := store.Open(ctx, filepath.Join(dataDir, "dp.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenPostgres(t)
 	manager := archive.NewManager(dataDir, 10<<20, db)
 	if _, err := manager.Upload(ctx, "demo", "demo.tar.gz", bytes.NewReader(configArchive(t, `{"port":8080}`)), nil); err != nil {
 		t.Fatal(err)
@@ -152,7 +139,7 @@ func TestServiceConfigRestoresRemoteWhenLocalCommitFails(t *testing.T) {
 	}
 	port := 8080
 	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		OwnerID: store.InitialAdminID, Name: "test", IP: "192.0.2.21", SSHUser: "u", SSHPort: 22,
+		OwnerID: domain.InitialAdminID, Name: "test", IP: "192.0.2.21", SSHUser: "u", SSHPort: 22,
 		SSHPasswordEnc: encrypted, InstallDir: "/opt/demo", ServiceType: "demo", Installed: true, HealthPort: &port,
 	})
 	if err != nil {
@@ -160,7 +147,7 @@ func TestServiceConfigRestoresRemoteWhenLocalCommitFails(t *testing.T) {
 	}
 	writer := &cancelingConfigWriter{cancel: cancel}
 	service := NewServiceConfigService(db, manager, cipher, writer)
-	actor := domain.User{ID: store.InitialAdminID, Username: "admin", Role: domain.RoleAdmin}
+	actor := domain.User{ID: domain.InitialAdminID, Username: "admin"}
 	_, err = service.Update(ctx, env.ID, []byte(`{"port":9090}`), actor)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Update() error = %v, want context cancellation", err)

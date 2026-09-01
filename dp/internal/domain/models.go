@@ -27,18 +27,10 @@ var (
 	ErrForbidden           = errors.New("forbidden")
 )
 
-type UserRole string
-
-const (
-	RoleAdmin UserRole = "admin"
-	RoleUser  UserRole = "user"
-)
-
 type User struct {
 	ID                 string           `json:"id"`
 	Username           string           `json:"username"`
 	PasswordHash       string           `json:"-"`
-	Role               UserRole         `json:"role"`
 	Roles              []access.RoleRef `json:"roles"`
 	Permissions        access.Grants    `json:"permissions"`
 	Enabled            bool             `json:"enabled"`
@@ -535,7 +527,6 @@ type CommunicationCreateInput struct {
 type CommunicationRecipient struct {
 	UserID   string     `json:"user_id"`
 	Username string     `json:"username"`
-	Role     UserRole   `json:"role"`
 	Roles    []string   `json:"roles,omitempty"`
 	ReadAt   *time.Time `json:"read_at"`
 }
@@ -546,7 +537,6 @@ type CommunicationMessage struct {
 	Type           CommunicationMessageType `json:"type"`
 	SenderUserID   string                   `json:"sender_user_id,omitempty"`
 	SenderUsername string                   `json:"sender_username"`
-	SenderRole     UserRole                 `json:"sender_role"`
 	SenderRoles    []string                 `json:"sender_roles,omitempty"`
 	Content        string                   `json:"content"`
 	CreatedAt      time.Time                `json:"created_at"`
@@ -672,7 +662,6 @@ type AuditEvent struct {
 	RiskLevel     string         `json:"risk_level"`
 	ActorUserID   string         `json:"actor_user_id,omitempty"`
 	ActorUsername string         `json:"actor_username"`
-	ActorRole     string         `json:"actor_role,omitempty"`
 	ActorRoles    []string       `json:"actor_roles,omitempty"`
 	OwnerID       string         `json:"owner_id,omitempty"`
 	OwnerUsername string         `json:"owner_username,omitempty"`

@@ -78,7 +78,7 @@ export function CommunicationsPage() {
     <Drawer width={820} title={detail?.title ?? '事项详情'} open={Boolean(selectedID)} onClose={() => setSelectedID(undefined)} loading={detailQuery.isLoading} extra={detail && canManage && (detail.status === 'open' ? <Button danger icon={<CloseCircleOutlined />} onClick={() => stateConfirm(modal, '关闭事项', '关闭后用户将无法继续回复，并会收到关闭通知。', (content) => close.mutate({ id: detail.id, content }))}>关闭事项</Button> : <Button type="primary" icon={<ReloadOutlined />} onClick={() => stateConfirm(modal, '重新打开事项', '重新打开会被明确记录，并通知用户可以继续回复。', (content) => reopen.mutate({ id: detail.id, content }))}>重新打开</Button>)}>
       {detail && <div className="communication-detail"><div className="communication-detail-summary"><Space wrap><Tag color={detail.status === 'open' ? 'green' : 'default'}>{detail.status === 'open' ? '处理中' : '已关闭'}</Tag>{detail.reopen_count > 0 && <Tag color="blue">已重新打开 {detail.reopen_count} 次</Tag>}<Typography.Text type="secondary">目标账号：{detail.target_username}</Typography.Text><Typography.Text type="secondary">创建人：{detail.created_by_username}</Typography.Text></Space>{detail.status === 'closed' && <div className="communication-closed-note"><CloseCircleOutlined /> 事项已关闭，无法继续回复</div>}</div>
         <div className="communication-resources"><Typography.Title level={5}>关联资源</Typography.Title>{detail.resources.length ? <Space wrap>{detail.resources.map((resource) => <Button key={resource.id} size="small" icon={<LinkOutlined />} disabled={!resource.available} onClick={() => resource.link && navigate(resource.link)}>{resource.resource_label}{!resource.available ? '（已失效）' : ''}</Button>)}</Space> : <Typography.Text type="secondary">未关联资源</Typography.Text>}</div>
-        <Typography.Title level={5}>沟通记录</Typography.Title><Timeline className="communication-timeline" items={(detail.messages ?? []).map((item) => ({ color: timelineColor(item), children: <MessageItem message={item} admin={coordinator} /> }))} />
+        <Typography.Title level={5}>沟通记录</Typography.Title><Timeline className="communication-timeline" items={(detail.messages ?? []).map((item) => ({ color: timelineColor(item), children: <MessageItem message={item} admin={coordinator} targetUserID={detail.target_user_id} /> }))} />
         {detail.status === 'open' && <Form form={replyForm} layout="vertical" onFinish={({ content }) => send.mutate({ id: detail.id, content })}><Form.Item name="content" label={coordinator ? '继续发送消息' : '发送回执'} rules={[{ required: true, whitespace: true, message: '请输入消息内容' }, { max: 5000 }]}><Input.TextArea rows={4} maxLength={5000} showCount placeholder={coordinator ? '补充说明或回复用户…' : '向管理员反馈处理情况…'} /></Form.Item><Button type="primary" htmlType="submit" icon={<SendOutlined />} loading={send.isPending}>{coordinator ? '发送消息' : '发送回执'}</Button></Form>}
       </div>}
     </Drawer>
@@ -87,16 +87,16 @@ export function CommunicationsPage() {
   </div>
 }
 
-function MessageItem({ message, admin }: { message: CommunicationMessage; admin: boolean }) {
+function MessageItem({ message, admin, targetUserID }: { message: CommunicationMessage; admin: boolean; targetUserID?: string }) {
   const stateMessage = message.type === 'system_closed' || message.type === 'system_reopened'
-  const userRecipient = message.recipients.find((item) => item.role === 'user')
-  return <div className={`communication-message${stateMessage ? ' is-system' : ''}`}><div className="communication-message-head"><Space><Typography.Text strong>{stateMessage ? (message.type === 'system_closed' ? '事项已关闭' : '事项已重新打开') : message.sender_username}</Typography.Text>{!stateMessage && <Tag>{message.sender_role === 'admin' ? '管理员' : '用户回执'}</Tag>}</Space><Typography.Text type="secondary">{new Date(message.created_at).toLocaleString('zh-CN')}</Typography.Text></div><div className="communication-message-content">{message.content}</div>{admin && userRecipient && <div className="communication-read-state">{userRecipient.read_at ? <span className="is-read"><CheckCircleOutlined /> 用户已读于 {new Date(userRecipient.read_at).toLocaleString('zh-CN')}</span> : <span>用户未读</span>}</div>}</div>
+  const userRecipient = message.recipients.find((item) => item.user_id === targetUserID)
+  return <div className={`communication-message${stateMessage ? ' is-system' : ''}`}><div className="communication-message-head"><Space><Typography.Text strong>{stateMessage ? (message.type === 'system_closed' ? '事项已关闭' : '事项已重新打开') : message.sender_username}</Typography.Text>{!stateMessage && <Tag>{message.type === 'admin_message' ? '协调消息' : '用户回执'}</Tag>}</Space><Typography.Text type="secondary">{new Date(message.created_at).toLocaleString('zh-CN')}</Typography.Text></div><div className="communication-message-content">{message.content}</div>{admin && userRecipient && <div className="communication-read-state">{userRecipient.read_at ? <span className="is-read"><CheckCircleOutlined /> 用户已读于 {new Date(userRecipient.read_at).toLocaleString('zh-CN')}</span> : <span>用户未读</span>}</div>}</div>
 }
 
 function timelineColor(message: CommunicationMessage) {
   if (message.type === 'system_closed') return 'gray'
   if (message.type === 'system_reopened') return 'blue'
-  return message.sender_role === 'admin' ? 'green' : 'orange'
+  return message.type === 'admin_message' ? 'green' : 'orange'
 }
 
 function decodeResources(values: string[]): CommunicationResourceInput[] {

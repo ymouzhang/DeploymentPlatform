@@ -1,1 +1,0 @@
-ALTER TABLE environments ADD COLUMN arch TEXT NOT NULL DEFAULT '';

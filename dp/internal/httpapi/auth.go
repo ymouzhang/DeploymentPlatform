@@ -20,14 +20,8 @@ type authenticated struct {
 }
 
 func currentUser(r *http.Request) domain.User {
-	switch value := r.Context().Value(authContextKey{}).(type) {
-	case authenticated:
-		return value.User
-	case domain.User: // 兼容直接构造认证上下文的单元测试。
-		return value
-	default:
-		return domain.User{}
-	}
+	value, _ := r.Context().Value(authContextKey{}).(authenticated)
+	return value.User
 }
 
 func currentSession(r *http.Request) domain.Session {
