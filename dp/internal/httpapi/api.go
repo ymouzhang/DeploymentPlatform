@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/application"
 	"DP/internal/archive"
 	"DP/internal/audit"
@@ -30,6 +31,7 @@ import (
 
 type API struct {
 	auth           *application.AuthService
+	roles          *application.RoleService
 	communications *application.CommunicationService
 	realtime       *realtime.Hub
 	realtimeBeat   time.Duration
@@ -50,6 +52,7 @@ type API struct {
 
 func New(
 	authService *application.AuthService,
+	roleService *application.RoleService,
 	communicationService *application.CommunicationService,
 	realtimeHub *realtime.Hub,
 	environments *application.EnvironmentService,
@@ -80,7 +83,7 @@ func New(
 		trustedProxies = append(trustedProxies, prefix)
 	}
 	return &API{
-		auth: authService, communications: communicationService, realtime: realtimeHub, realtimeBeat: 15 * time.Second,
+		auth: authService, roles: roleService, communications: communicationService, realtime: realtimeHub, realtimeBeat: 15 * time.Second,
 		environments: environments, configs: configs, serviceLogs: serviceLogs,
 		packages: packages, operations: operations, models: models,
 		health: healthMonitor, store: store, audit: auditService, uploadMax: uploadMax,
@@ -107,6 +110,13 @@ func (a *API) Handler(frontend fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/v1/users/{id}/sessions/revoke", a.revokeUserSessions)
 	mux.HandleFunc("POST /api/v1/users/{id}/transfer", a.transferUserResources)
 	mux.HandleFunc("DELETE /api/v1/users/{id}", a.deleteUser)
+	mux.Handle("GET /api/v1/permissions", a.requirePermission(access.RoleRead, http.HandlerFunc(a.listPermissions)))
+	mux.Handle("GET /api/v1/roles", a.requirePermission(access.RoleRead, http.HandlerFunc(a.listRoles)))
+	mux.Handle("POST /api/v1/roles", a.requirePermission(access.RoleCreate, http.HandlerFunc(a.createRole)))
+	mux.Handle("GET /api/v1/roles/{id}", a.requirePermission(access.RoleRead, http.HandlerFunc(a.getRole)))
+	mux.Handle("PUT /api/v1/roles/{id}", a.requirePermission(access.RoleUpdate, http.HandlerFunc(a.updateRole)))
+	mux.Handle("DELETE /api/v1/roles/{id}", a.requirePermission(access.RoleDelete, http.HandlerFunc(a.deleteRole)))
+	mux.Handle("PUT /api/v1/users/{id}/roles", a.requirePermission(access.AccountAssignRoles, http.HandlerFunc(a.replaceUserRoles)))
 	mux.HandleFunc("GET /api/v1/service-types", a.serviceTypes)
 	mux.HandleFunc("GET /api/v1/packages", a.listPackages)
 	mux.HandleFunc("GET /api/v1/environments", a.listEnvironments)
@@ -908,7 +918,7 @@ func classifyHTTPError(err error) (int, string, string, any) {
 		switch appErr.Code {
 		case "INVALID_CREDENTIALS":
 			status = http.StatusUnauthorized
-		case "ACCOUNT_DISABLED":
+		case "ACCOUNT_DISABLED", "GRANT_FORBIDDEN":
 			status = http.StatusForbidden
 		case "PASSWORD_CHANGE_REQUIRED":
 			status = http.StatusForbidden
@@ -916,7 +926,7 @@ func classifyHTTPError(err error) (int, string, string, any) {
 			status = http.StatusTooManyRequests
 		case "COMMUNICATION_CLOSED", "COMMUNICATION_ALREADY_OPEN", "COMMUNICATION_ALREADY_CLOSED", "COMMUNICATION_TARGET_DISABLED":
 			status = http.StatusConflict
-		case "PACKAGE_NOT_FOUND", "PACKAGE_IN_USE", "PACKAGE_VERSION_EXISTS", "PACKAGE_VERSION_CURRENT", "PACKAGE_VERSION_IN_USE", "PACKAGE_VERSION_INCOMPATIBLE", "CONFIG_REVISION_CURRENT", "ENVIRONMENT_INSTALLED", "ENVIRONMENT_HAS_MODELS", "USER_IN_USE", "USER_PROTECTED", "USERNAME_CONFLICT", "TRANSFER_CONFLICT", "TAG_EXISTS", "MODEL_TARGET_EXISTS", "MODEL_UPLOAD_EXISTS", "UPLOAD_OFFSET_MISMATCH", "MODEL_UPLOAD_INCOMPLETE", "MODEL_UPLOAD_CLOSED", "MODEL_UPLOAD_EXPIRED", "MODEL_OPERATION_IN_PROGRESS", "MODEL_NOT_RETRYABLE", "MODEL_UPLOAD_NOT_AVAILABLE":
+		case "PACKAGE_NOT_FOUND", "PACKAGE_IN_USE", "PACKAGE_VERSION_EXISTS", "PACKAGE_VERSION_CURRENT", "PACKAGE_VERSION_IN_USE", "PACKAGE_VERSION_INCOMPATIBLE", "CONFIG_REVISION_CURRENT", "ENVIRONMENT_INSTALLED", "ENVIRONMENT_HAS_MODELS", "USER_IN_USE", "USER_PROTECTED", "USERNAME_CONFLICT", "TRANSFER_CONFLICT", "TAG_EXISTS", "MODEL_TARGET_EXISTS", "MODEL_UPLOAD_EXISTS", "UPLOAD_OFFSET_MISMATCH", "MODEL_UPLOAD_INCOMPLETE", "MODEL_UPLOAD_CLOSED", "MODEL_UPLOAD_EXPIRED", "MODEL_OPERATION_IN_PROGRESS", "MODEL_NOT_RETRYABLE", "MODEL_UPLOAD_NOT_AVAILABLE", "ROLE_KEY_CONFLICT", "ROLE_IN_USE", "ROLE_PROTECTED":
 			status = http.StatusConflict
 		}
 		return status, appErr.Code, appErr.Message, nil
@@ -964,7 +974,7 @@ const requestIDKey contextKey = "request_id"
 
 func (a *API) requestMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := store.NewID()
+		id := domain.NewID()
 		ctx := context.WithValue(r.Context(), requestIDKey, id)
 		w.Header().Set("X-Request-ID", id)
 		w.Header().Set("X-Content-Type-Options", "nosniff")

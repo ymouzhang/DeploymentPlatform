@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 )
 
@@ -32,6 +33,22 @@ func currentUser(r *http.Request) domain.User {
 func currentSession(r *http.Request) domain.Session {
 	value, _ := r.Context().Value(authContextKey{}).(authenticated)
 	return value.Session
+}
+
+func currentSubject(r *http.Request) access.Subject {
+	user := currentUser(r)
+	return access.Subject{UserID: user.ID, Roles: user.Roles, Grants: user.Permissions}
+}
+
+func (a *API) requirePermission(permission access.Permission, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := currentUser(r)
+		if !user.Permissions.Allows(permission, user.ID, user.ID) {
+			a.writeError(w, r, domain.ErrForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *API) authMiddleware(next http.Handler) http.Handler {

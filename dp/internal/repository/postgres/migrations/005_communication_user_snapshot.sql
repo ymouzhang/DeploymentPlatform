@@ -1,0 +1,1 @@
+ALTER TABLE communication_threads DROP CONSTRAINT communication_threads_target_user_id_fkey;

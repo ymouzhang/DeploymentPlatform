@@ -112,6 +112,7 @@ func run() error {
 	}
 	api := httpapi.New(
 		authService,
+		nil,
 		communicationService,
 		realtimeHub,
 		environmentService, serviceConfigService, serviceLogService, packageManager, operationManager, modelManager, healthMonitor,

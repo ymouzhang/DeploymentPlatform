@@ -5,6 +5,14 @@ import (
 	"fmt"
 )
 
+var (
+	ErrConflict     = errors.New("RBAC conflict")
+	ErrInUse        = errors.New("RBAC resource in use")
+	ErrInvalidInput = errors.New("invalid RBAC input")
+	ErrNotFound     = errors.New("RBAC resource not found")
+	ErrProtected    = errors.New("protected RBAC resource")
+)
+
 type Scope string
 
 const (
@@ -94,6 +102,10 @@ type Role struct {
 	MemberCount int     `json:"member_count"`
 }
 
+func (r Role) HasKey(key string) bool {
+	return r.Key == key
+}
+
 type RoleRef struct {
 	ID   string `json:"id"`
 	Key  string `json:"key"`
@@ -104,6 +116,15 @@ type Subject struct {
 	UserID string    `json:"user_id"`
 	Roles  []RoleRef `json:"roles"`
 	Grants Grants    `json:"permissions"`
+}
+
+func (s Subject) HasRole(key string) bool {
+	for _, role := range s.Roles {
+		if role.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 type Grants map[Permission]Scope

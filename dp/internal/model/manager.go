@@ -72,7 +72,7 @@ func (m *Manager) CreateUpload(ctx context.Context, owner domain.User, actor dom
 	if env.HostKeyFingerprint == "" {
 		return UploadCreated{}, &domain.AppError{Code: "ENVIRONMENT_NOT_VALIDATED", Message: "请先在环境管理中完成 SSH 校验，再上传模型"}
 	}
-	modelID, uploadID := store.NewID(), store.NewID()
+	modelID, uploadID := domain.NewID(), domain.NewID()
 	remotePath := remote.ModelUploadRemotePath(input.TargetDir, uploadID)
 	password, err := m.cipher.Decrypt(env.SSHPasswordEnc)
 	if err != nil {
@@ -351,7 +351,7 @@ func (m *Manager) startTask(ctx context.Context, model domain.Model, action doma
 		return domain.ModelTask{}, err
 	}
 	task := domain.ModelTask{ModelID: model.ID, OwnerID: model.OwnerID, ActorUserID: actor.ID, ActorUsername: actor.Username, Action: action,
-		Status: domain.OperationQueued, Stage: "queued", LogPath: filepath.Join("model-tasks", store.NewID()+".jsonl")}
+		Status: domain.OperationQueued, Stage: "queued", LogPath: filepath.Join("model-tasks", domain.NewID()+".jsonl")}
 	var err error
 	task, err = m.store.CreateModelTask(ctx, task)
 	if err != nil {

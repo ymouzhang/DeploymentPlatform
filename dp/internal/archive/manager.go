@@ -83,7 +83,7 @@ func (m *Manager) ConfigureRetention(retain int) {
 func (m *Manager) Upload(
 	ctx context.Context, serviceType, filename string, src io.Reader, note *string,
 ) (domain.Package, error) {
-	return m.UploadForOwner(ctx, store.InitialAdminID, serviceType, filename, src, note)
+	return m.UploadForOwner(ctx, domain.InitialAdminID, serviceType, filename, src, note)
 }
 
 func (m *Manager) UploadForOwner(
@@ -169,7 +169,7 @@ func (m *Manager) UploadVersionForOwner(
 		return domain.Package{}, getErr
 	}
 
-	versionID := store.NewID()
+	versionID := domain.NewID()
 	relative := filepath.Join("packages", ownerID, serviceType, "versions", versionID+".tar.gz")
 	destination := filepath.Join(m.dataDir, relative)
 	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
@@ -200,7 +200,7 @@ func (m *Manager) UploadVersionForOwner(
 
 // UpdateNote 仅更新安装包备注，包文件保持不变。
 func (m *Manager) UpdateNote(ctx context.Context, serviceType, note string) (domain.Package, error) {
-	return m.UpdateNoteForOwner(ctx, store.InitialAdminID, serviceType, note)
+	return m.UpdateNoteForOwner(ctx, domain.InitialAdminID, serviceType, note)
 }
 
 func (m *Manager) UpdateNoteForOwner(ctx context.Context, ownerID, serviceType, note string) (domain.Package, error) {
@@ -316,7 +316,7 @@ func (m *Manager) pruneVersions(ctx context.Context, ownerID, serviceType string
 }
 
 func (m *Manager) Get(ctx context.Context, serviceType string) (domain.Package, error) {
-	return m.GetForOwner(ctx, store.InitialAdminID, serviceType)
+	return m.GetForOwner(ctx, domain.InitialAdminID, serviceType)
 }
 
 func (m *Manager) GetForOwner(ctx context.Context, ownerID, serviceType string) (domain.Package, error) {
@@ -324,7 +324,7 @@ func (m *Manager) GetForOwner(ctx context.Context, ownerID, serviceType string) 
 }
 
 func (m *Manager) Delete(ctx context.Context, serviceType string) error {
-	return m.DeleteForOwner(ctx, store.InitialAdminID, serviceType)
+	return m.DeleteForOwner(ctx, domain.InitialAdminID, serviceType)
 }
 
 func (m *Manager) DeleteForOwner(ctx context.Context, ownerID, serviceType string) error {
@@ -385,7 +385,7 @@ func (m *Manager) Snapshot(
 	ctx context.Context,
 	serviceType string,
 ) (domain.Package, string, Inspection, func(), error) {
-	return m.SnapshotForOwner(ctx, store.InitialAdminID, serviceType)
+	return m.SnapshotForOwner(ctx, domain.InitialAdminID, serviceType)
 }
 
 func (m *Manager) SnapshotForOwner(
@@ -433,7 +433,7 @@ func (m *Manager) ReadConfig(
 	ctx context.Context,
 	serviceType string,
 ) ([]byte, domain.Package, Inspection, error) {
-	return m.ReadConfigForOwner(ctx, store.InitialAdminID, serviceType)
+	return m.ReadConfigForOwner(ctx, domain.InitialAdminID, serviceType)
 }
 
 func (m *Manager) ReadConfigForOwner(

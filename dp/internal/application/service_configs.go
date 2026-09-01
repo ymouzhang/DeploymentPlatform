@@ -170,7 +170,7 @@ func (s *ServiceConfigService) save(ctx context.Context, environmentID string, c
 			_ = s.store.RecordValidation(ctx, env.ID, fingerprint, env.Arch)
 		}
 	}
-	revision := domain.ServiceConfigRevision{ID: store.NewID(), EnvironmentID: environmentID,
+	revision := domain.ServiceConfigRevision{ID: domain.NewID(), EnvironmentID: environmentID,
 		Content: config.Content, Format: config.Format, Path: config.Path, Port: config.Port,
 		Source: source, RestoredFromID: restoredFrom, CreatedBy: actor.ID,
 		CreatedByName: actor.Username, CreatedAt: time.Now().UTC()}

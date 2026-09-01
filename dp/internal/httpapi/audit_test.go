@@ -82,9 +82,13 @@ func TestAuditEndpointRejectsOrdinaryUser(t *testing.T) {
 
 func TestCSVCellPreventsFormulaInjection(t *testing.T) {
 	for _, value := range []string{"=cmd", "+1", "-1", "@SUM(A1)"} {
-		if got := csvCell(value); !strings.HasPrefix(got, "'") { t.Fatalf("csvCell(%q)=%q", value, got) }
+		if got := csvCell(value); !strings.HasPrefix(got, "'") {
+			t.Fatalf("csvCell(%q)=%q", value, got)
+		}
 	}
-	if got := csvCell("normal"); got != "normal" { t.Fatalf("normal=%q", got) }
+	if got := csvCell("normal"); got != "normal" {
+		t.Fatalf("normal=%q", got)
+	}
 }
 
 func mustJSON(t *testing.T, value any) []byte {

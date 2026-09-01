@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"DP/internal/access"
 )
 
 var serviceTypePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
@@ -33,17 +35,19 @@ const (
 )
 
 type User struct {
-	ID                 string    `json:"id"`
-	Username           string    `json:"username"`
-	PasswordHash       string    `json:"-"`
-	Role               UserRole  `json:"role"`
-	Enabled            bool      `json:"enabled"`
-	MustChangePassword bool      `json:"must_change_password"`
-	IsInitialAdmin     bool      `json:"is_initial_admin"`
-	CreatedBy          string    `json:"created_by,omitempty"`
-	CreatedByUsername  string    `json:"created_by_username,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string           `json:"id"`
+	Username           string           `json:"username"`
+	PasswordHash       string           `json:"-"`
+	Role               UserRole         `json:"role"`
+	Roles              []access.RoleRef `json:"roles"`
+	Permissions        access.Grants    `json:"permissions"`
+	Enabled            bool             `json:"enabled"`
+	MustChangePassword bool             `json:"must_change_password"`
+	IsInitialAdmin     bool             `json:"is_initial_admin"`
+	CreatedBy          string           `json:"created_by,omitempty"`
+	CreatedByUsername  string           `json:"created_by_username,omitempty"`
+	CreatedAt          time.Time        `json:"created_at"`
+	UpdatedAt          time.Time        `json:"updated_at"`
 }
 
 type Session struct {
@@ -532,6 +536,7 @@ type CommunicationRecipient struct {
 	UserID   string     `json:"user_id"`
 	Username string     `json:"username"`
 	Role     UserRole   `json:"role"`
+	Roles    []string   `json:"roles,omitempty"`
 	ReadAt   *time.Time `json:"read_at"`
 }
 
@@ -542,6 +547,7 @@ type CommunicationMessage struct {
 	SenderUserID   string                   `json:"sender_user_id,omitempty"`
 	SenderUsername string                   `json:"sender_username"`
 	SenderRole     UserRole                 `json:"sender_role"`
+	SenderRoles    []string                 `json:"sender_roles,omitempty"`
 	Content        string                   `json:"content"`
 	CreatedAt      time.Time                `json:"created_at"`
 	Recipients     []CommunicationRecipient `json:"recipients"`
@@ -667,6 +673,7 @@ type AuditEvent struct {
 	ActorUserID   string         `json:"actor_user_id,omitempty"`
 	ActorUsername string         `json:"actor_username"`
 	ActorRole     string         `json:"actor_role,omitempty"`
+	ActorRoles    []string       `json:"actor_roles,omitempty"`
 	OwnerID       string         `json:"owner_id,omitempty"`
 	OwnerUsername string         `json:"owner_username,omitempty"`
 	TargetType    string         `json:"target_type,omitempty"`

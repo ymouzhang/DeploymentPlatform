@@ -130,7 +130,7 @@
 | --- | --- | --- |
 | `super_admin` | 系统所有者 | 全部权限，范围均为 `all` |
 | `platform_admin` | 平台日常管理 | 除修改系统角色、授予 `super_admin` 外的管理及业务权限，范围为 `all` |
-| `operator` | 业务运维 | 自有安装包、环境、标签、模型、服务、操作和通讯的读写权限 |
+| `operator` | 业务运维 | 自有安装包、环境、标签、模型、服务和操作的读写权限；通讯仅查看和回复本人事项 |
 | `viewer` | 只读用户 | 自有业务资源、操作和通讯的只读权限 |
 
 约束：
@@ -170,6 +170,19 @@ flowchart LR
 | PUT | `/api/v1/roles/{id}` | `role.update` |
 | DELETE | `/api/v1/roles/{id}` | `role.delete` |
 | PUT | `/api/v1/users/{id}/roles` | `account.assign_roles` |
+
+创建角色请求包含 `key`、`name`、`description` 和 `grants`；更新角色请求不允许修改稳定的
+`key`，只包含 `name`、`description` 和完整的 `grants`。每个 grant 由
+`permission` 与 `scope` 组成，保存采用全量替换语义。用户角色更新请求为
+`{"role_ids":["..."]}`，同样采用全量替换语义；空数组不允许使启用账号失去全部角色。
+服务端拒绝未知权限、重复 grant、不适用于 `own` 的全局权限、未知角色和重复角色 ID。
+
+系统角色不能通过 API 修改或删除。自定义角色被用户占用时删除返回
+`409 ROLE_IN_USE`；角色 key 冲突返回 `409 ROLE_KEY_CONFLICT`；尝试授予操作者自身没有的权限或
+更大 scope 返回 `403 GRANT_FORBIDDEN`；修改系统角色、移除自己的 `super_admin`、让系统失去
+最后一个启用的 `super_admin`，或由非 `super_admin` 授予/移除 `super_admin`，返回
+`409 ROLE_PROTECTED`。角色和用户角色全量替换都在单个事务中完成，用户角色事务使用固定的
+advisory lock 串行化超级管理员不变量检查。
 
 `GET /api/v1/auth/me` 返回角色摘要和最终权限：
 

@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"DP/internal/domain"
-	"DP/internal/store"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -22,11 +21,35 @@ import (
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
 
 type AuthService struct {
-	store      *store.Store
+	store      AuthRepository
 	sessionTTL time.Duration
 }
 
-func NewAuthService(store *store.Store, sessionTTL time.Duration) *AuthService {
+type AuthRepository interface {
+	PendingInitialAdmin(context.Context) (domain.User, bool, error)
+	InitializeAdmin(context.Context, string, string, string) (domain.User, error)
+	GetUserByUsername(context.Context, string) (domain.User, error)
+	GetUser(context.Context, string) (domain.User, error)
+	ListUsers(context.Context) ([]domain.User, error)
+	CreateUser(context.Context, domain.User) (domain.User, error)
+	UpdateUserPasswordAndRevokeSessions(context.Context, string, string, bool) error
+	UpdateUserEnabled(context.Context, string, bool) (domain.User, error)
+	DeleteUser(context.Context, string) error
+	UserBusinessCounts(context.Context, string) (int, int, error)
+	UserDetail(context.Context, string, time.Time) (domain.UserDetail, error)
+	CreateSession(context.Context, string, string, string, string, time.Time) (domain.Session, error)
+	UserForSession(context.Context, string, time.Time) (domain.User, domain.Session, error)
+	DeleteSession(context.Context, string) error
+	DeleteUserSessions(context.Context, string) error
+	DeleteExpiredSessions(context.Context, time.Time) error
+	ListUserSessions(context.Context, string, time.Time) ([]domain.Session, error)
+	DeleteUserSessionByID(context.Context, string, string) error
+	LoginThrottleUntil(context.Context, []string, time.Time) (time.Time, error)
+	RecordLoginFailure(context.Context, []string, time.Time) (time.Time, error)
+	ClearLoginThrottle(context.Context, []string) error
+}
+
+func NewAuthService(store AuthRepository, sessionTTL time.Duration) *AuthService {
 	return &AuthService{store: store, sessionTTL: sessionTTL}
 }
 

@@ -695,7 +695,9 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 - `communication_message_recipients` 以 `(message_id, recipient_user_id)` 为联合主键，保存收件账号快照和 `read_at`；用户回执发送时为当时全部启用管理员建立独立收件记录。
 - `communication_resource_refs` 保存 `package/environment/service` 资源引用及创建时快照。安装包使用账号与服务类型作为稳定业务键，环境和服务使用环境 ID，但服务引用保留服务语义。
 
-通讯表不对账号表设置强外键，改为保存账号 ID 与用户名快照，确保删除账号不会破坏通讯历史；事项、消息、收件人和资源引用之间使用级联外键保证内部一致性。消息正文不进入审计或结构化应用日志。资源引用不保存密码、配置正文、远程日志、会话信息或安装包内容。
+通讯表不对账号表设置强外键，改为保存账号 ID 与用户名快照，确保删除账号不会破坏通讯历史；PostgreSQL
+初始 schema 中遗留的 `communication_threads.target_user_id` 账号外键由后续 migration 显式移除。事项、消息、
+收件人和资源引用之间使用级联外键保证内部一致性。消息正文不进入审计或结构化应用日志。资源引用不保存密码、配置正文、远程日志、会话信息或安装包内容。
 
 通讯列表先读取当前页事项，再按事项 ID 集合一次性批量读取资源引用并在内存分组，避免随页大小增长的逐事项查询。
 
@@ -708,6 +710,11 @@ CREATE INDEX idx_audit_events_outcome_time ON audit_events(outcome, occurred_at 
 前端使用独立的 `/communications` 消息中心，不复用仅管理员可见的风险通知中心。消息中心对全部账号显示为侧边栏一级导航，展开时显示未读数、折叠时在图标上显示未读提示点；顶栏快捷入口在有未读时切换为高对比强调样式并保留数字徽标。所有已完成强制改密的登录账号建立一个 `/events` SSE 连接，并保留 30 秒轮询作为兜底。列表、时间线、资源快照与状态操作均通过 React Query 独立缓存，发送、已读、关闭、重新打开和实时事件同时失效列表、相关详情和摘要缓存。
 
 本功能由迁移 `012_communications.sql` 建表，应用服务统一执行角色、长度和资源数量校验，存储层在事务内再次执行目标账号、资源归属和事项状态校验。生命周期、普通账号隔离、跨账号资源拒绝、按管理员独立未读、关闭后拒绝回复和重新打开标记已有自动化测试覆盖；OpenAPI 契约、全量 Go 测试、竞态检查、静态检查、前端类型检查、组件测试和生产构建作为交付验收项。
+
+RBAC 重构后，上述“管理员”指拥有对应 `communication.*` 权限且 scope 为 `all` 的账号：只有
+`communication.create:all` 可主动创建事项，只有 `communication.manage:all` 可关闭或重新打开；目标账号以
+`communication.read/reply:own` 查看和回执。内置 `operator` 不获得 create/manage，避免普通运维账号越权向其他
+账号发起或管理事项。
 
 ### 6.13 账号级实时事件
 
@@ -787,7 +794,8 @@ HTTP 层提供单一 `GET /events` SSE。连接建立时先发送 `sync` 事件�
 - `model_tasks` 保存部署/删除动作、状态、阶段、进度、错误、操作者快照和 JSONL 日志路径。
 
 同一账号、目标 IP 和规范目标目录只能存在一个未删除模型。环境有未删除模型时禁止改变 SSH 目标身份或
-删除环境；账号资源交接在同一事务中交接模型，活动模型任务存在时拒绝交接。详细字段和状态机见
+删除环境；已软删除模型保留环境名称和主机快照，环境随后删除时其可空 `environment_id` 由外键
+`ON DELETE SET NULL` 清空，不阻塞环境生命周期。账号资源交接在同一事务中交接模型，活动模型任务存在时拒绝交接。详细字段和状态机见
 [模型管理需求与设计](./model-management.md)。
 
 ## 7. 密码加密与密钥管理
@@ -1143,6 +1151,12 @@ data: {"status":"failed","stage":"script","exit_code":1}
 | `GET` | `/roles/{id}` | 具有 `role.read` 的账号查看角色详情与成员 |
 | `PUT` | `/roles/{id}` | 具有 `role.update` 的账号更新自定义角色与权限绑定 |
 | `DELETE` | `/roles/{id}` | 具有 `role.delete` 的账号删除未占用的自定义角色 |
+
+角色创建请求为 `key/name/description/grants`，角色更新请求为
+`name/description/grants`；`grants` 是 `{permission, scope}` 数组并采用全量替换。用户角色更新请求
+为 `{role_ids: []}` 并采用全量替换。未知或重复项、全局权限使用 `own`、空角色集合均拒绝；系统角色
+不可变，自定义角色占用时不可删除。后端在事务内串行校验 `super_admin` 的授予者、当前账号自我降权
+和“至少一个启用超级管理员”不变量，不能仅依赖前端确认框。
 
 账号不存在或密码错误时统一返回相同的用户名或密码错误。用户名或来源 IP 进入退避期时返回 `429 LOGIN_THROTTLED`；用户名和密码校验正确但账号被禁用时返回 `403 ACCOUNT_DISABLED`，登录页面明确提示“账号已被禁用”，这样只向已掌握正确凭据的请求者展示账号状态。初始化管理员和所有新建账号在持久化时固定设置 `must_change_password=1`；创建接口不接受调用方覆盖该字段。`must_change_password` 为真时，认证中间件仅放行 `/auth/me`、`/auth/password` 和 `/auth/logout`，其他接口返回 `403 PASSWORD_CHANGE_REQUIRED`。账号本人使用当前临时密码修改成功后清除标记、撤销全部会话并返回登录页。账号与会话列表不返回密码哈希、Token 或 Token 摘要。账号管理接口禁止禁用或删除初始管理员和当前登录账号；删除仍有业务数据的账号返回 `409 USER_IN_USE`。资源交接遇到运行中操作或目标唯一键冲突返回 `409 TRANSFER_CONFLICT`，消息明确区分运行中操作、目标账号状态和目标资源冲突，但不暴露凭据或配置内容。
 

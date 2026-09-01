@@ -112,7 +112,7 @@ func (m *Manager) start(
 		m.mu.Unlock()
 		return domain.Operation{}, domain.ErrOperationInProgress
 	}
-	id := store.NewID()
+	id := domain.NewID()
 	m.active[environmentID] = id
 	m.mu.Unlock()
 

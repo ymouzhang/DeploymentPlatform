@@ -5,26 +5,37 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 	"DP/internal/realtime"
-	"DP/internal/store"
 )
 
 type communicationPublisher interface {
 	Publish(userIDs []string, event realtime.Event)
 }
 
+type CommunicationRepository interface {
+	CreateCommunication(context.Context, domain.User, domain.CommunicationCreateInput) (domain.Communication, error)
+	ListCommunications(context.Context, domain.User, domain.CommunicationFilter) ([]domain.Communication, error)
+	GetCommunication(context.Context, domain.User, string) (domain.Communication, error)
+	MarkCommunicationRead(context.Context, domain.User, string) (domain.Communication, error)
+	CommunicationSummary(context.Context, domain.User) (domain.CommunicationSummary, error)
+	SendCommunicationMessage(context.Context, domain.User, string, string) (domain.CommunicationMessage, error)
+	ChangeCommunicationState(context.Context, domain.User, string, bool, string) (domain.Communication, error)
+	ListUsers(context.Context) ([]domain.User, error)
+}
+
 type CommunicationService struct {
-	store  *store.Store
+	store  CommunicationRepository
 	events communicationPublisher
 }
 
-func NewCommunicationService(db *store.Store, events communicationPublisher) *CommunicationService {
+func NewCommunicationService(db CommunicationRepository, events communicationPublisher) *CommunicationService {
 	return &CommunicationService{store: db, events: events}
 }
 
 func (s *CommunicationService) Create(ctx context.Context, actor domain.User, input domain.CommunicationCreateInput) (domain.Communication, error) {
-	if actor.Role != domain.RoleAdmin {
+	if scope, ok := actor.Permissions.Scope(access.CommunicationCreate); !ok || scope != access.ScopeAll {
 		return domain.Communication{}, domain.ErrForbidden
 	}
 	input.TargetUserID = strings.TrimSpace(input.TargetUserID)
@@ -55,7 +66,11 @@ func (s *CommunicationService) Create(ctx context.Context, actor domain.User, in
 }
 
 func (s *CommunicationService) List(ctx context.Context, actor domain.User, filter domain.CommunicationFilter) ([]domain.Communication, error) {
-	if actor.Role != domain.RoleAdmin {
+	scope, ok := actor.Permissions.Scope(access.CommunicationRead)
+	if !ok {
+		return nil, domain.ErrForbidden
+	}
+	if scope != access.ScopeAll {
 		filter.TargetUserID = actor.ID
 	}
 	filter.Keyword = strings.TrimSpace(filter.Keyword)
@@ -63,10 +78,16 @@ func (s *CommunicationService) List(ctx context.Context, actor domain.User, filt
 }
 
 func (s *CommunicationService) Get(ctx context.Context, actor domain.User, id string) (domain.Communication, error) {
+	if _, ok := actor.Permissions.Scope(access.CommunicationRead); !ok {
+		return domain.Communication{}, domain.ErrForbidden
+	}
 	return s.store.GetCommunication(ctx, actor, id)
 }
 
 func (s *CommunicationService) MarkRead(ctx context.Context, actor domain.User, id string) (domain.Communication, error) {
+	if _, ok := actor.Permissions.Scope(access.CommunicationReply); !ok {
+		return domain.Communication{}, domain.ErrForbidden
+	}
 	item, err := s.store.MarkCommunicationRead(ctx, actor, id)
 	if err == nil {
 		s.publish(ctx, item.ID, realtime.ChangeRead, actor.ID)
@@ -75,16 +96,23 @@ func (s *CommunicationService) MarkRead(ctx context.Context, actor domain.User, 
 }
 
 func (s *CommunicationService) Summary(ctx context.Context, actor domain.User) (domain.CommunicationSummary, error) {
+	if _, ok := actor.Permissions.Scope(access.CommunicationRead); !ok {
+		return domain.CommunicationSummary{}, domain.ErrForbidden
+	}
 	return s.store.CommunicationSummary(ctx, actor)
 }
 
 func (s *CommunicationService) Send(ctx context.Context, actor domain.User, id, content string) (domain.CommunicationMessage, error) {
+	scope, ok := actor.Permissions.Scope(access.CommunicationReply)
+	if !ok {
+		return domain.CommunicationMessage{}, domain.ErrForbidden
+	}
 	content = strings.TrimSpace(content)
 	if err := validateCommunicationContent(content, false); err != nil {
 		return domain.CommunicationMessage{}, err
 	}
 	targetUserID := actor.ID
-	if actor.Role == domain.RoleAdmin {
+	if scope == access.ScopeAll {
 		item, err := s.store.GetCommunication(ctx, actor, id)
 		if err != nil {
 			return domain.CommunicationMessage{}, err
@@ -99,7 +127,7 @@ func (s *CommunicationService) Send(ctx context.Context, actor domain.User, id, 
 }
 
 func (s *CommunicationService) ChangeState(ctx context.Context, actor domain.User, id string, reopen bool, content string) (domain.Communication, error) {
-	if actor.Role != domain.RoleAdmin {
+	if scope, ok := actor.Permissions.Scope(access.CommunicationManage); !ok || scope != access.ScopeAll {
 		return domain.Communication{}, domain.ErrForbidden
 	}
 	content = strings.TrimSpace(content)
@@ -125,7 +153,7 @@ func (s *CommunicationService) publish(ctx context.Context, threadID, change str
 	users, err := s.store.ListUsers(ctx)
 	if err == nil {
 		for _, user := range users {
-			if user.Role == domain.RoleAdmin && user.Enabled {
+			if scope, ok := user.Permissions.Scope(access.CommunicationRead); ok && scope == access.ScopeAll && user.Enabled {
 				userIDs = append(userIDs, user.ID)
 			}
 		}

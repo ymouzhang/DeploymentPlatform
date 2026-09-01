@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"DP/internal/access"
 	"DP/internal/domain"
 )
 
@@ -367,6 +368,18 @@ func scanUser(row scanner) (domain.User, error) {
 		return domain.User{}, err
 	}
 	user.Role = domain.UserRole(role)
+	if user.Role == domain.RoleAdmin {
+		user.Roles = []access.RoleRef{{Key: access.RolePlatformAdmin, Name: "平台管理员"}}
+		user.Permissions = access.Grants{
+			access.CommunicationRead: access.ScopeAll, access.CommunicationCreate: access.ScopeAll,
+			access.CommunicationReply: access.ScopeAll, access.CommunicationManage: access.ScopeAll,
+		}
+	} else {
+		user.Roles = []access.RoleRef{{Key: access.RoleOperator, Name: "运维人员"}}
+		user.Permissions = access.Grants{
+			access.CommunicationRead: access.ScopeOwn, access.CommunicationReply: access.ScopeOwn,
+		}
+	}
 	user.Enabled = enabled != 0
 	user.MustChangePassword = mustChange != 0
 	user.IsInitialAdmin = initial != 0
