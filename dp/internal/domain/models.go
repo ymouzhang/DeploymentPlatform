@@ -663,7 +663,7 @@ type AuditEvent struct {
 	RiskLevel     string         `json:"risk_level"`
 	ActorUserID   string         `json:"actor_user_id,omitempty"`
 	ActorUsername string         `json:"actor_username"`
-	ActorRoles    []string       `json:"actor_roles,omitempty"`
+	ActorRoles    []string       `json:"actor_roles"`
 	OwnerID       string         `json:"owner_id,omitempty"`
 	OwnerUsername string         `json:"owner_username,omitempty"`
 	TargetType    string         `json:"target_type,omitempty"`

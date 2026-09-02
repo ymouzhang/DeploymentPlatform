@@ -27,7 +27,8 @@ import { communicationKeys } from '../features/communications/queryKeys'
 import { RealtimeEvents } from '../realtime/RealtimeEvents'
 import { HeaderMessageEntry, SidebarMessageIcon, SidebarMessageLabel } from '../features/communications/MessageEntrypoints'
 import { ModelUploadProvider } from '../features/models/ModelUploadContext'
-import { firstAllowedPath } from './navigation'
+import { documentTitleForPath, firstAllowedPath, pageNameForPath } from './navigation'
+import { PageErrorBoundary } from './PageErrorBoundary'
 
 const { Header, Sider, Content } = Layout
 const EnvironmentsPage = lazy(() =>
@@ -80,6 +81,7 @@ function Shell() {
   const sessionsQuery = useQuery({ queryKey: ['own-sessions'], queryFn: api.listOwnSessions, enabled: sessionsOpen })
   const location = useLocation()
   const navigate = useNavigate()
+  const pageName = pageNameForPath(location.pathname)
   const [siderCollapsed, setSiderCollapsed] = useState(
     () => window.localStorage.getItem('dp:sider-collapsed') === 'true',
   )
@@ -89,6 +91,9 @@ function Shell() {
     const requested = new URLSearchParams(location.search).get('owner_id') ?? undefined
     if (!requested || usersQuery.data?.some((item) => item.id === requested)) setOwnerId(requested)
   }, [location.pathname, location.search, meQuery.data, usersQuery.data])
+  useEffect(() => {
+    document.title = documentTitleForPath(location.pathname)
+  }, [location.pathname])
   if (meQuery.isLoading && !loggedOut) return <div className="page-loading">正在验证登录状态…</div>
   if (loggedOut || !meQuery.data) return <LoginPage onLogin={(user) => { queryClient.setQueryData(['me'], user); setLoggedOut(false); navigate(firstAllowedPath(user), { replace: true }) }} />
   const user = meQuery.data
@@ -110,27 +115,6 @@ function Shell() {
     }
   }
   if (user.must_change_password) return <div className="forced-password-page"><div className="forced-password-card"><div className="forced-password-mark"><KeyOutlined /></div><Typography.Title level={2}>设置你的新密码</Typography.Title><Typography.Paragraph type="secondary">当前账号正在使用系统初始化或管理员分配的临时密码。完成修改后，才能继续访问部署资源。</Typography.Paragraph><Alert type="info" showIcon message="修改成功后将退出当前会话，请使用新密码重新登录。" /><Form form={passwordForm} layout="vertical" onFinish={submitPassword}><Form.Item name="current_password" label="当前临时密码" rules={[{ required: true, message: '请输入当前临时密码' }]}><Input.Password autoFocus /></Form.Item><Form.Item name="new_password" label="新密码" rules={[{ required: true, message: '请输入新密码' }, { min: 8, max: 128 }]}><Input.Password /></Form.Item><Form.Item name="confirm_password" label="确认新密码" dependencies={['new_password']} rules={[{ required: true, message: '请再次输入新密码' }, ({ getFieldValue }) => ({ validator(_, value) { return !value || getFieldValue('new_password') === value ? Promise.resolve() : Promise.reject(new Error('两次输入的密码不一致')) } })]}><Input.Password /></Form.Item><Button block type="primary" htmlType="submit">完成密码修改</Button><Button block type="text" icon={<LogoutOutlined />} onClick={async () => { await api.logout(); finishLogout() }}>退出登录</Button></Form></div></div>
-  const pageName =
-    location.pathname === '/dashboard'
-      ? '管理总览'
-      : location.pathname === '/packages'
-      ? '安装包管理'
-        : location.pathname === '/services'
-          ? '服务管理'
-          : location.pathname === '/models'
-            ? '模型管理'
-        : location.pathname === '/users'
-          ? '账号管理'
-		  : location.pathname === '/roles'
-			? '角色与权限'
-          : location.pathname === '/operations'
-            ? '操作中心'
-            : location.pathname === '/notifications'
-              ? '通知中心'
-              : location.pathname === '/communications'
-                ? '消息中心'
-              : location.pathname === '/audit' ? '审计日志' : '环境管理'
-
   const toggleSider = () => {
     setSiderCollapsed((collapsed) => {
       const next = !collapsed
@@ -216,21 +200,23 @@ function Shell() {
             <ModelUploadProvider key={user.id} userId={user.id}>
               <RealtimeEvents />
               <Suspense fallback={<div className="page-loading">正在加载…</div>}>
-                <Routes>
-                <Route path="/dashboard" element={can('dashboard.read') ? <DashboardPage /> : <ForbiddenPage />} />
-                <Route path="/packages" element={can('package.read') ? <PackagesPage /> : <ForbiddenPage />} />
-                <Route path="/environments" element={can('environment.read') ? <EnvironmentsPage /> : <ForbiddenPage />} />
-                <Route path="/models" element={can('model.read') ? <ModelsPage /> : <ForbiddenPage />} />
-                <Route path="/services" element={can('service.read') ? <ServicesPage /> : <ForbiddenPage />} />
-                <Route path="/communications" element={can('communication.read') ? <CommunicationsPage /> : <ForbiddenPage />} />
-                <Route path="/users" element={can('account.read') ? <UsersPage /> : <ForbiddenPage />} />
-				<Route path="/roles" element={can('role.read') ? <RolesPage /> : <ForbiddenPage />} />
-                <Route path="/audit" element={can('audit.read') ? <AuditPage /> : <ForbiddenPage />} />
-                <Route path="/operations" element={can('operation.read') ? <OperationsPage /> : <ForbiddenPage />} />
-                <Route path="/notifications" element={can('notification.read') ? <NotificationsPage /> : <ForbiddenPage />} />
-                <Route path="/forbidden" element={<ForbiddenPage />} />
-                <Route path="*" element={<Navigate to={firstAllowedPath(user)} replace />} />
-                </Routes>
+                <PageErrorBoundary resetKey={location.pathname} onHome={() => navigate(firstAllowedPath(user))}>
+                  <Routes>
+                    <Route path="/dashboard" element={can('dashboard.read') ? <DashboardPage /> : <ForbiddenPage />} />
+                    <Route path="/packages" element={can('package.read') ? <PackagesPage /> : <ForbiddenPage />} />
+                    <Route path="/environments" element={can('environment.read') ? <EnvironmentsPage /> : <ForbiddenPage />} />
+                    <Route path="/models" element={can('model.read') ? <ModelsPage /> : <ForbiddenPage />} />
+                    <Route path="/services" element={can('service.read') ? <ServicesPage /> : <ForbiddenPage />} />
+                    <Route path="/communications" element={can('communication.read') ? <CommunicationsPage /> : <ForbiddenPage />} />
+                    <Route path="/users" element={can('account.read') ? <UsersPage /> : <ForbiddenPage />} />
+                    <Route path="/roles" element={can('role.read') ? <RolesPage /> : <ForbiddenPage />} />
+                    <Route path="/audit" element={can('audit.read') ? <AuditPage /> : <ForbiddenPage />} />
+                    <Route path="/operations" element={can('operation.read') ? <OperationsPage /> : <ForbiddenPage />} />
+                    <Route path="/notifications" element={can('notification.read') ? <NotificationsPage /> : <ForbiddenPage />} />
+                    <Route path="/forbidden" element={<ForbiddenPage />} />
+                    <Route path="*" element={<Navigate to={firstAllowedPath(user)} replace />} />
+                  </Routes>
+                </PageErrorBoundary>
               </Suspense>
             </ModelUploadProvider>
           </AuthContext.Provider>

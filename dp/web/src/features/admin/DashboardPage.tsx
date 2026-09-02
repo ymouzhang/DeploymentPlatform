@@ -53,7 +53,7 @@ export function DashboardPage() {
               <div className="dashboard-pending-title"><span>{item.title}</span><Tag color={item.risk_level === 'high' ? 'error' : 'warning'}>{item.risk_level === 'high' ? '高风险' : '关注'}</Tag></div>
               <div className="dashboard-pending-copy">{item.message}</div>
               <div className="dashboard-pending-meta"><span>{item.category}</span><time>{formatTime(item.created_at)}</time></div>
-            </button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有待处风险" />}
+            </button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有待处理风险" />}
           </div>
         </section>
       </div>}

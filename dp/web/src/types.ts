@@ -503,7 +503,7 @@ export interface OperationEvent {
 export interface AuditEvent {
   id: string
   occurred_at: string
-  category: 'authentication' | 'account' | 'package' | 'environment' | 'service' | 'model' | 'communication' | 'audit'
+  category: 'authentication' | 'authorization' | 'account' | 'package' | 'environment' | 'service' | 'model' | 'communication' | 'audit'
   action: string
   outcome: 'success' | 'failure' | 'denied'
   risk_level: 'normal' | 'high'

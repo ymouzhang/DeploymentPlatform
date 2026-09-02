@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,38 @@ import (
 	"DP/internal/domain"
 	"DP/internal/testdb"
 )
+
+func TestAuditRepositoryNormalizesEmptyActorRoles(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := Open(ctx, testdb.PostgresURL(t))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	created, err := db.CreateAuditEvent(ctx, domain.AuditEvent{
+		Category: "authentication", Action: "auth.login", Outcome: "failure",
+		ActorUsername: "anonymous", RequestID: domain.NewID(),
+	})
+	if err != nil {
+		t.Fatalf("create audit event: %v", err)
+	}
+	loaded, err := db.GetAuditEvent(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get audit event: %v", err)
+	}
+	if loaded.ActorRoles == nil || len(loaded.ActorRoles) != 0 {
+		t.Fatalf("expected non-nil empty actor roles, got %#v", loaded.ActorRoles)
+	}
+	payload, err := json.Marshal(loaded)
+	if err != nil {
+		t.Fatalf("marshal audit event: %v", err)
+	}
+	if !strings.Contains(string(payload), `"actor_roles":[]`) {
+		t.Fatalf("actor_roles must be an empty JSON array: %s", payload)
+	}
+}
 
 func TestAuditRepositoryIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

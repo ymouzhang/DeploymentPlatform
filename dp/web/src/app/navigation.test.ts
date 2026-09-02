@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Permission, PermissionScope, User } from '../types'
-import { allowedPagePaths } from './navigation'
+import { allowedPagePaths, documentTitleForPath, pageNameForPath } from './navigation'
 
 const businessPaths = ['/packages', '/environments', '/models', '/services', '/communications', '/operations']
 const managementPaths = ['/dashboard', '/roles', '/users', '/audit', '/notifications']
@@ -38,5 +38,13 @@ describe('built-in role navigation', () => {
     const paths = allowedPagePaths(roleUser(role, permissions))
     expect(paths).toEqual(businessPaths)
     expect(paths.some((path) => managementPaths.includes(path))).toBe(false)
+  })
+})
+
+describe('page titles', () => {
+  it('maps known routes and uses a neutral fallback', () => {
+    expect(pageNameForPath('/audit')).toBe('审计日志')
+    expect(documentTitleForPath('/audit')).toBe('DP · 审计日志')
+    expect(documentTitleForPath('/unknown')).toBe('DP · 部署平台')
   })
 })

@@ -148,7 +148,7 @@ function AuditDetail({ event, onOpenOperation }: { event: AuditEvent; onOpenOper
   return <Space direction="vertical" size={20} style={{ width: '100%' }}>
     <Descriptions column={1} bordered size="small" items={[
       { key: 'time', label: '时间', children: formatTime(event.occurred_at) },
-      { key: 'actor', label: '操作账号', children: `${event.actor_username || '匿名'}${event.actor_roles.length ? ` · ${event.actor_roles.map(roleLabel).join('、')}` : ''}` },
+      { key: 'actor', label: '操作账号', children: `${event.actor_username || '匿名'}${event.actor_roles?.length ? ` · ${event.actor_roles.map(roleLabel).join('、')}` : ''}` },
       { key: 'action', label: '事件', children: <Space><span>{actionLabel(event.action)}</span><OutcomeTag event={event} /></Space> },
       { key: 'target', label: '操作对象', children: event.target_label || '-' },
       { key: 'owner', label: '所属账号', children: event.owner_username || '-' },
@@ -200,7 +200,7 @@ function categoryLabel(value: string) { return categoryOptions.find((item) => it
 function roleLabel(value: string) {
   return ({ super_admin: '超级管理员', platform_admin: '平台管理员', operator: '运维人员', viewer: '只读用户' } as Record<string, string>)[value] ?? value
 }
-function roleLabels(values: string[]) { return values.length ? values.map(roleLabel).join('、') : '未认证' }
+function roleLabels(values?: string[]) { return values?.length ? values.map(roleLabel).join('、') : '未认证' }
 function formatTime(value: string) { return new Date(value).toLocaleString('zh-CN', { hour12: false }) }
 function localDateTime(date: Date) {
   const offset = date.getTimezoneOffset() * 60000

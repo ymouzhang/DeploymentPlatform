@@ -25,3 +25,28 @@ describe('changePassword', () => {
     })
   })
 })
+
+describe('audit events', () => {
+  it('normalizes missing and null actor roles to an empty array', async () => {
+    const events = [
+      { id: 'event-1', actor_roles: undefined },
+      { id: 'event-2', actor_roles: null },
+    ]
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { items: events, next_cursor: '' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: events[1] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const page = await api.listAuditEvents({ from: '2026-09-01T00:00:00Z', to: '2026-09-02T00:00:00Z' })
+    const detail = await api.getAuditEvent('event-2')
+
+    expect(page.items.map((item) => item.actor_roles)).toEqual([[], []])
+    expect(detail.actor_roles).toEqual([])
+  })
+})

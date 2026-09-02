@@ -192,6 +192,7 @@ body { min-height: 100vh; }
 .page { width: 100%; max-width: 1450px; margin: 0 auto; animation: page-in .3s ease; }
 @keyframes page-in { from { opacity: 0; transform: translateY(5px); } }
 .page-loading { display: grid; min-height: 320px; place-items: center; color: #778078; }
+.page-error { display: grid; gap: 18px; max-width: 760px; margin: 72px auto 0; }
 
 .page-heading { display: flex; min-height: 94px; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 27px; }
 .page-heading > div:first-child { min-width: 360px; flex: 1 1 auto; }

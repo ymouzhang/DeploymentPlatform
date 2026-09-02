@@ -212,7 +212,8 @@ advisory lock 串行化超级管理员不变量检查。
 前端根据权限映射生成导航和操作入口；直接访问无权页面时显示 403 页面，不静默跳到其他页面。
 
 用户、通讯和审计的公开 JSON 只使用多角色字段：用户返回 `roles` 与 `permissions`，通讯快照返回
-`roles`/`sender_roles`，审计返回 `actor_roles`。本次不兼容重构不再输出或接收旧的单值
+`roles`/`sender_roles`，审计始终返回数组类型的 `actor_roles`，匿名事件返回 `[]` 而不是省略字段或返回
+`null`。本次不兼容重构不再输出或接收旧的单值
 `role`、`sender_role`、`actor_role`，也不提供字段别名或数据转换入口。
 
 同一原则适用于外围状态：环境导入只接受 schema v2，浏览器不读取旧模型上传 localStorage key，启动脚本
@@ -400,6 +401,7 @@ flowchart LR
 - own 与 all 数据范围选择器测试；
 - 角色权限矩阵编辑和防误操作确认测试；
 - API 返回 403 的页面反馈测试；
+- 审计空角色数组渲染、页面错误边界恢复和动态标题测试；
 - TypeScript 类型检查、Vitest 和生产构建通过。
 
 ### 9.3 部署

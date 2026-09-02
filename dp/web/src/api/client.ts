@@ -45,6 +45,10 @@ interface ErrorEnvelope {
   request_id?: string
 }
 
+type WireAuditEvent = Omit<AuditEvent, 'actor_roles'> & {
+  actor_roles?: string[] | null
+}
+
 export class ApiError extends Error {
   status: number
   code: string
@@ -252,11 +256,13 @@ export const api = {
   sendCommunicationMessage: (id: string, content: string) => request<CommunicationMessage>(`/api/v1/communications/${id}/messages`, { method: 'POST', body: JSON.stringify({ content }) }),
   closeCommunication: (id: string, content = '') => request<Communication>(`/api/v1/communications/${id}/close`, { method: 'POST', body: JSON.stringify({ content }) }),
   reopenCommunication: (id: string, content = '') => request<Communication>(`/api/v1/communications/${id}/reopen`, { method: 'POST', body: JSON.stringify({ content }) }),
-  listAuditEvents: (filter: AuditFilter) =>
-    request<{ items: AuditEvent[]; next_cursor: string }>(`/api/v1/audit-events?${auditParams(filter)}`),
+  listAuditEvents: async (filter: AuditFilter) => {
+    const page = await request<{ items: WireAuditEvent[]; next_cursor: string }>(`/api/v1/audit-events?${auditParams(filter)}`)
+    return { ...page, items: page.items.map(normalizeAuditEvent) }
+  },
   auditSummary: (filter: AuditFilter) =>
     request<AuditSummary>(`/api/v1/audit-events/summary?${auditParams(filter, false)}`),
-  getAuditEvent: (id: string) => request<AuditEvent>(`/api/v1/audit-events/${id}`),
+  getAuditEvent: async (id: string) => normalizeAuditEvent(await request<WireAuditEvent>(`/api/v1/audit-events/${id}`)),
   exportAuditEvents: async (filter: AuditFilter) => {
     const response = await fetch(`/api/v1/audit-events/export?${auditParams(filter, false)}`)
     if (!response.ok) {
@@ -295,6 +301,10 @@ function auditParams(filter: AuditFilter, includeCursor = true) {
     }
   }
   return params.toString()
+}
+
+function normalizeAuditEvent(event: WireAuditEvent): AuditEvent {
+  return { ...event, actor_roles: event.actor_roles ?? [] }
 }
 
 function params(values: object) {
