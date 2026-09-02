@@ -21,14 +21,14 @@ import (
 
 type Repository interface {
 	CreateOperation(context.Context, domain.Operation) error
-	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetServiceInstance(context.Context, string) (domain.ServiceInstance, error)
 	GetOperation(context.Context, string) (domain.Operation, error)
 	GetServiceConfig(context.Context, string) (domain.ServiceConfig, error)
 	LastSuccessfulAction(context.Context, string) (domain.OperationAction, error)
 	MarkInstalled(context.Context, string, string, int) error
 	MarkUninstalled(context.Context, string) error
-	RecordValidation(context.Context, string, string, string) error
-	UpdateEnvironmentArch(context.Context, string, string) error
+	RecordHostValidation(context.Context, string, string, string) error
+	UpdateHostArch(context.Context, string, string) error
 	UpdateOperation(context.Context, domain.Operation) error
 	UpsertServiceConfig(context.Context, domain.ServiceConfig) (domain.ServiceConfig, error)
 }
@@ -65,52 +65,52 @@ func NewManager(
 	}
 }
 
-func (m *Manager) Busy(environmentID string) bool {
+func (m *Manager) Busy(serviceInstanceID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	_, ok := m.active[environmentID]
+	_, ok := m.active[serviceInstanceID]
 	return ok
 }
 
 func (m *Manager) Start(
 	ctx context.Context,
-	environmentID string,
+	serviceInstanceID string,
 	action domain.OperationAction,
 ) (domain.Operation, error) {
-	return m.start(ctx, environmentID, action, nil)
+	return m.start(ctx, serviceInstanceID, action, nil)
 }
 
 func (m *Manager) StartWithAudit(
 	ctx context.Context,
-	environmentID string,
+	serviceInstanceID string,
 	action domain.OperationAction,
 	event domain.AuditEvent,
 ) (domain.Operation, error) {
-	return m.start(ctx, environmentID, action, &event)
+	return m.start(ctx, serviceInstanceID, action, &event)
 }
 
 func (m *Manager) start(
 	ctx context.Context,
-	environmentID string,
+	serviceInstanceID string,
 	action domain.OperationAction,
 	auditEvent *domain.AuditEvent,
 ) (domain.Operation, error) {
-	env, err := m.store.GetEnvironment(ctx, environmentID)
+	instance, err := m.store.GetServiceInstance(ctx, serviceInstanceID)
 	if err != nil {
 		return domain.Operation{}, err
 	}
 	switch action {
 	case domain.ActionInstall:
-		if env.Installed {
+		if instance.Installed {
 			return domain.Operation{}, domain.ErrAlreadyInstalled
 		}
-		if _, err := m.packages.GetForOwner(ctx, env.OwnerID, env.ServiceType); err != nil {
+		if _, err := m.packages.GetForOwner(ctx, instance.OwnerID, instance.ServiceType); err != nil {
 			return domain.Operation{}, &domain.AppError{
 				Code: "PACKAGE_NOT_FOUND", Message: "请先上传该服务类型的安装包", Err: err,
 			}
 		}
 	case domain.ActionStart, domain.ActionStop:
-		if !env.Installed {
+		if !instance.Installed {
 			return domain.Operation{}, domain.ErrNotInstalled
 		}
 	case domain.ActionReset:
@@ -121,32 +121,32 @@ func (m *Manager) start(
 	}
 
 	m.mu.Lock()
-	if _, exists := m.active[environmentID]; exists {
+	if _, exists := m.active[serviceInstanceID]; exists {
 		m.mu.Unlock()
 		return domain.Operation{}, domain.ErrOperationInProgress
 	}
 	id := domain.NewID()
-	m.active[environmentID] = id
+	m.active[serviceInstanceID] = id
 	m.mu.Unlock()
 
 	logRelative := filepath.Join("operations", id+".jsonl")
 	op := domain.Operation{
-		ID: id, EnvironmentID: environmentID, Action: action,
+		ID: id, ServiceInstanceID: serviceInstanceID, Action: action,
 		Status: domain.OperationQueued, Stage: "queued",
 		LogPath: logRelative, CreatedAt: time.Now().UTC(),
 	}
-	op.OwnerID, op.EnvironmentName, op.EnvironmentIP, op.ServiceType = env.OwnerID, env.Name, env.IP, env.ServiceType
+	op.OwnerID, op.ServiceInstanceName, op.HostIP, op.ServiceType = instance.OwnerID, instance.Name, instance.Host.IP, instance.ServiceType
 	if auditEvent != nil {
 		op.RequestID = auditEvent.RequestID
 		op.ActorUserID, op.ActorUsername = auditEvent.ActorUserID, auditEvent.ActorUsername
 		op.OwnerUsername = auditEvent.OwnerUsername
 	}
 	if err := os.MkdirAll(filepath.Join(m.dataDir, "operations"), 0o750); err != nil {
-		m.release(environmentID)
+		m.release(serviceInstanceID)
 		return domain.Operation{}, err
 	}
 	if err := m.store.CreateOperation(ctx, op); err != nil {
-		m.release(environmentID)
+		m.release(serviceInstanceID)
 		return domain.Operation{}, err
 	}
 	if auditEvent != nil && m.audit != nil {
@@ -167,7 +167,7 @@ func (m *Manager) Wait() {
 }
 
 func (m *Manager) run(op domain.Operation) {
-	defer m.release(op.EnvironmentID)
+	defer m.release(op.ServiceInstanceID)
 	logger, err := newEventLogger(filepath.Join(m.dataDir, op.LogPath))
 	if err != nil {
 		m.finish(&op, domain.OperationFailed, "prepare", "LOG_CREATE_FAILED", err.Error(), nil)
@@ -188,12 +188,12 @@ func (m *Manager) run(op domain.Operation) {
 		Type: "state", Status: string(op.Status), Stage: op.Stage, Message: "操作开始",
 	})
 
-	env, err := m.store.GetEnvironment(m.ctx, op.EnvironmentID)
+	instance, err := m.store.GetServiceInstance(m.ctx, op.ServiceInstanceID)
 	if err != nil {
-		m.finishLogged(&op, logger, domain.OperationFailed, "prepare", "ENVIRONMENT_NOT_FOUND", err.Error(), nil)
+		m.finishLogged(&op, logger, domain.OperationFailed, "prepare", "SERVICE_INSTANCE_NOT_FOUND", err.Error(), nil)
 		return
 	}
-	password, err := m.cipher.Decrypt(env.SSHPasswordEnc)
+	password, err := m.cipher.Decrypt(instance.Host.SSHPasswordEnc)
 	if err != nil {
 		m.finishLogged(&op, logger, domain.OperationFailed, "prepare", "PASSWORD_DECRYPT_FAILED", err.Error(), nil)
 		return
@@ -206,21 +206,21 @@ func (m *Manager) run(op domain.Operation) {
 	case domain.ActionInstall:
 		m.stage(&op, logger, "package", "正在固定安装包版本")
 		pkg, packagePath, inspection, cleanup, snapshotErr :=
-			m.packages.SnapshotForOwner(m.ctx, env.OwnerID, env.ServiceType)
+			m.packages.SnapshotForOwner(m.ctx, instance.OwnerID, instance.ServiceType)
 		if snapshotErr != nil {
 			m.finishLogged(&op, logger, domain.OperationFailed, "package", "PACKAGE_INVALID", snapshotErr.Error(), nil)
 			return
 		}
 		defer cleanup()
-		config, configErr := m.store.GetServiceConfig(m.ctx, env.ID)
+		config, configErr := m.store.GetServiceConfig(m.ctx, instance.ID)
 		if errors.Is(configErr, domain.ErrNotFound) {
 			config = domain.ServiceConfig{
-				EnvironmentID: env.ID,
-				Content:       string(inspection.Config),
-				Format:        inspection.ConfigType,
-				Path:          archive.RelativeConfigPath(inspection),
-				Port:          inspection.Port,
-				Inherited:     true,
+				ServiceInstanceID: instance.ID,
+				Content:           string(inspection.Config),
+				Format:            inspection.ConfigType,
+				Path:              archive.RelativeConfigPath(inspection),
+				Port:              inspection.Port,
+				Inherited:         true,
 			}
 		} else if configErr != nil {
 			m.finishLogged(&op, logger, domain.OperationFailed, "package", "CONFIG_LOAD_FAILED", configErr.Error(), nil)
@@ -228,7 +228,7 @@ func (m *Manager) run(op domain.Operation) {
 		}
 		m.stage(&op, logger, "remote", "正在连接目标服务器")
 		fingerprint, exitCode, err = m.remote.Install(
-			m.ctx, env, password, packagePath, pkg.SHA256, config.Port,
+			m.ctx, instance, password, packagePath, pkg.SHA256, config.Port,
 			config.Path, []byte(config.Content),
 			inspection.HasInstall, inspection.RootPrefix != "", emit,
 		)
@@ -238,16 +238,16 @@ func (m *Manager) run(op domain.Operation) {
 				_, err = m.store.UpsertServiceConfig(m.ctx, config)
 			}
 			if err == nil {
-				err = m.store.MarkInstalled(m.ctx, env.ID, pkg.SHA256, config.Port)
+				err = m.store.MarkInstalled(m.ctx, instance.ID, pkg.SHA256, config.Port)
 			}
 			if err == nil {
 				// 架构采集为尽力而为：失败仅记日志，不影响安装结果。
-				if arch, detectErr := m.remote.DetectArch(m.ctx, env, password); detectErr != nil {
-					m.log.Warn("detect environment arch", "environment_id", env.ID, "error", detectErr)
-				} else if updateErr := m.store.UpdateEnvironmentArch(m.ctx, env.ID, arch); updateErr != nil {
-					m.log.Warn("update environment arch", "environment_id", env.ID, "error", updateErr)
+				if arch, detectErr := m.remote.DetectArch(m.ctx, instance, password); detectErr != nil {
+					m.log.Warn("detect host architecture", "service_instance_id", instance.ID, "host_id", instance.HostID, "error", detectErr)
+				} else if updateErr := m.store.UpdateHostArch(m.ctx, instance.HostID, arch); updateErr != nil {
+					m.log.Warn("update host architecture", "service_instance_id", instance.ID, "host_id", instance.HostID, "error", updateErr)
 				} else {
-					env.Arch = arch
+					instance.Host.Arch = arch
 				}
 			}
 		} else {
@@ -260,18 +260,18 @@ func (m *Manager) run(op domain.Operation) {
 				if port == 0 {
 					port = config.Port
 				}
-				_ = m.store.MarkInstalled(m.ctx, env.ID, sha, port)
+				_ = m.store.MarkInstalled(m.ctx, instance.ID, sha, port)
 				emit("system", "检测到远端已安装标记，已同步本地安装状态")
 			}
 		}
 	case domain.ActionStart:
 		m.stage(&op, logger, "script", "正在启动服务")
-		fingerprint, exitCode, err = m.remote.RunScript(m.ctx, env, password, "start.sh", emit)
+		fingerprint, exitCode, err = m.remote.RunScript(m.ctx, instance, password, "start.sh", emit)
 	case domain.ActionStop:
 		m.stage(&op, logger, "script", "正在停止服务")
-		fingerprint, exitCode, err = m.remote.RunScript(m.ctx, env, password, "stop.sh", emit)
+		fingerprint, exitCode, err = m.remote.RunScript(m.ctx, instance, password, "stop.sh", emit)
 	case domain.ActionReset:
-		lastAction, actionErr := m.store.LastSuccessfulAction(m.ctx, env.ID)
+		lastAction, actionErr := m.store.LastSuccessfulAction(m.ctx, instance.ID)
 		if actionErr != nil && !errors.Is(actionErr, domain.ErrNotFound) {
 			m.finishLogged(&op, logger, domain.OperationFailed, "prepare", "OPERATION_HISTORY_FAILED", actionErr.Error(), nil)
 			return
@@ -283,14 +283,14 @@ func (m *Manager) run(op domain.Operation) {
 			m.stage(&op, logger, "reset", "服务最近已成功停止，跳过 stop.sh")
 		}
 		fingerprint, exitCode, err = m.remote.ResetInstallation(
-			m.ctx, env, password, runStop, emit,
+			m.ctx, instance, password, runStop, emit,
 		)
 		if err == nil {
-			err = m.store.MarkUninstalled(m.ctx, env.ID)
+			err = m.store.MarkUninstalled(m.ctx, instance.ID)
 		}
 	}
-	if fingerprint != "" && (env.HostKeyFingerprint == "" || env.HostKeyFingerprint == fingerprint) {
-		_ = m.store.RecordValidation(m.ctx, env.ID, fingerprint, env.Arch)
+	if fingerprint != "" && (instance.Host.HostKeyFingerprint == "" || instance.Host.HostKeyFingerprint == fingerprint) {
+		_ = m.store.RecordHostValidation(m.ctx, instance.HostID, fingerprint, instance.Host.Arch)
 	}
 	if err != nil {
 		exit := exitCode
@@ -376,9 +376,9 @@ func (m *Manager) ReadEvents(op domain.Operation, after int64) ([]domain.Operati
 	return events, scanner.Err()
 }
 
-func (m *Manager) release(environmentID string) {
+func (m *Manager) release(serviceInstanceID string) {
 	m.mu.Lock()
-	delete(m.active, environmentID)
+	delete(m.active, serviceInstanceID)
 	m.mu.Unlock()
 }
 

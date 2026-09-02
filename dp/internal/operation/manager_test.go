@@ -26,9 +26,8 @@ func TestManagerWaitsForCanceledOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		OwnerID: domain.InitialAdminID, Name: "test", IP: "192.0.2.40", SSHUser: "user", SSHPort: 22,
-		SSHPasswordEnc: encrypted, InstallDir: "/opt/demo", ServiceType: "demo", Installed: true,
+	env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{
+		OwnerID: domain.InitialAdminID, Name: "test", Host: domain.Host{IP: "192.0.2.40", SSHUser: "user", SSHPort: 22, SSHPasswordEnc: encrypted}, InstallDir: "/opt/demo", ServiceType: "demo", Installed: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +42,7 @@ func TestManagerWaitsForCanceledOperation(t *testing.T) {
 	cancel()
 	manager.Wait()
 	if manager.Busy(env.ID) {
-		t.Fatal("environment remains busy after Wait")
+		t.Fatal("serviceInstance remains busy after Wait")
 	}
 	stored, err := db.GetOperation(ctx, op.ID)
 	if err != nil {

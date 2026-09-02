@@ -39,13 +39,13 @@ func TestCommunicationLifecycleAndIsolation(t *testing.T) {
 	if err := db.UpsertPackage(ctx, domain.Package{OwnerID: user.ID, ServiceType: "demo", OriginalFilename: "demo.tar.gz", StoragePath: "demo", SHA256: "sha", SizeBytes: 1, ConfigPort: 8080, UploadedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	environment, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: user.ID, Name: "production", IP: "192.0.2.10", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
+	serviceInstance, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{OwnerID: user.ID, Name: "production", Host: domain.Host{IP: "192.0.2.10", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc"}, InstallDir: "/opt/demo", ServiceType: "demo"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := NewCommunicationService(db, nil)
 	thread, err := service.Create(ctx, admin, domain.CommunicationCreateInput{TargetUserID: user.ID, Title: "检查部署",
-		Content: "请确认部署状态", Resources: []domain.CommunicationResourceInput{{ResourceType: "package", ResourceKey: "demo"}, {ResourceType: "environment", ResourceID: environment.ID}, {ResourceType: "service", ResourceID: environment.ID}}})
+		Content: "请确认部署状态", Resources: []domain.CommunicationResourceInput{{ResourceType: "package", ResourceKey: "demo"}, {ResourceType: "host", ResourceID: serviceInstance.HostID}, {ResourceType: "service", ResourceID: serviceInstance.ID}}})
 	if err != nil || len(thread.Resources) != 3 || len(thread.Messages) != 1 {
 		t.Fatalf("thread=%+v err=%v", thread, err)
 	}
@@ -106,7 +106,7 @@ func TestCommunicationLifecycleAndIsolation(t *testing.T) {
 	if summary.Unread != 1 {
 		t.Fatalf("enabled admin did not receive new receipt, unread=%d", summary.Unread)
 	}
-	if _, err := db.DeleteEnvironment(ctx, environment.ID); err != nil {
+	if _, err := db.DeleteServiceInstance(ctx, serviceInstance.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.DeletePackageByOwner(ctx, user.ID, "demo"); err != nil {
@@ -117,8 +117,11 @@ func TestCommunicationLifecycleAndIsolation(t *testing.T) {
 		t.Fatalf("resource snapshots missing after deletion: thread=%+v err=%v", afterDelete, err)
 	}
 	for _, resource := range afterDelete.Resources {
-		if resource.Available {
-			t.Fatalf("deleted resource still available: %+v", resource)
+		if resource.ResourceType == "host" && !resource.Available {
+			t.Fatalf("host should remain available after deleting a service instance: %+v", resource)
+		}
+		if resource.ResourceType != "host" && resource.Available {
+			t.Fatalf("deleted package or service still available: %+v", resource)
 		}
 	}
 }
@@ -130,13 +133,13 @@ func TestCommunicationRejectsOrdinaryCreationAndCrossOwnerResource(t *testing.T)
 	first, _ := db.CreateUser(ctx, testutil.User(t, "first-user", access.RoleOperator, true))
 	second, _ := db.CreateUser(ctx, testutil.User(t, "second-user", access.RoleOperator, true))
 	disabled, _ := db.CreateUser(ctx, testutil.User(t, "disabled-user", access.RoleOperator, false))
-	environment, _ := db.CreateEnvironment(ctx, domain.Environment{OwnerID: second.ID, Name: "other", IP: "192.0.2.20", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/x", ServiceType: "demo"})
+	serviceInstance, _ := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{OwnerID: second.ID, Name: "other", Host: domain.Host{IP: "192.0.2.20", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc"}, InstallDir: "/opt/x", ServiceType: "demo"})
 	service := NewCommunicationService(db, nil)
 	input := domain.CommunicationCreateInput{TargetUserID: first.ID, Title: "标题", Content: "内容"}
 	if _, err := service.Create(ctx, first, input); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("ordinary creation error=%v", err)
 	}
-	input.Resources = []domain.CommunicationResourceInput{{ResourceType: "environment", ResourceID: environment.ID}}
+	input.Resources = []domain.CommunicationResourceInput{{ResourceType: "host", ResourceID: serviceInstance.HostID}}
 	if _, err := service.Create(ctx, admin, input); communicationErrorCode(err) != "COMMUNICATION_RESOURCE_INVALID" {
 		t.Fatalf("cross-owner resource error=%v", err)
 	}

@@ -1,6 +1,13 @@
 # DP
 
-DP（Deployment Platform，部署管理平台）是面向内部环境的 Web 管理平台，用于按账号和服务类型管理安装包、目标服务器与服务配置，通过 SSH/SFTP 完成远程部署和生命周期操作，并通过目标服务的 HTTP `/healthz` 接口持续观测运行状态。
+DP（Deployment Platform，部署管理平台）是面向内网服务器的 Web 管理平台，用于管理主机、安装包、服务实例和模型，通过 SSH/SFTP 完成远程部署与生命周期操作，并通过目标服务的 HTTP `/healthz` 接口持续观测运行状态。
+
+核心资源采用明确的两层模型：
+
+- **主机**：一台 SSH 目标机及其连接凭据，同一台主机只注册一次；
+- **服务实例**：某个服务类型在某台主机上的一次部署；同一主机可以创建多个不同或同类服务实例。
+
+使用顺序：上传服务安装包 → 注册并校验主机 → 在服务管理中选择主机和安装包创建实例 → 安装、配置、启动和查看日志。模型直接关联主机，不依赖服务实例。
 
 安装包配置支持 `config/config.json`、`config/config.yaml`、`config/application.yml` 和 `config/application.yaml`，每个安装包必须且只能使用其中一种。
 安装包可以带一个公共顶层目录（例如 `dist/`）；配置端口支持顶层 `port` 或 `server.port`。
@@ -8,7 +15,7 @@ DP（Deployment Platform，部署管理平台）是面向内部环境的 Web 管
 上传安装包时可选择已有服务类型或创建自定义类型；每次上传形成不可变版本，可查看引用、切换当前版本并按保留策略清理安全的旧版本。
 服务实例配置在保存前展示差异，每次保存和回滚都形成可追溯的不可变修订。
 系统通过 Core RBAC 管理用户、角色、权限和 `own/all` 数据范围；授权默认拒绝并由后端统一执行。具有全局权限的角色可以治理全部账号资源，受限角色只能访问被授予范围内的数据。
-模型管理支持选择已有环境并复用 SSH 凭据，将超大 `.tar.gz` 按分片直接中转到目标机，支持断点续传、
+模型管理支持选择已有主机并复用 SSH 凭据，将超大 `.tar.gz` 按分片直接中转到目标机，支持断点续传、
 安全校验解压、任务日志和带归属标记校验的删除；DP 数据盘不保存完整模型副本。
 
 需求与设计：
@@ -16,13 +23,12 @@ DP（Deployment Platform，部署管理平台）是面向内部环境的 Web 管
 - [产品需求](docs/prd.md)
 - [架构设计](docs/architecture.md)
 - [模型管理需求与设计](docs/model-management.md)
-- [管理员产品优化路线图](docs/admin-product-optimization.md)
 - [RBAC 与 PostgreSQL 重构设计](docs/rbac-postgresql-refactor.md)
 - [OpenAPI 契约](api/openapi.yaml)
 
 ### 文档维护约定
 
-所有新增功能和会改变用户行为的修改必须先更新相关文档，再修改代码；实现完成后还需校准文档与实际行为，并将文档和代码放在同一提交中。管理员优化项还必须在同一提交中更新[管理员产品优化路线图](docs/admin-product-optimization.md)的状态。路线图全部完成并将有效规则沉淀到正式文档后，应删除路线图及其引用；本条文档先行约定继续长期有效。
+所有新增功能和会改变用户行为的修改必须同步更新相关文档；实现完成后需校准文档、OpenAPI 契约与实际行为，并将文档和代码放在同一提交中。
 
 ## 本地启动
 
@@ -96,7 +102,7 @@ Compose 默认将 DP 发布到宿主机 `0.0.0.0:30199`，可通过 `DP_HTTP_POR
 
 脚本首次运行会创建 `.env`、生成独立的 32 字节主密钥和随机初始管理员密码、创建 `data/`，随后通过
 Docker Compose 构建并启动服务。访问 `http://<服务器IP>:30199`。
-本版本不兼容旧 SQLite 配置；已有 `.env` 缺少 PostgreSQL 凭据时脚本会拒绝启动，需按
+本版本采用全新 PostgreSQL 数据结构，不提供旧资源模型或 SQLite 数据的兼容迁移；已有 `.env` 缺少 PostgreSQL 凭据时脚本会拒绝启动，需按
 `.env.example` 创建新配置。首次登录后应立即修改随机初始管理员密码。
 
 常用命令：
@@ -162,4 +168,4 @@ make package
 
 完整环境变量见 [.env.example](.env.example)。
 
-版本与治理相关参数：`DP_PACKAGE_VERSION_RETENTION` 控制每个服务类型的版本保留目标数量，`DP_OPERATION_RETENTION_DAYS` 控制终态操作及 JSONL 日志保留期，`DP_NOTIFICATION_RETENTION_DAYS` 控制已处理通知保留期，`DP_STALE_ACCOUNT_DAYS` 控制长期未登录账号提醒阈值（默认 90 天）。被环境引用的安装包版本、未处理通知和运行中操作不会被自动清理。
+版本与治理相关参数：`DP_PACKAGE_VERSION_RETENTION` 控制每个服务类型的版本保留目标数量，`DP_OPERATION_RETENTION_DAYS` 控制终态操作及 JSONL 日志保留期，`DP_NOTIFICATION_RETENTION_DAYS` 控制已处理通知保留期，`DP_STALE_ACCOUNT_DAYS` 控制长期未登录账号提醒阈值（默认 90 天）。被服务实例引用的安装包版本、未处理通知和运行中操作不会被自动清理。

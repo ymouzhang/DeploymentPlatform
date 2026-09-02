@@ -17,18 +17,20 @@ export type Permission =
   | 'package.read'
   | 'package.write'
   | 'package.delete'
-  | 'environment.read'
-  | 'environment.write'
-  | 'environment.delete'
-  | 'environment.validate'
-  | 'environment.import'
-  | 'environment.export'
+  | 'host.read'
+  | 'host.write'
+  | 'host.delete'
+  | 'host.validate'
+  | 'host.import'
+  | 'host.export'
   | 'tag.read'
   | 'tag.write'
   | 'model.read'
   | 'model.upload'
   | 'model.delete'
   | 'service.read'
+  | 'service.write'
+  | 'service.delete'
   | 'service.config.read'
   | 'service.config.write'
   | 'service.install'
@@ -106,7 +108,7 @@ export interface ServiceTypeInfo {
   package_format: string
 }
 
-export interface Environment {
+export interface Host {
   id: string
   owner_id: string
   owner_username?: string
@@ -115,6 +117,29 @@ export interface Environment {
   arch: string
   ssh_user: string
   ssh_port: number
+  note: string
+  last_validation_at?: string
+  created_at: string
+  updated_at: string
+  has_password: boolean
+}
+
+export interface HostInput {
+  name: string
+  ip: string
+  ssh_user: string
+  ssh_port: number
+  ssh_password?: string
+  note?: string
+}
+
+export interface ServiceInstance {
+  id: string
+  owner_id: string
+  owner_username?: string
+  host_id: string
+  host: Host
+  name: string
   install_dir: string
   service_type: ServiceType
   note: string
@@ -122,19 +147,14 @@ export interface Environment {
   installed_at?: string
   installed_package_sha256?: string
   health_port?: number
-  last_validation_at?: string
   created_at: string
   updated_at: string
-  has_password: boolean
   tags?: ResourceTagRef[]
 }
 
-export interface EnvironmentInput {
+export interface ServiceInstanceInput {
+  host_id: string
   name: string
-  ip: string
-  ssh_user: string
-  ssh_port: number
-  ssh_password?: string
   install_dir: string
   service_type: ServiceType
   note?: string
@@ -151,7 +171,7 @@ export interface ResourceTag extends ResourceTagRef {
   id: string
   owner_id: string
   owner_username?: string
-  environment_count: number
+	service_instance_count: number
 	model_count: number
   created_at: string
   updated_at: string
@@ -179,7 +199,7 @@ export interface PackageInfo {
   service_type: ServiceType
   current_version_id: string
   version_count: number
-  referenced_environment_count: number
+  referenced_service_instance_count: number
   original_filename: string
   sha256: string
   size_bytes: number
@@ -205,7 +225,7 @@ export interface PackageVersion {
   uploaded_by_username: string
   uploaded_at: string
   current: boolean
-  referenced_environment_count: number
+  referenced_service_instance_count: number
 }
 
 export interface HealthResult {
@@ -221,19 +241,20 @@ export interface OperationSummary {
 }
 
 export interface Service {
-  environment: Environment
+  service_instance: ServiceInstance
   health: HealthResult
-  service_port?: number
+  api_port?: number
   busy: boolean
   last_operation?: OperationSummary
 }
 
 export interface ServiceConfig {
-  environment_id: string
+  service_instance_id: string
   content: string
   format: 'json' | 'yaml'
   path: string
   port: number
+  api_port?: number
   inherited: boolean
   current_revision_id?: string
   updated_at?: string
@@ -255,7 +276,7 @@ export interface ServiceConfigPreview {
 
 export interface ServiceConfigRevision {
   id: string
-  environment_id: string
+  service_instance_id: string
   content?: string
   format: 'json' | 'yaml'
   path: string
@@ -278,14 +299,14 @@ export type OperationStatus =
 
 export interface Operation {
   id: string
-  environment_id: string
+  service_instance_id: string
   request_id?: string
   actor_user_id?: string
   actor_username?: string
   owner_id?: string
   owner_username?: string
-  environment_name?: string
-  environment_ip?: string
+  service_instance_name?: string
+  host_ip?: string
   service_type?: string
   action: 'install' | 'start' | 'stop' | 'reset'
   status: OperationStatus
@@ -322,9 +343,9 @@ export interface Model {
   id: string
   owner_id: string
   owner_username?: string
-  environment_id: string
-  environment_name: string
-  environment_ip: string
+  host_id: string
+  host_name: string
+  host_ip: string
   name: string
   source: 'offline' | 'modelscope' | 'huggingface'
   target_dir: string
@@ -352,7 +373,9 @@ export interface ModelUploadCreated {
 
 export interface UserDetail extends User {
   package_count: number
-  environment_count: number
+  host_count: number
+  service_instance_count: number
+  model_count: number
   installed_service_count: number
   recent_operation_count: number
   active_session_count: number
@@ -406,15 +429,15 @@ export interface CommunicationMessage {
 
 export interface CommunicationResource {
   id: string
-  resource_type: 'package' | 'environment' | 'service'
+  resource_type: 'package' | 'host' | 'service'
   resource_id?: string
   resource_key?: string
   owner_id?: string
   owner_username: string
   resource_label: string
   service_type: string
-  environment_name: string
-  environment_ip: string
+  host_name: string
+  host_ip: string
   available: boolean
   link?: string
 }
@@ -442,7 +465,7 @@ export interface Communication {
 }
 
 export interface CommunicationResourceInput {
-  resource_type: 'package' | 'environment' | 'service'
+  resource_type: 'package' | 'host' | 'service'
   resource_id?: string
   resource_key?: string
 }
@@ -461,14 +484,15 @@ export interface DashboardMetrics {
   enabled_users: number
   disabled_users: number
   packages: number
-  environments: number
+	hosts: number
+	service_instances: number
   installed_services: number
   running_services: number
   active_operations: number
   failed_operations_24h: number
   login_failures_24h: number
-  unvalidated_environments: number
-  stale_validation_environments: number
+	unvalidated_hosts: number
+	stale_validation_hosts: number
   unhealthy_installed_services: number
   high_risk_audits_24h: number
   unread_notifications: number
@@ -503,7 +527,7 @@ export interface OperationEvent {
 export interface AuditEvent {
   id: string
   occurred_at: string
-  category: 'authentication' | 'authorization' | 'account' | 'package' | 'environment' | 'service' | 'model' | 'communication' | 'audit'
+  category: 'authentication' | 'authorization' | 'account' | 'package' | 'host' | 'service' | 'model' | 'communication' | 'audit'
   action: string
   outcome: 'success' | 'failure' | 'denied'
   risk_level: 'normal' | 'high'

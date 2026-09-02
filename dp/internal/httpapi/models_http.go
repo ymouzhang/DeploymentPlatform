@@ -57,7 +57,7 @@ func (a *API) createModelUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setAuditTarget(r, owner, "model", created.Model.ID, created.Model.Name, map[string]any{
-		"environment_id": created.Model.EnvironmentID, "target_dir": created.Model.TargetDir,
+		"host_id": created.Model.HostID, "target_dir": created.Model.TargetDir,
 		"size_bytes": created.Model.SizeBytes, "source": created.Model.Source,
 	})
 	writeData(w, http.StatusCreated, created)

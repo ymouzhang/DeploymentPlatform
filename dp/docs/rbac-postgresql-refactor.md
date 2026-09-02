@@ -67,8 +67,8 @@
 
 | 资源 | `own` 判定 |
 | --- | --- |
-| package、environment、tag、model、service | `owner_id = current_user.id` |
-| service config、service log | 通过 environment 的 `owner_id` |
+| package、host、service instance、tag、model、service | `owner_id = current_user.id` |
+| service config、service log | 通过 service instance 的 `owner_id` |
 | operation | `owner_id = current_user.id` 或 `actor_user_id = current_user.id` |
 | communication | 当前用户是发起人、目标人或消息参与人 |
 | session | `user_id = current_user.id` |
@@ -92,18 +92,20 @@
 | package | `package.read` | own/all | 查看安装包和版本 |
 | package | `package.write` | own/all | 上传、更新、切换版本和备注 |
 | package | `package.delete` | own/all | 删除版本或安装包 |
-| environment | `environment.read` | own/all | 查看环境和 SSH 信息摘要 |
-| environment | `environment.write` | own/all | 新建和修改环境 |
-| environment | `environment.delete` | own/all | 删除环境 |
-| environment | `environment.validate` | own/all | 执行 SSH 校验 |
-| environment | `environment.import` | own/all | 导入环境 |
-| environment | `environment.export` | own/all | 导出环境 |
+| host | `host.read` | own/all | 查看主机和 SSH 信息摘要 |
+| host | `host.write` | own/all | 新建和修改主机 |
+| host | `host.delete` | own/all | 删除未被引用的主机 |
+| host | `host.validate` | own/all | 执行 SSH 校验 |
+| host | `host.import` | own/all | 导入主机 |
+| host | `host.export` | own/all | 导出主机 |
 | tag | `tag.read` | own/all | 查看资源标签 |
 | tag | `tag.write` | own/all | 创建、修改、删除和绑定标签 |
 | model | `model.read` | own/all | 查看模型及任务 |
 | model | `model.upload` | own/all | 上传、续传、完成和重试模型 |
 | model | `model.delete` | own/all | 删除模型或取消上传 |
 | service | `service.read` | own/all | 查看服务状态 |
+| service | `service.write` | own/all | 创建和修改服务实例 |
+| service | `service.delete` | own/all | 删除服务实例 |
 | service | `service.config.read` | own/all | 查看配置、模板和历史 |
 | service | `service.config.write` | own/all | 保存和回滚配置 |
 | service | `service.install` | own/all | 安装服务 |
@@ -130,7 +132,7 @@
 | --- | --- | --- |
 | `super_admin` | 系统所有者 | 全部权限，范围均为 `all` |
 | `platform_admin` | 平台日常管理 | 除修改系统角色、授予 `super_admin` 外的管理及业务权限，范围为 `all` |
-| `operator` | 业务运维 | 自有安装包、环境、标签、模型、服务和操作的读写权限；通讯仅查看和回复本人事项 |
+| `operator` | 业务运维 | 自有安装包、主机、服务实例、标签、模型和操作的读写权限；通讯仅查看和回复本人事项 |
 | `viewer` | 只读用户 | 自有业务资源、操作和通讯的只读权限 |
 
 约束：
@@ -216,7 +218,7 @@ advisory lock 串行化超级管理员不变量检查。
 `null`。本次不兼容重构不再输出或接收旧的单值
 `role`、`sender_role`、`actor_role`，也不提供字段别名或数据转换入口。
 
-同一原则适用于外围状态：环境导入只接受 schema v2，浏览器不读取旧模型上传 localStorage key，启动脚本
+同一原则适用于外围状态：主机导入只接受 schema v1，浏览器不读取旧模型上传 localStorage key，启动脚本
 不补写旧 `.env`。缺少当前 PostgreSQL、管理员或主密钥字段时直接拒绝并要求重新初始化配置。
 
 ## 4. PostgreSQL 数据设计
@@ -326,7 +328,7 @@ internal/
 
 - `httpapi` 不直接拼业务 SQL，不判断固定角色名；
 - `access` 不依赖 HTTP 和 PostgreSQL，只处理权限、scope 和资源归属；
-- `repository/postgres` 按 `auth.go`、`rbac.go`、`environment.go` 等领域文件拆分，不为每张表创建空洞仓储接口；
+- `repository/postgres` 按 `auth.go`、`rbac.go`、`hosts.go`、`service_instances.go` 等领域文件拆分，不为每张表创建空洞仓储接口；
 - 应用服务只为真实外部边界定义小接口，接口由消费方声明；
 - 构造函数使用字段名初始化，错误只处理一次并使用 `%w` 添加简短上下文；
 - 生产路径不 panic，不使用可变全局状态，不启动无法收敛的 fire-and-forget goroutine；

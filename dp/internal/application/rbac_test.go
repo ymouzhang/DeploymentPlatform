@@ -12,21 +12,21 @@ import (
 func TestRoleServiceRejectsGrantEscalation(t *testing.T) {
 	repository := &roleRepositoryStub{
 		permissions: []access.Definition{
-			{Key: access.EnvironmentRead, Scoped: true},
+			{Key: access.HostRead, Scoped: true},
 		},
 	}
 	service := NewRoleService(repository)
 	actor := access.Subject{
 		UserID: "actor",
 		Grants: access.Grants{
-			access.RoleCreate:      access.ScopeAll,
-			access.EnvironmentRead: access.ScopeOwn,
+			access.RoleCreate: access.ScopeAll,
+			access.HostRead:   access.ScopeOwn,
 		},
 	}
 
 	_, err := service.CreateRole(context.Background(), actor, RoleCreateInput{
 		Key: "cross_owner_reader", Name: "跨账号只读",
-		Grants: []access.Grant{{Permission: access.EnvironmentRead, Scope: access.ScopeAll}},
+		Grants: []access.Grant{{Permission: access.HostRead, Scope: access.ScopeAll}},
 	})
 	assertAppErrorCode(t, err, "GRANT_FORBIDDEN")
 	if repository.created {

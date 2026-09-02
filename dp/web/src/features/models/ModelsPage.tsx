@@ -36,9 +36,9 @@ export function ModelsPage() {
     queryKey: ['models', ownerId], queryFn: () => api.listModels(ownerId),
     refetchInterval: (query) => query.state.data?.some((item) => ['uploading', 'deploying', 'deleting'].includes(item.status)) ? 2000 : false,
   })
-  const environmentsQuery = useQuery({
-    queryKey: ['environments', 'model-upload', uploadOwner],
-    queryFn: () => api.listEnvironments(modelUploadAll ? uploadOwner : undefined),
+  const hostsQuery = useQuery({
+    queryKey: ['hosts', 'model-upload', uploadOwner],
+    queryFn: () => api.listHosts(modelUploadAll ? uploadOwner : undefined),
   })
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export function ModelsPage() {
     }
     if (pending) {
       setUploadOwner(pending.owner_id ?? user.id)
-      form.setFieldsValue({ name: pending.name, environment_id: pending.environment_id, target_dir: pending.target_dir })
+      form.setFieldsValue({ name: pending.name, host_id: pending.host_id, target_dir: pending.target_dir })
     } else {
       setUploadOwner(modelUploadAll ? (ownerId ?? user.id) : user.id)
       form.setFieldsValue({ target_dir: '/opt/models/model-name' })
@@ -97,7 +97,7 @@ export function ModelsPage() {
   const columns = useMemo<ColumnsType<Model>>(() => [
     { title: '模型', dataIndex: 'name', width: 180, render: (value, item) => <Space direction="vertical" size={0}><Typography.Text strong>{value}</Typography.Text><Typography.Text type="secondary" ellipsis style={{ maxWidth: 210 }}>{item.original_filename}</Typography.Text></Space> },
     ...(modelReadAll ? [{ title: '所属账号', dataIndex: 'owner_username', width: 120 }] : []),
-    { title: '目标环境', width: 180, render: (_, item) => <Space direction="vertical" size={0}><span>{item.environment_name}</span><Typography.Text type="secondary">{item.environment_ip}</Typography.Text></Space> },
+    { title: '目标主机', width: 180, render: (_, item) => <Space direction="vertical" size={0}><span>{item.host_name}</span><Typography.Text type="secondary">{item.host_ip}</Typography.Text></Space> },
     { title: '目标目录', dataIndex: 'target_dir', ellipsis: true, width: 260 },
     { title: '大小', width: 120, render: (_, item) => item.expanded_size_bytes ? `${bytes(item.expanded_size_bytes)} / 包 ${bytes(item.size_bytes)}` : bytes(item.size_bytes) },
     { title: '状态', width: 150, render: (_, item) => <Space direction="vertical" size={2}><Tag color={statusLabels[item.status].color}>{statusLabels[item.status].text}</Tag>{item.latest_task && ['deploying','deleting'].includes(item.status) && <Progress size="small" percent={item.latest_task.progress} showInfo={false} />}</Space> },
@@ -109,19 +109,19 @@ export function ModelsPage() {
   ], [can, message, modelReadAll, queryClient])
 	const visibleModels = (modelsQuery.data ?? []).filter((item) => {
 		const value = keyword.trim().toLowerCase()
-		return !value || [item.name, item.environment_name, item.environment_ip, item.target_dir, item.original_filename].some((field) => field.toLowerCase().includes(value))
+		return !value || [item.name, item.host_name, item.host_ip, item.target_dir, item.original_filename].some((field) => field.toLowerCase().includes(value))
 	})
 
   return <div className="page">
-    <div className="page-heading"><div><Typography.Title level={2}>模型管理</Typography.Title><Typography.Paragraph type="secondary">将大模型包分片直传目标环境，DP 不保存完整模型文件。</Typography.Paragraph></div>{can('model.upload') && <Button type="primary" icon={<CloudUploadOutlined />} onClick={openUpload}>上传模型</Button>}</div>
+    <div className="page-heading"><div><Typography.Title level={2}>模型管理</Typography.Title><Typography.Paragraph type="secondary">将大模型包分片直传目标主机，DP 不保存完整模型文件。</Typography.Paragraph></div>{can('model.upload') && <Button type="primary" icon={<CloudUploadOutlined />} onClick={openUpload}>上传模型</Button>}</div>
     {pending && <Alert showIcon type={activity?.status === 'failed' ? 'error' : 'warning'} message={`${activity?.status === 'failed' ? '后台上传失败' : '存在未完成上传'}：${pending.name}`} description={activity?.error ?? (['uploading','pausing'].includes(activity?.status ?? '') ? '上传依赖当前浏览器。可以关闭弹窗并切换 DP 页面，但请勿刷新、关闭标签页或退出浏览器。' : '刷新或关闭浏览器后，需要重新选择同一个本地文件，上传会从目标机已经保存的位置继续。')} action={!['uploading','pausing'].includes(activity?.status ?? '') ? <Button size="small" onClick={openUpload}>继续上传</Button> : undefined} />}
-	<Card><Input.Search allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索模型、环境、IP 或目标目录" style={{ maxWidth: 420, marginBottom: 16 }} /><Table<Model> rowKey="id" loading={modelsQuery.isLoading} dataSource={visibleModels} columns={columns} scroll={{ x: 1200 }} pagination={{ pageSize: 20, showSizeChanger: true }} /></Card>
+	<Card><Input.Search allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索模型、主机、IP 或目标目录" style={{ maxWidth: 420, marginBottom: 16 }} /><Table<Model> rowKey="id" loading={modelsQuery.isLoading} dataSource={visibleModels} columns={columns} scroll={{ x: 1200 }} pagination={{ pageSize: 20, showSizeChanger: true }} /></Card>
     <Modal title={pending ? '继续上传模型' : '上传离线模型'} open={open} onCancel={() => setOpen(false)} footer={<Space>{pending && <Button danger onClick={() => void cancelPending()}>取消会话</Button>}<Button type="primary" onClick={() => void begin()}>{pending ? '继续后台上传' : '开始后台上传'}</Button></Space>} destroyOnClose={false}>
       <Alert type="warning" showIcon message="模型将直传目标机；可切换 DP 页面，上传期间请勿刷新、退出或关闭浏览器。目标机需预留压缩包、解压目录和安全余量。" style={{ marginBottom: 16 }} />
       <Form form={form} layout="vertical">
-        {modelUploadAll && <Form.Item label="所属账号"><Select value={uploadOwner} options={users.filter((item) => item.enabled).map((item) => ({value:item.id,label:item.username}))} onChange={(value) => { setUploadOwner(value); form.setFieldValue('environment_id', undefined) }} /></Form.Item>}
+        {modelUploadAll && <Form.Item label="所属账号"><Select value={uploadOwner} options={users.filter((item) => item.enabled).map((item) => ({value:item.id,label:item.username}))} onChange={(value) => { setUploadOwner(value); form.setFieldValue('host_id', undefined) }} /></Form.Item>}
         <Form.Item name="name" label="模型名称" rules={[{required:true,max:128}]}><Input /></Form.Item>
-		<Form.Item name="environment_id" label="目标环境" extra="仅展示已保存 SSH 凭据并完成主机指纹校验的环境" rules={[{required:true,message:'请选择目标环境'}]}><Select showSearch optionFilterProp="label" options={(environmentsQuery.data ?? []).filter((env) => env.has_password && env.last_validation_at).map((env) => ({value:env.id,label:`${env.name} · ${env.ip}`}))} /></Form.Item>
+		<Form.Item name="host_id" label="目标主机" extra="仅展示已保存 SSH 凭据并完成主机指纹校验的主机" rules={[{required:true,message:'请选择目标主机'}]}><Select showSearch optionFilterProp="label" options={(hostsQuery.data ?? []).filter((host) => host.has_password && host.last_validation_at).map((host) => ({value:host.id,label:`${host.name} · ${host.ip}`}))} /></Form.Item>
         <Form.Item name="target_dir" label="目标绝对目录" rules={[{required:true,pattern:/^\//,message:'请输入绝对目录'}]}><Input placeholder="/opt/models/Qwen3" /></Form.Item>
         <Form.Item label="模型压缩包" required><Upload beforeUpload={() => false} accept=".tar.gz,application/gzip" maxCount={1} fileList={fileList} onChange={({fileList}) => setFileList(fileList.slice(-1))}><Button>选择 .tar.gz 文件</Button></Upload></Form.Item>
       </Form>

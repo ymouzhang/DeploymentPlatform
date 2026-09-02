@@ -36,7 +36,8 @@ export function CommunicationsPage() {
   })
   const detailQuery = useQuery({ queryKey: communicationKeys.detail(selectedID), queryFn: () => api.getCommunication(selectedID!), enabled: Boolean(selectedID), refetchInterval: 30_000 })
   const packagesQuery = useQuery({ queryKey: ['communication-packages', targetUserID], queryFn: () => api.listPackages(targetUserID), enabled: canCreate && Boolean(targetUserID) })
-  const environmentsQuery = useQuery({ queryKey: ['communication-environments', targetUserID], queryFn: () => api.listEnvironments(targetUserID), enabled: canCreate && Boolean(targetUserID) })
+  const hostsQuery = useQuery({ queryKey: ['communication-hosts', targetUserID], queryFn: () => api.listHosts(targetUserID), enabled: canCreate && Boolean(targetUserID) })
+  const servicesQuery = useQuery({ queryKey: ['communication-services', targetUserID], queryFn: () => api.listServices(targetUserID), enabled: canCreate && Boolean(targetUserID) })
 
   const refresh = () => {
     void client.invalidateQueries({ queryKey: communicationKeys.lists })
@@ -63,9 +64,9 @@ export function CommunicationsPage() {
 
   const resourceOptions = useMemo(() => [
     { label: '安装包', options: (packagesQuery.data ?? []).map((item) => ({ value: `package:${item.service_type}`, label: item.service_type })) },
-    { label: '环境', options: (environmentsQuery.data ?? []).map((item) => ({ value: `environment:${item.id}`, label: `${item.name} · ${item.ip}` })) },
-    { label: '服务', options: (environmentsQuery.data ?? []).map((item) => ({ value: `service:${item.id}`, label: `${item.service_type} · ${item.name}` })) },
-  ], [environmentsQuery.data, packagesQuery.data])
+    { label: '主机', options: (hostsQuery.data ?? []).map((item) => ({ value: `host:${item.id}`, label: `${item.name} · ${item.ip}` })) },
+    { label: '服务', options: (servicesQuery.data ?? []).map(({ service_instance: item }) => ({ value: `service:${item.id}`, label: `${item.service_type} · ${item.name}` })) },
+  ], [hostsQuery.data, servicesQuery.data, packagesQuery.data])
   const targetUsers = auth.users.filter((user) => user.enabled && user.permissions['communication.read'] === 'own')
   const detail = detailQuery.data
   const rows = listQuery.data?.pages.flatMap((page) => page.items) ?? []
@@ -83,7 +84,7 @@ export function CommunicationsPage() {
       </div>}
     </Drawer>
 
-    <Modal width={680} title="新建协作事项" open={createOpen} onCancel={() => { setCreateOpen(false); createForm.resetFields() }} onOk={() => createForm.validateFields().then((values) => create.mutate({ target_user_id: values.target_user_id, title: values.title, content: values.content, resources: decodeResources(values.resources ?? []) }))} confirmLoading={create.isPending} okText="发送给用户"><Form form={createForm} layout="vertical"><Form.Item name="target_user_id" label="目标用户" rules={[{ required: true, message: '请选择目标用户' }]}><Select showSearch optionFilterProp="label" options={targetUsers.map((user) => ({ value: user.id, label: user.username }))} onChange={() => createForm.setFieldValue('resources', [])} /></Form.Item><Form.Item name="title" label="事项标题" rules={[{ required: true, whitespace: true }, { max: 100 }]}><Input maxLength={100} showCount /></Form.Item><Form.Item name="content" label="消息内容" rules={[{ required: true, whitespace: true }, { max: 5000 }]}><Input.TextArea rows={5} maxLength={5000} showCount /></Form.Item><Form.Item name="resources" label="关联资源" extra="仅展示目标用户所属的资源；关联不会自动执行任何运维操作。"><Select mode="multiple" allowClear maxCount={50} disabled={!targetUserID} loading={packagesQuery.isLoading || environmentsQuery.isLoading} options={resourceOptions} placeholder={targetUserID ? '选择安装包、环境或服务（可多选）' : '请先选择目标用户'} /></Form.Item></Form></Modal>
+    <Modal width={680} title="新建协作事项" open={createOpen} onCancel={() => { setCreateOpen(false); createForm.resetFields() }} onOk={() => createForm.validateFields().then((values) => create.mutate({ target_user_id: values.target_user_id, title: values.title, content: values.content, resources: decodeResources(values.resources ?? []) }))} confirmLoading={create.isPending} okText="发送给用户"><Form form={createForm} layout="vertical"><Form.Item name="target_user_id" label="目标用户" rules={[{ required: true, message: '请选择目标用户' }]}><Select showSearch optionFilterProp="label" options={targetUsers.map((user) => ({ value: user.id, label: user.username }))} onChange={() => createForm.setFieldValue('resources', [])} /></Form.Item><Form.Item name="title" label="事项标题" rules={[{ required: true, whitespace: true }, { max: 100 }]}><Input maxLength={100} showCount /></Form.Item><Form.Item name="content" label="消息内容" rules={[{ required: true, whitespace: true }, { max: 5000 }]}><Input.TextArea rows={5} maxLength={5000} showCount /></Form.Item><Form.Item name="resources" label="关联资源" extra="仅展示目标用户所属的资源；关联不会自动执行任何运维操作。"><Select mode="multiple" allowClear maxCount={50} disabled={!targetUserID} loading={packagesQuery.isLoading || hostsQuery.isLoading || servicesQuery.isLoading} options={resourceOptions} placeholder={targetUserID ? '选择安装包、主机或服务（可多选）' : '请先选择目标用户'} /></Form.Item></Form></Modal>
   </div>
 }
 

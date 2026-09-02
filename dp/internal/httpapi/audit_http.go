@@ -158,24 +158,32 @@ func auditAction(method, path string) (category, action, targetType string, ok b
 		return "account", "account.resources.transfer", "user", true
 	case method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/users/"):
 		return "account", "account.delete", "user", true
-	case method == http.MethodPost && path == "/api/v1/environments":
-		return "environment", "environment.create", "environment", true
+	case method == http.MethodPost && path == "/api/v1/hosts":
+		return "host", "host.create", "host", true
+	case method == http.MethodPut && isDirectResourcePath(path, "/api/v1/hosts/"):
+		return "host", "host.update", "host", true
+	case method == http.MethodDelete && isDirectResourcePath(path, "/api/v1/hosts/"):
+		return "host", "host.delete", "host", true
+	case method == http.MethodPost && strings.HasSuffix(path, "/validate") && strings.Contains(path, "/hosts"):
+		return "host", "host.validate", "host", true
+	case method == http.MethodPost && path == "/api/v1/hosts/import":
+		return "host", "host.import", "host", true
+	case method == http.MethodGet && path == "/api/v1/hosts/export":
+		return "host", "host.export", "host_export", true
+	case method == http.MethodPost && path == "/api/v1/services":
+		return "service", "service.create", "service", true
 	case method == http.MethodPost && path == "/api/v1/tags":
-		return "environment", "tag.create", "tag", true
+		return "service", "tag.create", "tag", true
 	case method == http.MethodPut && strings.HasPrefix(path, "/api/v1/tags/"):
-		return "environment", "tag.update", "tag", true
+		return "service", "tag.update", "tag", true
 	case method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/tags/"):
-		return "environment", "tag.delete", "tag", true
-	case method == http.MethodPut && strings.HasPrefix(path, "/api/v1/environments/"):
-		return "environment", "environment.update", "environment", true
-	case method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/environments/"):
-		return "environment", "environment.delete", "environment", true
-	case method == http.MethodPost && strings.HasSuffix(path, "/validate") && strings.Contains(path, "/environments"):
-		return "environment", "environment.validate", "environment", true
-	case method == http.MethodPost && path == "/api/v1/environments/import":
-		return "environment", "environment.import", "environment", true
-	case method == http.MethodGet && path == "/api/v1/environments/export":
-		return "environment", "environment.export", "environment_export", true
+		return "service", "tag.delete", "tag", true
+	case method == http.MethodPut && isDirectResourcePath(path, "/api/v1/services/"):
+		return "service", "service.update", "service", true
+	case method == http.MethodDelete && isDirectResourcePath(path, "/api/v1/services/"):
+		return "service", "service.delete", "service", true
+	case method == http.MethodPut && strings.HasPrefix(path, "/api/v1/services/") && strings.HasSuffix(path, "/tags"):
+		return "service", "service.tags.update", "service", true
 	case method == http.MethodPut && strings.Contains(path, "/service-types/") && strings.HasSuffix(path, "/package"):
 		return "package", "package.update", "package", true
 	case method == http.MethodPut && strings.Contains(path, "/package/versions/") && strings.HasSuffix(path, "/current"):
@@ -215,6 +223,11 @@ func auditAction(method, path string) (category, action, targetType string, ok b
 	default:
 		return "", "", "", false
 	}
+}
+
+func isDirectResourcePath(path, prefix string) bool {
+	id := strings.TrimPrefix(path, prefix)
+	return id != path && id != "" && !strings.Contains(id, "/")
 }
 
 func auditMeta(r *http.Request) *auditMetadata {

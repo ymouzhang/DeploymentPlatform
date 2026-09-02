@@ -10,7 +10,7 @@ import (
 	"DP/internal/testdb"
 )
 
-func TestEnvironmentRepositoryIntegration(t *testing.T) {
+func TestServiceInstanceRepositoryIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	db, err := Open(ctx, testdb.PostgresURL(t))
@@ -25,38 +25,40 @@ func TestEnvironmentRepositoryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create tag: %v", err)
 	}
-	env, err := db.CreateEnvironmentWithTags(ctx, domain.Environment{
-		OwnerID: domain.InitialAdminID, Name: "integration-env", IP: "192.0.2.50",
-		SSHUser: "deploy", SSHPort: 22, SSHPasswordEnc: "encrypted", InstallDir: "/opt/dp",
+	host, err := db.CreateHost(ctx, domain.Host{OwnerID: domain.InitialAdminID, Name: "integration-host", IP: "192.0.2.50", SSHUser: "deploy", SSHPort: 22, SSHPasswordEnc: "encrypted"})
+	if err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	instance, err := db.CreateServiceInstanceWithTags(ctx, domain.ServiceInstance{
+		OwnerID: domain.InitialAdminID, HostID: host.ID, Name: "integration-instance", InstallDir: "/opt/dp",
 		ServiceType: "integration", Note: "test",
 	}, []string{tag.ID})
 	if err != nil {
-		t.Fatalf("create environment: %v", err)
+		t.Fatalf("create serviceInstance: %v", err)
 	}
-	if env.IP != "192.0.2.50" || len(env.Tags) != 1 || env.Tags[0].ID != tag.ID {
-		t.Fatalf("unexpected environment: %+v", env)
+	if instance.Host.IP != "192.0.2.50" || len(instance.Tags) != 1 || instance.Tags[0].ID != tag.ID {
+		t.Fatalf("unexpected serviceInstance: %+v", instance)
 	}
-	_, err = db.CreateEnvironment(ctx, domain.Environment{
-		OwnerID: domain.InitialAdminID, Name: "duplicate", IP: env.IP,
-		SSHUser: "deploy", SSHPort: 22, SSHPasswordEnc: "encrypted", InstallDir: "/opt/other",
-		ServiceType: env.ServiceType,
+	_, err = db.CreateServiceInstance(ctx, domain.ServiceInstance{
+		OwnerID: domain.InitialAdminID, HostID: instance.HostID, Name: "duplicate", InstallDir: instance.InstallDir,
+		ServiceType: instance.ServiceType,
 	})
 	if !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("expected environment conflict, got %v", err)
+		t.Fatalf("expected serviceInstance conflict, got %v", err)
 	}
-	if err := db.RecordValidation(ctx, env.ID, "SHA256:fingerprint", "amd64"); err != nil {
+	if err := db.RecordHostValidation(ctx, instance.HostID, "SHA256:fingerprint", "amd64"); err != nil {
 		t.Fatalf("record validation: %v", err)
 	}
-	if err := db.MarkInstalled(ctx, env.ID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 18080); err != nil {
+	if err := db.MarkInstalled(ctx, instance.ID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 18080); err != nil {
 		t.Fatalf("mark installed: %v", err)
 	}
-	loaded, err := db.GetEnvironment(ctx, env.ID)
-	if err != nil || !loaded.Installed || loaded.HealthPort == nil || *loaded.HealthPort != 18080 || loaded.Arch != "amd64" {
-		t.Fatalf("unexpected installed environment: %+v err=%v", loaded, err)
+	loaded, err := db.GetServiceInstance(ctx, instance.ID)
+	if err != nil || !loaded.Installed || loaded.HealthPort == nil || *loaded.HealthPort != 18080 || loaded.Host.Arch != "amd64" {
+		t.Fatalf("unexpected installed serviceInstance: %+v err=%v", loaded, err)
 	}
 
 	config, err := db.UpsertServiceConfig(ctx, domain.ServiceConfig{
-		EnvironmentID: env.ID, Content: "port: 18080\n", Format: "yaml", Path: "config.yaml", Port: 18080,
+		ServiceInstanceID: instance.ID, Content: "port: 18080\n", Format: "yaml", Path: "config.yaml", Port: 18080,
 	})
 	if err != nil {
 		t.Fatalf("upsert service config: %v", err)
@@ -65,34 +67,34 @@ func TestEnvironmentRepositoryIntegration(t *testing.T) {
 		t.Fatalf("unexpected service config: %+v", config)
 	}
 	revision := domain.ServiceConfigRevision{
-		ID: domain.NewID(), EnvironmentID: env.ID, Content: "port: 18081\n", Format: "yaml",
+		ID: domain.NewID(), ServiceInstanceID: instance.ID, Content: "port: 18081\n", Format: "yaml",
 		Path: "config.yaml", Port: 18081, Source: "manual", CreatedBy: domain.InitialAdminID,
 		CreatedByName: "integration-admin", CreatedAt: time.Now().UTC(),
 	}
 	_, err = db.SaveServiceConfigRevision(ctx, domain.ServiceConfig{
-		EnvironmentID: env.ID, Content: revision.Content, Format: revision.Format,
+		ServiceInstanceID: instance.ID, Content: revision.Content, Format: revision.Format,
 		Path: revision.Path, Port: revision.Port,
 	}, revision, true)
 	if err != nil {
 		t.Fatalf("save service config revision: %v", err)
 	}
-	revisions, err := db.ListServiceConfigRevisions(ctx, env.ID)
+	revisions, err := db.ListServiceConfigRevisions(ctx, instance.ID)
 	if err != nil || len(revisions) != 1 || revisions[0].Content != "" || !revisions[0].Current {
 		t.Fatalf("unexpected config revisions: %+v err=%v", revisions, err)
 	}
-	loadedRevision, err := db.GetServiceConfigRevision(ctx, env.ID, revision.ID)
+	loadedRevision, err := db.GetServiceConfigRevision(ctx, instance.ID, revision.ID)
 	if err != nil || loadedRevision.Content != revision.Content {
 		t.Fatalf("unexpected config revision: %+v err=%v", loadedRevision, err)
 	}
-	ports, err := db.ListServicePorts(ctx)
-	if err != nil || ports[env.ID] != 18081 {
-		t.Fatalf("unexpected service ports: %+v err=%v", ports, err)
+	updatedInstance, err := db.GetServiceInstance(ctx, instance.ID)
+	if err != nil || updatedInstance.HealthPort == nil || *updatedInstance.HealthPort != 18081 {
+		t.Fatalf("unexpected health port: instance=%+v err=%v", updatedInstance, err)
 	}
 	operation := domain.Operation{
-		ID: domain.NewID(), EnvironmentID: env.ID, RequestID: domain.NewID(),
+		ID: domain.NewID(), ServiceInstanceID: instance.ID, RequestID: domain.NewID(),
 		ActorUserID: domain.InitialAdminID, ActorUsername: "integration-admin",
 		OwnerID: domain.InitialAdminID, OwnerUsername: "integration-admin",
-		EnvironmentName: env.Name, EnvironmentIP: env.IP, ServiceType: env.ServiceType,
+		ServiceInstanceName: instance.Name, HostIP: instance.Host.IP, ServiceType: instance.ServiceType,
 		Action: domain.ActionStart, Status: domain.OperationQueued, Stage: "queued",
 		LogPath: "operations/integration.jsonl", CreatedAt: time.Now().UTC(),
 	}
@@ -111,11 +113,11 @@ func TestEnvironmentRepositoryIntegration(t *testing.T) {
 	if err != nil || loadedOperation.Status != domain.OperationSucceeded || len(loadedOperation.Tags) != 1 {
 		t.Fatalf("unexpected operation: %+v err=%v", loadedOperation, err)
 	}
-	lastAction, err := db.LastSuccessfulAction(ctx, env.ID)
+	lastAction, err := db.LastSuccessfulAction(ctx, instance.ID)
 	if err != nil || lastAction != domain.ActionStart {
 		t.Fatalf("unexpected last action: %s err=%v", lastAction, err)
 	}
-	operations, err := db.ListOperations(ctx, domain.OperationFilter{Keyword: "integration-env", Limit: 10})
+	operations, err := db.ListOperations(ctx, domain.OperationFilter{Keyword: "integration-instance", Limit: 10})
 	if err != nil || len(operations) != 1 {
 		t.Fatalf("unexpected operation list: %+v err=%v", operations, err)
 	}
@@ -124,8 +126,8 @@ func TestEnvironmentRepositoryIntegration(t *testing.T) {
 		t.Fatalf("unexpected deleted operation paths: %+v err=%v", paths, err)
 	}
 	model, upload, err := db.CreateModelUpload(ctx, domain.Model{
-		OwnerID: domain.InitialAdminID, EnvironmentID: env.ID, EnvironmentName: env.Name,
-		EnvironmentIP: env.IP, Name: "integration-model", Source: "offline",
+		OwnerID: domain.InitialAdminID, HostID: instance.HostID, HostName: instance.Host.Name,
+		HostIP: instance.Host.IP, Name: "integration-model", Source: "offline",
 		TargetDir: "/opt/models/integration", OriginalFilename: "model.tar.gz", SizeBytes: 4096,
 		Status: domain.ModelUploading, CreatedBy: domain.InitialAdminID,
 		CreatedByUsername: "integration-admin",
@@ -169,15 +171,15 @@ func TestEnvironmentRepositoryIntegration(t *testing.T) {
 	if err != nil || len(models) != 1 || models[0].LatestTask == nil || models[0].Status != domain.ModelReady {
 		t.Fatalf("unexpected models: %+v err=%v", models, err)
 	}
-	hasModels, err := db.EnvironmentHasModels(ctx, env.ID)
+	hasModels, err := db.HostHasModels(ctx, instance.HostID)
 	if err != nil || !hasModels {
-		t.Fatalf("environment model check failed: has=%v err=%v", hasModels, err)
+		t.Fatalf("serviceInstance model check failed: has=%v err=%v", hasModels, err)
 	}
 	if err := db.MarkModelDeleted(ctx, model.ID); err != nil {
 		t.Fatalf("mark model deleted: %v", err)
 	}
-	if _, err := db.DeleteEnvironment(ctx, env.ID); err != nil {
-		t.Fatalf("delete environment: %v", err)
+	if _, err := db.DeleteServiceInstance(ctx, instance.ID); err != nil {
+		t.Fatalf("delete serviceInstance: %v", err)
 	}
 	if err := db.DeleteResourceTag(ctx, tag.ID); err != nil {
 		t.Fatalf("delete resource tag: %v", err)

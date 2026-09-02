@@ -41,18 +41,20 @@ const (
 	PackageRead         Permission = "package.read"
 	PackageWrite        Permission = "package.write"
 	PackageDelete       Permission = "package.delete"
-	EnvironmentRead     Permission = "environment.read"
-	EnvironmentWrite    Permission = "environment.write"
-	EnvironmentDelete   Permission = "environment.delete"
-	EnvironmentValidate Permission = "environment.validate"
-	EnvironmentImport   Permission = "environment.import"
-	EnvironmentExport   Permission = "environment.export"
+	HostRead            Permission = "host.read"
+	HostWrite           Permission = "host.write"
+	HostDelete          Permission = "host.delete"
+	HostValidate        Permission = "host.validate"
+	HostImport          Permission = "host.import"
+	HostExport          Permission = "host.export"
 	TagRead             Permission = "tag.read"
 	TagWrite            Permission = "tag.write"
 	ModelRead           Permission = "model.read"
 	ModelUpload         Permission = "model.upload"
 	ModelDelete         Permission = "model.delete"
 	ServiceRead         Permission = "service.read"
+	ServiceWrite        Permission = "service.write"
+	ServiceDelete       Permission = "service.delete"
 	ServiceConfigRead   Permission = "service.config.read"
 	ServiceConfigWrite  Permission = "service.config.write"
 	ServiceInstall      Permission = "service.install"
@@ -105,18 +107,20 @@ func Definitions() []Definition {
 		{Key: PackageRead, Resource: "package", Action: "read", Description: "查看安装包", Scoped: true},
 		{Key: PackageWrite, Resource: "package", Action: "write", Description: "上传和更新安装包", Scoped: true},
 		{Key: PackageDelete, Resource: "package", Action: "delete", Description: "删除安装包", Scoped: true},
-		{Key: EnvironmentRead, Resource: "environment", Action: "read", Description: "查看环境", Scoped: true},
-		{Key: EnvironmentWrite, Resource: "environment", Action: "write", Description: "创建和修改环境", Scoped: true},
-		{Key: EnvironmentDelete, Resource: "environment", Action: "delete", Description: "删除环境", Scoped: true},
-		{Key: EnvironmentValidate, Resource: "environment", Action: "validate", Description: "校验 SSH 环境", Scoped: true},
-		{Key: EnvironmentImport, Resource: "environment", Action: "import", Description: "导入环境", Scoped: true},
-		{Key: EnvironmentExport, Resource: "environment", Action: "export", Description: "导出环境", Scoped: true},
+		{Key: HostRead, Resource: "host", Action: "read", Description: "查看主机", Scoped: true},
+		{Key: HostWrite, Resource: "host", Action: "write", Description: "创建和修改主机", Scoped: true},
+		{Key: HostDelete, Resource: "host", Action: "delete", Description: "删除主机", Scoped: true},
+		{Key: HostValidate, Resource: "host", Action: "validate", Description: "校验主机 SSH 连接", Scoped: true},
+		{Key: HostImport, Resource: "host", Action: "import", Description: "导入主机", Scoped: true},
+		{Key: HostExport, Resource: "host", Action: "export", Description: "导出主机", Scoped: true},
 		{Key: TagRead, Resource: "tag", Action: "read", Description: "查看标签", Scoped: true},
 		{Key: TagWrite, Resource: "tag", Action: "write", Description: "管理标签", Scoped: true},
 		{Key: ModelRead, Resource: "model", Action: "read", Description: "查看模型", Scoped: true},
 		{Key: ModelUpload, Resource: "model", Action: "upload", Description: "上传和重试模型", Scoped: true},
 		{Key: ModelDelete, Resource: "model", Action: "delete", Description: "删除模型", Scoped: true},
 		{Key: ServiceRead, Resource: "service", Action: "read", Description: "查看服务", Scoped: true},
+		{Key: ServiceWrite, Resource: "service", Action: "write", Description: "创建和修改服务实例", Scoped: true},
+		{Key: ServiceDelete, Resource: "service", Action: "delete", Description: "删除服务实例", Scoped: true},
 		{Key: ServiceConfigRead, Resource: "service", Action: "config.read", Description: "查看服务配置", Scoped: true},
 		{Key: ServiceConfigWrite, Resource: "service", Action: "config.write", Description: "修改服务配置", Scoped: true},
 		{Key: ServiceInstall, Resource: "service", Action: "install", Description: "安装服务", Scoped: true},

@@ -21,10 +21,10 @@ describe('DashboardPage', () => {
     vi.mocked(api.listTags).mockResolvedValue([])
     vi.mocked(api.adminDashboard).mockResolvedValue({
       metrics: {
-        users: 3, enabled_users: 2, disabled_users: 1, packages: 7, environments: 4,
+        users: 3, enabled_users: 2, disabled_users: 1, packages: 7, hosts: 3, service_instances: 4,
         installed_services: 2, running_services: 1, active_operations: 0,
-        failed_operations_24h: 1, login_failures_24h: 5, unvalidated_environments: 0,
-        stale_validation_environments: 0, unhealthy_installed_services: 0,
+        failed_operations_24h: 1, login_failures_24h: 5, unvalidated_hosts: 0,
+        stale_validation_hosts: 0, unhealthy_installed_services: 0,
         high_risk_audits_24h: 2, unread_notifications: 3, unread_communications: 2,
       },
       communications: [{

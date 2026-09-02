@@ -51,3 +51,27 @@ func OpenPostgres(t testing.TB) *postgres.DB {
 	t.Cleanup(db.Close)
 	return db
 }
+
+// CreateServiceInstance explicitly creates the test host before its service
+// instance. Production repositories never create hosts as a side effect.
+type ServiceInstanceStore interface {
+	CreateHost(context.Context, domain.Host) (domain.Host, error)
+	CreateServiceInstance(context.Context, domain.ServiceInstance) (domain.ServiceInstance, error)
+}
+
+func CreateServiceInstance(t testing.TB, ctx context.Context, db ServiceInstanceStore, item domain.ServiceInstance) (domain.ServiceInstance, error) {
+	t.Helper()
+	if item.OwnerID == "" {
+		item.OwnerID = domain.InitialAdminID
+	}
+	if item.HostID == "" {
+		item.Host.OwnerID = item.OwnerID
+		host, err := db.CreateHost(ctx, item.Host)
+		if err != nil {
+			return domain.ServiceInstance{}, err
+		}
+		item.HostID = host.ID
+	}
+	item.Host = domain.Host{}
+	return db.CreateServiceInstance(ctx, item)
+}

@@ -7,7 +7,7 @@ const user: User = {
   username: 'operator',
   roles: [{ id: 'role-1', key: 'operator', name: '运维人员' }],
   permissions: {
-    'environment.read': 'own',
+    'host.read': 'own',
     'package.read': 'all',
   },
   enabled: true,
@@ -20,13 +20,13 @@ const user: User = {
 describe('RBAC access helpers', () => {
   it('denies missing permissions by default', () => {
     expect(canAccess(user, 'role.read')).toBe(false)
-    expect(canAccess(undefined, 'environment.read')).toBe(false)
+    expect(canAccess(undefined, 'host.read')).toBe(false)
   })
 
   it('enforces own scope against the resource owner', () => {
-    expect(canAccess(user, 'environment.read', user.id)).toBe(true)
-    expect(canAccess(user, 'environment.read', 'user-2')).toBe(false)
-    expect(hasAllAccess(user, 'environment.read')).toBe(false)
+    expect(canAccess(user, 'host.read', user.id)).toBe(true)
+    expect(canAccess(user, 'host.read', 'user-2')).toBe(false)
+    expect(hasAllAccess(user, 'host.read')).toBe(false)
   })
 
   it('allows all scope for every owner', () => {

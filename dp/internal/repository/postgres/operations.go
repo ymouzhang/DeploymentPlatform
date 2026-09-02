@@ -14,14 +14,14 @@ import (
 
 const operationSelect = `SELECT
 	o.id::text,
-	o.environment_id::text,
+	o.service_instance_id::text,
 	COALESCE(o.request_id::text, ''),
 	COALESCE(o.actor_user_id::text, ''),
 	o.actor_username,
 	COALESCE(o.owner_id::text, ''),
 	o.owner_username,
-	o.environment_name,
-	COALESCE(host(o.environment_ip), ''),
+	o.service_instance_name,
+	COALESCE(host(o.host_ip), ''),
 	o.service_type,
 	o.action,
 	o.status,
@@ -43,8 +43,8 @@ func (db *DB) CreateOperation(ctx context.Context, operation domain.Operation) e
 	defer func() { _ = tx.Rollback(ctx) }()
 	if operation.OwnerID != "" {
 		var ownerID string
-		err := tx.QueryRow(ctx, `SELECT owner_id::text FROM environments WHERE id = $1 FOR SHARE`,
-			operation.EnvironmentID).Scan(&ownerID)
+		err := tx.QueryRow(ctx, `SELECT owner_id::text FROM service_instances WHERE id = $1 FOR SHARE`,
+			operation.ServiceInstanceID).Scan(&ownerID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -56,21 +56,21 @@ func (db *DB) CreateOperation(ctx context.Context, operation domain.Operation) e
 		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO operations (
-		id, environment_id, request_id, actor_user_id, actor_username, owner_id, owner_username,
-		environment_name, environment_ip, service_type, action, status, stage, log_path, created_at
+		id, service_instance_id, request_id, actor_user_id, actor_username, owner_id, owner_username,
+		service_instance_name, host_ip, service_type, action, status, stage, log_path, created_at
 	) VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5,
 		NULLIF($6, '')::uuid, $7, $8, NULLIF($9, '')::inet, $10, $11, $12, $13, $14, $15)`,
-		operation.ID, operation.EnvironmentID, operation.RequestID, operation.ActorUserID,
-		operation.ActorUsername, operation.OwnerID, operation.OwnerUsername, operation.EnvironmentName,
-		operation.EnvironmentIP, operation.ServiceType, operation.Action, operation.Status,
+		operation.ID, operation.ServiceInstanceID, operation.RequestID, operation.ActorUserID,
+		operation.ActorUsername, operation.OwnerID, operation.OwnerUsername, operation.ServiceInstanceName,
+		operation.HostIP, operation.ServiceType, operation.Action, operation.Status,
 		operation.Stage, operation.LogPath, operation.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert operation: %w", err)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO operation_tags (operation_id, tag_id, group_name, value)
 		SELECT $1, t.id, t.group_name, t.value
-		FROM environment_tags et JOIN resource_tags t ON t.id = et.tag_id
-		WHERE et.environment_id = $2`, operation.ID, operation.EnvironmentID)
+		FROM service_instance_tags et JOIN resource_tags t ON t.id = et.tag_id
+		WHERE et.service_instance_id = $2`, operation.ID, operation.ServiceInstanceID)
 	if err != nil {
 		return fmt.Errorf("snapshot operation tags: %w", err)
 	}
@@ -82,12 +82,12 @@ func (db *DB) CreateOperation(ctx context.Context, operation domain.Operation) e
 
 func (db *DB) LastSuccessfulAction(
 	ctx context.Context,
-	environmentID string,
+	service_instanceID string,
 ) (domain.OperationAction, error) {
 	var action domain.OperationAction
 	err := db.pool.QueryRow(ctx, `SELECT action FROM operations
-		WHERE environment_id = $1 AND status = $2
-		ORDER BY created_at DESC, id DESC LIMIT 1`, environmentID, domain.OperationSucceeded).Scan(&action)
+		WHERE service_instance_id = $1 AND status = $2
+		ORDER BY created_at DESC, id DESC LIMIT 1`, service_instanceID, domain.OperationSucceeded).Scan(&action)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domain.ErrNotFound
 	}
@@ -120,8 +120,8 @@ func (db *DB) GetOperation(ctx context.Context, id string) (domain.Operation, er
 
 func (db *DB) LatestOperations(ctx context.Context) (map[string]domain.Operation, error) {
 	rows, err := db.pool.Query(ctx, operationSelect+` WHERE o.id IN (
-		SELECT DISTINCT ON (environment_id) id FROM operations
-		ORDER BY environment_id, created_at DESC, id DESC
+		SELECT DISTINCT ON (service_instance_id) id FROM operations
+		ORDER BY service_instance_id, created_at DESC, id DESC
 	)`)
 	if err != nil {
 		return nil, fmt.Errorf("query latest operations: %w", err)
@@ -143,7 +143,7 @@ func (db *DB) LatestOperations(ctx context.Context) (map[string]domain.Operation
 	}
 	latest := make(map[string]domain.Operation, len(items))
 	for _, item := range items {
-		latest[item.EnvironmentID] = item
+		latest[item.ServiceInstanceID] = item
 	}
 	return latest, nil
 }
@@ -198,7 +198,7 @@ func (db *DB) ListOperations(ctx context.Context, filter domain.OperationFilter)
 			positions[index] = len(args)
 		}
 		where = append(where, fmt.Sprintf(`(
-			lower(o.environment_name) LIKE $%d OR lower(host(o.environment_ip)) LIKE $%d OR
+			lower(o.service_instance_name) LIKE $%d OR lower(host(o.host_ip)) LIKE $%d OR
 			lower(o.service_type) LIKE $%d OR lower(o.error_code) LIKE $%d OR
 			lower(o.id::text) LIKE $%d OR lower(COALESCE(o.request_id::text, '')) LIKE $%d
 		)`, positions[0], positions[1], positions[2], positions[3], positions[4], positions[5]))
@@ -282,9 +282,9 @@ func scanPostgresOperation(row interface{ Scan(...any) error }) (domain.Operatio
 	var item domain.Operation
 	var exitCode sql.NullInt64
 	var startedAt, finishedAt sql.NullTime
-	err := row.Scan(&item.ID, &item.EnvironmentID, &item.RequestID, &item.ActorUserID,
-		&item.ActorUsername, &item.OwnerID, &item.OwnerUsername, &item.EnvironmentName,
-		&item.EnvironmentIP, &item.ServiceType, &item.Action, &item.Status, &item.Stage,
+	err := row.Scan(&item.ID, &item.ServiceInstanceID, &item.RequestID, &item.ActorUserID,
+		&item.ActorUsername, &item.OwnerID, &item.OwnerUsername, &item.ServiceInstanceName,
+		&item.HostIP, &item.ServiceType, &item.Action, &item.Status, &item.Stage,
 		&exitCode, &item.ErrorCode, &item.ErrorMessage, &item.LogPath, &item.CreatedAt,
 		&startedAt, &finishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {

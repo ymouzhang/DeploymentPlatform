@@ -42,7 +42,7 @@ func TestAuthRepositoryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if !hasRoleRef(user.Roles, access.RoleOperator) || user.Permissions[access.EnvironmentRead] != access.ScopeOwn {
+	if !hasRoleRef(user.Roles, access.RoleOperator) || user.Permissions[access.HostRead] != access.ScopeOwn {
 		t.Fatalf("new user has unexpected access: %+v", user)
 	}
 

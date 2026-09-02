@@ -214,14 +214,16 @@ func (db *DB) UpdateUserEnabled(ctx context.Context, id string, enabled bool) (d
 	return db.GetUser(ctx, id)
 }
 
-func (db *DB) UserBusinessCounts(ctx context.Context, id string) (packages, environments int, err error) {
+func (db *DB) UserBusinessCounts(ctx context.Context, id string) (packages, resources int, err error) {
 	err = db.pool.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM packages WHERE owner_id = $1),
-		(SELECT count(*) FROM environments WHERE owner_id = $1)`, id).Scan(&packages, &environments)
+		(SELECT count(*) FROM hosts WHERE owner_id = $1) +
+		(SELECT count(*) FROM service_instances WHERE owner_id = $1) +
+		(SELECT count(*) FROM models WHERE owner_id = $1)`, id).Scan(&packages, &resources)
 	if err != nil {
 		return 0, 0, fmt.Errorf("count user business resources: %w", err)
 	}
-	return packages, environments, nil
+	return packages, resources, nil
 }
 
 func (db *DB) DeleteUser(ctx context.Context, id string) error {
@@ -486,15 +488,16 @@ func (db *DB) UserDetail(ctx context.Context, id string, now time.Time) (domain.
 	detail := domain.UserDetail{User: user}
 	err = db.pool.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM packages WHERE owner_id = $1),
-		(SELECT count(*) FROM environments WHERE owner_id = $1),
+		(SELECT count(*) FROM hosts WHERE owner_id = $1),
+		(SELECT count(*) FROM service_instances WHERE owner_id = $1),
 		(SELECT count(*) FROM models WHERE owner_id = $1 AND deleted_at IS NULL),
-		(SELECT count(*) FROM environments WHERE owner_id = $1 AND installed),
+		(SELECT count(*) FROM service_instances WHERE owner_id = $1 AND installed),
 		(SELECT count(*) FROM operations WHERE owner_id = $1 AND created_at >= $2),
 		(SELECT count(*) FROM sessions WHERE user_id = $1 AND expires_at > $3),
 		(SELECT count(*) FROM audit_events WHERE actor_user_id = $1 AND action = 'auth.login' AND outcome <> 'success'),
 		(SELECT count(*) FROM audit_events WHERE actor_user_id = $1 AND risk_level = 'high')`,
 		id, now.Add(-30*24*time.Hour), now).Scan(
-		&detail.PackageCount, &detail.EnvironmentCount, &detail.ModelCount,
+		&detail.PackageCount, &detail.HostCount, &detail.ServiceInstanceCount, &detail.ModelCount,
 		&detail.InstalledServiceCount, &detail.RecentOperationCount, &detail.ActiveSessionCount,
 		&detail.LoginFailureCount, &detail.HighRiskCount,
 	)

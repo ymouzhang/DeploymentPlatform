@@ -16,7 +16,7 @@ const tagSelect = `SELECT
 	COALESCE(u.username, ''),
 	t.group_name,
 	t.value,
-	(SELECT count(*) FROM environment_tags et WHERE et.tag_id = t.id),
+	(SELECT count(*) FROM service_instance_tags et WHERE et.tag_id = t.id),
 	t.created_at,
 	t.updated_at
 	FROM resource_tags t
@@ -95,7 +95,7 @@ func (db *DB) DeleteResourceTag(ctx context.Context, id string) error {
 		return fmt.Errorf("begin delete resource tag: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `DELETE FROM environment_tags WHERE tag_id = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM service_instance_tags WHERE tag_id = $1`, id); err != nil {
 		return fmt.Errorf("detach resource tag: %w", err)
 	}
 	now := time.Now().UTC()
@@ -131,7 +131,7 @@ func (db *DB) ValidateTagIDs(ctx context.Context, ownerID string, tagIDs []strin
 		}
 		found++
 		if ownerID != "" && actualOwner != ownerID {
-			return domain.FieldError("tag_ids", "环境只能关联所属账号的标签")
+			return domain.FieldError("tag_ids", "服务实例只能关联所属账号的标签")
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -143,26 +143,26 @@ func (db *DB) ValidateTagIDs(ctx context.Context, ownerID string, tagIDs []strin
 	return nil
 }
 
-func (db *DB) ReplaceEnvironmentTags(ctx context.Context, environmentID string, tagIDs []string) error {
+func (db *DB) ReplaceServiceInstanceTags(ctx context.Context, service_instanceID string, tagIDs []string) error {
 	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("begin replace environment tags: %w", err)
+		return fmt.Errorf("begin replace service_instance tags: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var ownerID string
-	err = tx.QueryRow(ctx, `SELECT owner_id::text FROM environments WHERE id = $1 FOR UPDATE`, environmentID).
+	err = tx.QueryRow(ctx, `SELECT owner_id::text FROM service_instances WHERE id = $1 FOR UPDATE`, service_instanceID).
 		Scan(&ownerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("lock environment for tags: %w", err)
+		return fmt.Errorf("lock service_instance for tags: %w", err)
 	}
-	if err := replaceEnvironmentTags(ctx, tx, environmentID, ownerID, tagIDs); err != nil {
+	if err := replaceServiceInstanceTags(ctx, tx, service_instanceID, ownerID, tagIDs); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit environment tags: %w", err)
+		return fmt.Errorf("commit service_instance tags: %w", err)
 	}
 	return nil
 }
@@ -204,7 +204,7 @@ func (db *DB) PopulateOperationTags(ctx context.Context, operations []domain.Ope
 func scanPostgresResourceTag(row interface{ Scan(...any) error }) (domain.ResourceTag, error) {
 	var item domain.ResourceTag
 	err := row.Scan(&item.ID, &item.OwnerID, &item.OwnerUsername, &item.GroupName, &item.Value,
-		&item.EnvironmentCount, &item.CreatedAt, &item.UpdatedAt)
+		&item.ServiceInstanceCount, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ResourceTag{}, domain.ErrNotFound
 	}

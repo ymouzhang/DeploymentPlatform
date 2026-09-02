@@ -34,26 +34,25 @@ type Repository interface {
 	CountOperationsByTags(context.Context, []string, time.Time) (int, int, error)
 	CreateResourceTag(context.Context, string, domain.ResourceTagInput) (domain.ResourceTag, error)
 	DashboardMetrics(context.Context, time.Time, time.Time) (domain.DashboardMetrics, error)
-	DeleteEnvironment(context.Context, string) ([]string, error)
 	DeleteResourceTag(context.Context, string) error
-	EnvironmentHasModels(context.Context, string) (bool, error)
 	GetAuditEvent(context.Context, string) (domain.AuditEvent, error)
-	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetHost(context.Context, string) (domain.Host, error)
+	GetServiceInstance(context.Context, string) (domain.ServiceInstance, error)
 	GetModelUpload(context.Context, string) (domain.ModelUpload, error)
 	GetResourceTag(context.Context, string) (domain.ResourceTag, error)
 	GetUser(context.Context, string) (domain.User, error)
 	LatestOperations(context.Context) (map[string]domain.Operation, error)
 	ListAuditEvents(context.Context, domain.AuditFilter) ([]domain.AuditEvent, error)
-	ListEnvironments(context.Context) ([]domain.Environment, error)
+	ListHosts(context.Context, string) ([]domain.Host, error)
+	ListServiceInstances(context.Context) ([]domain.ServiceInstance, error)
 	ListNotifications(context.Context, domain.NotificationFilter) ([]domain.Notification, error)
 	ListOperations(context.Context, domain.OperationFilter) ([]domain.Operation, error)
 	ListPackagesByOwner(context.Context, string) ([]domain.Package, error)
 	ListResourceTags(context.Context, string) ([]domain.ResourceTag, error)
-	ListServicePorts(context.Context) (map[string]int, error)
 	MarkNotificationRead(context.Context, string, string, time.Time) (domain.Notification, error)
 	NotificationSummary(context.Context) (domain.NotificationSummary, error)
 	RecentNotifications(context.Context, int) ([]domain.Notification, error)
-	ReplaceEnvironmentTags(context.Context, string, []string) error
+	ReplaceServiceInstanceTags(context.Context, string, []string) error
 	ResolveNotification(context.Context, string, string, time.Time) (domain.Notification, error)
 	UpdateResourceTag(context.Context, string, domain.ResourceTagInput) (domain.ResourceTag, error)
 	ValidateTagIDs(context.Context, string, []string) error
@@ -65,7 +64,8 @@ type API struct {
 	communications *application.CommunicationService
 	realtime       *realtime.Hub
 	realtimeBeat   time.Duration
-	environments   *application.EnvironmentService
+	hosts          *application.HostService
+	instances      *application.ServiceInstanceService
 	configs        *application.ServiceConfigService
 	serviceLogs    *application.ServiceLogService
 	packages       *archive.Manager
@@ -85,7 +85,8 @@ func New(
 	roleService *application.RoleService,
 	communicationService *application.CommunicationService,
 	realtimeHub *realtime.Hub,
-	environments *application.EnvironmentService,
+	hosts *application.HostService,
+	instances *application.ServiceInstanceService,
 	configs *application.ServiceConfigService,
 	serviceLogs *application.ServiceLogService,
 	packages *archive.Manager,
@@ -114,7 +115,7 @@ func New(
 	}
 	return &API{
 		auth: authService, roles: roleService, communications: communicationService, realtime: realtimeHub, realtimeBeat: 15 * time.Second,
-		environments: environments, configs: configs, serviceLogs: serviceLogs,
+		hosts: hosts, instances: instances, configs: configs, serviceLogs: serviceLogs,
 		packages: packages, operations: operations, models: models,
 		health: healthMonitor, store: store, audit: auditService, uploadMax: uploadMax,
 		auditExportMax: auditExportMax, trustedProxies: trustedProxies, log: log,
@@ -165,15 +166,14 @@ func (a *API) protectedRoutes() []protectedRoute {
 		{"PUT /api/v1/users/{id}/roles", access.AccountAssignRoles, a.replaceUserRoles},
 		{"GET /api/v1/service-types", access.PackageRead, a.serviceTypes},
 		{"GET /api/v1/packages", access.PackageRead, a.listPackages},
-		{"GET /api/v1/environments", access.EnvironmentRead, a.listEnvironments},
-		{"POST /api/v1/environments", access.EnvironmentWrite, a.createEnvironment},
-		{"PUT /api/v1/environments/{id}", access.EnvironmentWrite, a.updateEnvironment},
-		{"DELETE /api/v1/environments/{id}", access.EnvironmentDelete, a.deleteEnvironment},
-		{"POST /api/v1/environments/validate", access.EnvironmentValidate, a.validateDraftEnvironment},
-		{"POST /api/v1/environments/{id}/validate", access.EnvironmentValidate, a.validateSavedEnvironment},
-		{"GET /api/v1/environments/export", access.EnvironmentExport, a.exportEnvironments},
-		{"POST /api/v1/environments/import", access.EnvironmentImport, a.importEnvironments},
-		{"PUT /api/v1/environments/{id}/tags", access.TagWrite, a.replaceEnvironmentTags},
+		{"GET /api/v1/hosts", access.HostRead, a.listHosts},
+		{"POST /api/v1/hosts", access.HostWrite, a.createHost},
+		{"PUT /api/v1/hosts/{id}", access.HostWrite, a.updateHost},
+		{"DELETE /api/v1/hosts/{id}", access.HostDelete, a.deleteHost},
+		{"POST /api/v1/hosts/validate", access.HostValidate, a.validateDraftHost},
+		{"POST /api/v1/hosts/{id}/validate", access.HostValidate, a.validateSavedHost},
+		{"GET /api/v1/hosts/export", access.HostExport, a.exportHosts},
+		{"POST /api/v1/hosts/import", access.HostImport, a.importHosts},
 		{"GET /api/v1/tags", access.TagRead, a.listResourceTags},
 		{"POST /api/v1/tags", access.TagWrite, a.createResourceTag},
 		{"PUT /api/v1/tags/{id}", access.TagWrite, a.updateResourceTag},
@@ -185,6 +185,10 @@ func (a *API) protectedRoutes() []protectedRoute {
 		{"PUT /api/v1/service-types/{type}/package/versions/{versionId}/current", access.PackageWrite, a.activatePackageVersion},
 		{"DELETE /api/v1/service-types/{type}/package/versions/{versionId}", access.PackageDelete, a.deletePackageVersion},
 		{"GET /api/v1/services", access.ServiceRead, a.listServices},
+		{"POST /api/v1/services", access.ServiceWrite, a.createServiceInstance},
+		{"PUT /api/v1/services/{id}", access.ServiceWrite, a.updateServiceInstance},
+		{"DELETE /api/v1/services/{id}", access.ServiceDelete, a.deleteServiceInstance},
+		{"PUT /api/v1/services/{id}/tags", access.TagWrite, a.replaceServiceInstanceTags},
 		{"GET /api/v1/services/{id}/config", access.ServiceConfigRead, a.getServiceConfig},
 		{"PUT /api/v1/services/{id}/config", access.ServiceConfigWrite, a.updateServiceConfig},
 		{"POST /api/v1/services/{id}/config/preview", access.ServiceConfigWrite, a.previewServiceConfig},
@@ -277,18 +281,13 @@ func (a *API) listPackages(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, packages)
 }
 
-func (a *API) listEnvironments(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.listOwnerScope(r, access.EnvironmentRead)
+func (a *API) listHosts(w http.ResponseWriter, r *http.Request) {
+	ownerID, err := a.listOwnerScope(r, access.HostRead)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	tagIDs, err := a.visibleTagIDs(r, ownerID, access.EnvironmentRead)
-	if err != nil {
-		a.writeError(w, r, err)
-		return
-	}
-	items, err := a.environments.ListFiltered(r.Context(), ownerID, tagIDs)
+	items, err := a.hosts.List(r.Context(), ownerID)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -296,58 +295,38 @@ func (a *API) listEnvironments(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, items)
 }
 
-func (a *API) createEnvironment(w http.ResponseWriter, r *http.Request) {
-	var input domain.EnvironmentInput
+func (a *API) createHost(w http.ResponseWriter, r *http.Request) {
+	var input domain.HostInput
 	if err := decodeJSON(r, &input); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	ownerID, err := a.createOwnerScope(r, access.EnvironmentWrite)
+	ownerID, err := a.createOwnerScope(r, access.HostWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	result, err := a.environments.Create(r.Context(), ownerID, input)
+	result, err := a.hosts.Create(r.Context(), ownerID, input)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
 	owner, _ := a.store.GetUser(r.Context(), ownerID)
-	setAuditTarget(r, owner, "environment", result.ID, result.Name,
-		map[string]any{"ip": result.IP, "ssh_user": result.SSHUser, "ssh_port": result.SSHPort,
-			"install_dir": result.InstallDir, "service_type": result.ServiceType, "note": result.Note, "tags": tagLabels(result.Tags)})
+	setAuditTarget(r, owner, "host", result.ID, result.Name,
+		map[string]any{"ip": result.IP, "ssh_user": result.SSHUser, "ssh_port": result.SSHPort, "note": result.Note})
 	writeData(w, http.StatusCreated, result)
 }
 
-func (a *API) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
+func (a *API) deleteHost(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	env, err := a.authorizeEnvironment(r, id, access.EnvironmentDelete)
+	host, err := a.authorizeHost(r, id, access.HostDelete)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	owner, _ := a.store.GetUser(r.Context(), env.OwnerID)
-	setAuditTarget(r, owner, "environment", env.ID, env.Name,
-		map[string]any{"ip": env.IP, "service_type": env.ServiceType})
-	if env.Installed {
-		a.writeError(w, r, &domain.AppError{
-			Code:    "ENVIRONMENT_INSTALLED",
-			Message: "该环境已安装服务，请先重置后再删除",
-		})
-		return
-	}
-	if a.operations.Busy(id) {
-		a.writeError(w, r, domain.ErrOperationInProgress)
-		return
-	}
-	if used, checkErr := a.store.EnvironmentHasModels(r.Context(), id); checkErr != nil {
-		a.writeError(w, r, checkErr)
-		return
-	} else if used {
-		a.writeError(w, r, &domain.AppError{Code: "ENVIRONMENT_HAS_MODELS", Message: "该环境仍有关联模型，请先删除模型"})
-		return
-	}
-	_, err = a.store.DeleteEnvironment(r.Context(), id)
+	owner, _ := a.store.GetUser(r.Context(), host.OwnerID)
+	setAuditTarget(r, owner, "host", host.ID, host.Name, map[string]any{"ip": host.IP})
+	err = a.hosts.Delete(r.Context(), id)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -355,71 +334,61 @@ func (a *API) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]string{"deleted": id})
 }
 
-func (a *API) updateEnvironment(w http.ResponseWriter, r *http.Request) {
-	original, err := a.authorizeEnvironment(r, r.PathValue("id"), access.EnvironmentWrite)
+func (a *API) updateHost(w http.ResponseWriter, r *http.Request) {
+	original, err := a.authorizeHost(r, r.PathValue("id"), access.HostWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
 	owner, _ := a.store.GetUser(r.Context(), original.OwnerID)
-	setAuditTarget(r, owner, "environment", original.ID, original.Name, nil)
-	var input domain.EnvironmentInput
+	setAuditTarget(r, owner, "host", original.ID, original.Name, nil)
+	var input domain.HostInput
 	if err := decodeJSON(r, &input); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	input.Normalize()
-	if input.IP != original.IP || input.SSHUser != original.SSHUser || input.SSHPort != original.SSHPort {
-		if used, checkErr := a.store.EnvironmentHasModels(r.Context(), original.ID); checkErr != nil {
-			a.writeError(w, r, checkErr)
-			return
-		} else if used {
-			a.writeError(w, r, &domain.AppError{Code: "ENVIRONMENT_HAS_MODELS", Message: "该环境仍有关联模型，不能修改 IP、SSH 用户或 SSH 端口"})
-			return
-		}
-	}
-	result, err := a.environments.Update(r.Context(), r.PathValue("id"), input)
+	result, err := a.hosts.Update(r.Context(), r.PathValue("id"), input)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	setAuditTarget(r, owner, "environment", result.ID, result.Name, map[string]any{
-		"before":               map[string]any{"name": original.Name, "ip": original.IP, "ssh_user": original.SSHUser, "ssh_port": original.SSHPort, "install_dir": original.InstallDir, "service_type": original.ServiceType, "note": original.Note, "tags": tagLabels(original.Tags)},
-		"after":                map[string]any{"name": result.Name, "ip": result.IP, "ssh_user": result.SSHUser, "ssh_port": result.SSHPort, "install_dir": result.InstallDir, "service_type": result.ServiceType, "note": result.Note, "tags": tagLabels(result.Tags)},
+	setAuditTarget(r, owner, "host", result.ID, result.Name, map[string]any{
+		"before":               map[string]any{"name": original.Name, "ip": original.IP, "ssh_user": original.SSHUser, "ssh_port": original.SSHPort, "note": original.Note},
+		"after":                map[string]any{"name": result.Name, "ip": result.IP, "ssh_user": result.SSHUser, "ssh_port": result.SSHPort, "note": result.Note},
 		"ssh_password_changed": input.SSHPassword != "",
 	})
 	writeData(w, http.StatusOK, result)
 }
 
-func (a *API) validateDraftEnvironment(w http.ResponseWriter, r *http.Request) {
-	var input domain.EnvironmentInput
+func (a *API) validateDraftHost(w http.ResponseWriter, r *http.Request) {
+	var input domain.HostInput
 	if err := decodeJSON(r, &input); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	ownerID, err := a.createOwnerScope(r, access.EnvironmentValidate)
+	ownerID, err := a.createOwnerScope(r, access.HostValidate)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	result, err := a.environments.ValidateDraft(r.Context(), ownerID, input)
+	result, err := a.hosts.ValidateDraft(r.Context(), input)
 	owner, _ := a.store.GetUser(r.Context(), ownerID)
-	setAuditTarget(r, owner, "environment", "", input.Name, map[string]any{"ip": input.IP, "service_type": input.ServiceType})
+	setAuditTarget(r, owner, "host", "", input.Name, map[string]any{"ip": input.IP})
 	if err != nil {
 		setAuditOutcome(r, "failure", "VALIDATION_FAILED")
 	}
 	writeValidation(w, result, err)
 }
 
-func (a *API) validateSavedEnvironment(w http.ResponseWriter, r *http.Request) {
-	env, authorizeErr := a.authorizeEnvironment(r, r.PathValue("id"), access.EnvironmentValidate)
+func (a *API) validateSavedHost(w http.ResponseWriter, r *http.Request) {
+	host, authorizeErr := a.authorizeHost(r, r.PathValue("id"), access.HostValidate)
 	if authorizeErr != nil {
 		a.writeError(w, r, authorizeErr)
 		return
 	}
-	owner, _ := a.store.GetUser(r.Context(), env.OwnerID)
-	setAuditTarget(r, owner, "environment", env.ID, env.Name, map[string]any{"ip": env.IP, "service_type": env.ServiceType})
-	result, err := a.environments.ValidateSaved(r.Context(), r.PathValue("id"))
+	owner, _ := a.store.GetUser(r.Context(), host.OwnerID)
+	setAuditTarget(r, owner, "host", host.ID, host.Name, map[string]any{"ip": host.IP})
+	result, err := a.hosts.ValidateSaved(r.Context(), r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
 		a.writeError(w, r, err)
 		return
@@ -434,20 +403,20 @@ func (a *API) validateSavedEnvironment(w http.ResponseWriter, r *http.Request) {
 	writeValidation(w, result, err)
 }
 
-func (a *API) exportEnvironments(w http.ResponseWriter, r *http.Request) {
-	ownerID, err := a.packageOwnerScope(r, access.EnvironmentExport)
+func (a *API) exportHosts(w http.ResponseWriter, r *http.Request) {
+	ownerID, err := a.packageOwnerScope(r, access.HostExport)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	document, err := a.environments.Export(r.Context(), ownerID)
+	document, err := a.hosts.Export(r.Context(), ownerID)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
 	owner, _ := a.store.GetUser(r.Context(), ownerID)
-	setAuditTarget(r, owner, "environment_export", ownerID, owner.Username, map[string]any{"count": len(document.Environments)})
-	filename := "dp-environments-" + time.Now().Format("20060102") + ".json"
+	setAuditTarget(r, owner, "host_export", ownerID, owner.Username, map[string]any{"count": len(document.Hosts)})
+	filename := "dp-hosts-" + time.Now().Format("20060102") + ".json"
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Header().Set("Cache-Control", "no-store")
@@ -455,26 +424,92 @@ func (a *API) exportEnvironments(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(document)
 }
 
-func (a *API) importEnvironments(w http.ResponseWriter, r *http.Request) {
+func (a *API) importHosts(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
-	var document application.ExportDocument
+	var document application.HostExportDocument
 	if err := decodeJSON(r, &document); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	ownerID, err := a.createOwnerScope(r, access.EnvironmentImport)
+	ownerID, err := a.createOwnerScope(r, access.HostImport)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	result, err := a.environments.Import(r.Context(), ownerID, document)
+	result, err := a.hosts.Import(r.Context(), ownerID, document)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
 	owner, _ := a.store.GetUser(r.Context(), ownerID)
-	setAuditTarget(r, owner, "environment", "", "批量导入环境", map[string]any{"created": result.Created, "overwritten": result.Overwritten, "total": result.Total})
+	setAuditTarget(r, owner, "host", "", "批量导入主机", map[string]any{"created": result.Created, "updated": result.Updated})
 	writeData(w, http.StatusOK, result)
+}
+
+func (a *API) createServiceInstance(w http.ResponseWriter, r *http.Request) {
+	var input domain.ServiceInstanceInput
+	if err := decodeJSON(r, &input); err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	ownerID, err := a.createOwnerScope(r, access.ServiceWrite)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	result, err := a.instances.Create(r.Context(), ownerID, input)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	owner, _ := a.store.GetUser(r.Context(), ownerID)
+	setAuditTarget(r, owner, "service", result.ID, result.Name, map[string]any{
+		"host_id": result.HostID, "service_type": result.ServiceType, "install_dir": result.InstallDir,
+	})
+	writeData(w, http.StatusCreated, result)
+}
+
+func (a *API) updateServiceInstance(w http.ResponseWriter, r *http.Request) {
+	original, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceWrite)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	var input domain.ServiceInstanceInput
+	if err := decodeJSON(r, &input); err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	result, err := a.instances.Update(r.Context(), original.ID, input)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	owner, _ := a.store.GetUser(r.Context(), original.OwnerID)
+	setAuditTarget(r, owner, "service", result.ID, result.Name, map[string]any{
+		"before": map[string]any{"host_id": original.HostID, "service_type": original.ServiceType, "install_dir": original.InstallDir},
+		"after":  map[string]any{"host_id": result.HostID, "service_type": result.ServiceType, "install_dir": result.InstallDir},
+	})
+	writeData(w, http.StatusOK, result)
+}
+
+func (a *API) deleteServiceInstance(w http.ResponseWriter, r *http.Request) {
+	instance, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceDelete)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	if a.operations.Busy(instance.ID) {
+		a.writeError(w, r, domain.ErrOperationInProgress)
+		return
+	}
+	if err := a.instances.Delete(r.Context(), instance.ID); err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	owner, _ := a.store.GetUser(r.Context(), instance.OwnerID)
+	setAuditTarget(r, owner, "service", instance.ID, instance.Name, nil)
+	writeData(w, http.StatusOK, map[string]string{"deleted": instance.ID})
 }
 
 func (a *API) getPackage(w http.ResponseWriter, r *http.Request) {
@@ -662,12 +697,12 @@ func (a *API) listServices(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	environments, err := a.environments.ListFiltered(r.Context(), ownerID, tagIDs)
+	instances, err := a.instances.ListFiltered(r.Context(), ownerID, tagIDs)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	ports, err := a.store.ListServicePorts(r.Context())
+	ports, err := a.configs.ListAPIPorts(r.Context(), instances)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -678,21 +713,21 @@ func (a *API) listServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serviceType := r.URL.Query().Get("service_type")
-	result := make([]domain.ServiceView, 0, len(environments))
-	for _, env := range environments {
-		if serviceType != "" && env.ServiceType != serviceType {
+	result := make([]domain.ServiceView, 0, len(instances))
+	for _, instance := range instances {
+		if serviceType != "" && instance.ServiceType != serviceType {
 			continue
 		}
-		var servicePort *int
-		if port, ok := ports[env.ID]; ok {
-			servicePort = &port
+		var apiPort *int
+		if port, ok := ports[instance.ID]; ok {
+			apiPort = &port
 		}
 		healthResult := domain.HealthResult{Status: "unknown"}
-		if env.Installed {
-			healthResult = a.health.Snapshot(env.ID)
+		if instance.Installed {
+			healthResult = a.health.Snapshot(instance.ID)
 		}
 		var lastOperation *domain.OperationSummary
-		if op, ok := latestOps[env.ID]; ok {
+		if op, ok := latestOps[instance.ID]; ok {
 			lastOperation = &domain.OperationSummary{
 				Action:       op.Action,
 				Status:       op.Status,
@@ -701,18 +736,18 @@ func (a *API) listServices(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		result = append(result, domain.ServiceView{
-			Environment:   env,
-			Health:        healthResult,
-			ServicePort:   servicePort,
-			Busy:          a.operations.Busy(env.ID),
-			LastOperation: lastOperation,
+			ServiceInstance: instance,
+			Health:          healthResult,
+			APIPort:         apiPort,
+			Busy:            a.operations.Busy(instance.ID),
+			LastOperation:   lastOperation,
 		})
 	}
 	writeData(w, http.StatusOK, result)
 }
 
 func (a *API) getServiceConfig(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
+	if _, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -725,13 +760,13 @@ func (a *API) getServiceConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) updateServiceConfig(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigWrite)
+	instance, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceConfigWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	owner, _ := a.store.GetUser(r.Context(), env.OwnerID)
-	setAuditTarget(r, owner, "service", env.ID, env.Name, map[string]any{"config_changed": true})
+	owner, _ := a.store.GetUser(r.Context(), instance.OwnerID)
+	setAuditTarget(r, owner, "service", instance.ID, instance.Name, map[string]any{"config_changed": true})
 	var input struct {
 		Content string `json:"content"`
 	}
@@ -744,13 +779,13 @@ func (a *API) updateServiceConfig(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	setAuditTarget(r, owner, "service", env.ID, env.Name,
+	setAuditTarget(r, owner, "service", instance.ID, instance.Name,
 		map[string]any{"config_changed": true, "revision_id": config.CurrentRevisionID, "format": config.Format, "path": config.Path, "port": config.Port})
 	writeData(w, http.StatusOK, config)
 }
 
 func (a *API) previewServiceConfig(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigWrite); err != nil {
+	if _, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceConfigWrite); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -770,7 +805,7 @@ func (a *API) previewServiceConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listServiceConfigRevisions(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
+	if _, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -783,7 +818,7 @@ func (a *API) listServiceConfigRevisions(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *API) getServiceConfigRevision(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
+	if _, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceConfigRead); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
@@ -796,38 +831,38 @@ func (a *API) getServiceConfigRevision(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) rollbackServiceConfigRevision(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceConfigWrite)
+	instance, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceConfigWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	owner, _ := a.store.GetUser(r.Context(), env.OwnerID)
-	setAuditTarget(r, owner, "service", env.ID, env.Name, map[string]any{"restored_from_revision_id": r.PathValue("revisionId")})
-	item, err := a.configs.Rollback(r.Context(), env.ID, r.PathValue("revisionId"), currentUser(r))
+	owner, _ := a.store.GetUser(r.Context(), instance.OwnerID)
+	setAuditTarget(r, owner, "service", instance.ID, instance.Name, map[string]any{"restored_from_revision_id": r.PathValue("revisionId")})
+	item, err := a.configs.Rollback(r.Context(), instance.ID, r.PathValue("revisionId"), currentUser(r))
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	setAuditTarget(r, owner, "service", env.ID, env.Name, map[string]any{"revision_id": item.ID, "restored_from_revision_id": item.RestoredFromID, "port": item.Port})
+	setAuditTarget(r, owner, "service", instance.ID, instance.Name, map[string]any{"revision_id": item.ID, "restored_from_revision_id": item.RestoredFromID, "port": item.Port})
 	writeData(w, http.StatusOK, item)
 }
 
 func (a *API) startAction(action domain.OperationAction) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		env, err := a.authorizeEnvironment(r, r.PathValue("id"), serviceActionPermission(action))
+		instance, err := a.authorizeServiceInstance(r, r.PathValue("id"), serviceActionPermission(action))
 		if err != nil {
 			a.writeError(w, r, err)
 			return
 		}
-		owner, _ := a.store.GetUser(r.Context(), env.OwnerID)
-		setAuditTarget(r, owner, "service", env.ID, env.Name, map[string]any{"ip": env.IP, "service_type": env.ServiceType})
+		owner, _ := a.store.GetUser(r.Context(), instance.OwnerID)
+		setAuditTarget(r, owner, "service", instance.ID, instance.Name, map[string]any{"ip": instance.Host.IP, "service_type": instance.ServiceType})
 		event := domain.AuditEvent{
 			Category: "service", Action: "service." + string(action) + ".requested", Outcome: "success",
 			ActorUserID: currentUser(r).ID, ActorUsername: currentUser(r).Username,
 			ActorRoles: roleKeys(currentUser(r)), OwnerID: owner.ID, OwnerUsername: owner.Username,
-			TargetType: "service", TargetID: env.ID, TargetLabel: env.Name,
+			TargetType: "service", TargetID: instance.ID, TargetLabel: instance.Name,
 			RequestID: requestID(r.Context()), SourceIP: a.sourceIP(r), UserAgent: r.UserAgent(),
-			Changes: map[string]any{"ip": env.IP, "service_type": env.ServiceType},
+			Changes: map[string]any{"ip": instance.Host.IP, "service_type": instance.ServiceType},
 		}
 		op, err := a.operations.StartWithAudit(r.Context(), r.PathValue("id"), action, event)
 		if err != nil {
@@ -856,13 +891,13 @@ func serviceActionPermission(action domain.OperationAction) access.Permission {
 }
 
 func (a *API) checkHealth(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.ServiceHealth)
+	instance, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.ServiceHealth)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	owner, _ := a.store.GetUser(r.Context(), env.OwnerID)
-	setAuditTarget(r, owner, "service", env.ID, env.Name, map[string]any{"ip": env.IP, "service_type": env.ServiceType})
+	owner, _ := a.store.GetUser(r.Context(), instance.OwnerID)
+	setAuditTarget(r, owner, "service", instance.ID, instance.Name, map[string]any{"ip": instance.Host.IP, "service_type": instance.ServiceType})
 	result, err := a.health.CheckNow(r.Context(), r.PathValue("id"))
 	if err != nil {
 		a.writeError(w, r, err)
@@ -997,7 +1032,7 @@ func classifyHTTPError(err error) (int, string, string, any) {
 			status = http.StatusTooManyRequests
 		case "COMMUNICATION_CLOSED", "COMMUNICATION_ALREADY_OPEN", "COMMUNICATION_ALREADY_CLOSED", "COMMUNICATION_TARGET_DISABLED":
 			status = http.StatusConflict
-		case "PACKAGE_NOT_FOUND", "PACKAGE_IN_USE", "PACKAGE_VERSION_EXISTS", "PACKAGE_VERSION_CURRENT", "PACKAGE_VERSION_IN_USE", "PACKAGE_VERSION_INCOMPATIBLE", "CONFIG_REVISION_CURRENT", "ENVIRONMENT_INSTALLED", "ENVIRONMENT_HAS_MODELS", "USER_IN_USE", "USER_PROTECTED", "USERNAME_CONFLICT", "TRANSFER_CONFLICT", "TAG_EXISTS", "MODEL_TARGET_EXISTS", "MODEL_UPLOAD_EXISTS", "UPLOAD_OFFSET_MISMATCH", "MODEL_UPLOAD_INCOMPLETE", "MODEL_UPLOAD_CLOSED", "MODEL_UPLOAD_EXPIRED", "MODEL_OPERATION_IN_PROGRESS", "MODEL_NOT_RETRYABLE", "MODEL_UPLOAD_NOT_AVAILABLE", "ROLE_KEY_CONFLICT", "ROLE_IN_USE", "ROLE_PROTECTED":
+		case "PACKAGE_NOT_FOUND", "PACKAGE_IN_USE", "PACKAGE_VERSION_EXISTS", "PACKAGE_VERSION_CURRENT", "PACKAGE_VERSION_IN_USE", "PACKAGE_VERSION_INCOMPATIBLE", "CONFIG_REVISION_CURRENT", "SERVICE_INSTALLED", "SERVICE_INSTANCE_CONFLICT", "HOST_CONFLICT", "HOST_HAS_SERVICES", "HOST_HAS_MODELS", "HOST_IN_USE", "USER_IN_USE", "USER_PROTECTED", "USERNAME_CONFLICT", "TRANSFER_CONFLICT", "TAG_EXISTS", "MODEL_TARGET_EXISTS", "MODEL_UPLOAD_EXISTS", "UPLOAD_OFFSET_MISMATCH", "MODEL_UPLOAD_INCOMPLETE", "MODEL_UPLOAD_CLOSED", "MODEL_UPLOAD_EXPIRED", "MODEL_OPERATION_IN_PROGRESS", "MODEL_NOT_RETRYABLE", "MODEL_UPLOAD_NOT_AVAILABLE", "ROLE_KEY_CONFLICT", "ROLE_IN_USE", "ROLE_PROTECTED":
 			status = http.StatusConflict
 		}
 		return status, appErr.Code, appErr.Message, nil
@@ -1010,13 +1045,13 @@ func classifyHTTPError(err error) (int, string, string, any) {
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound, "NOT_FOUND", "请求的资源不存在", nil
 	case errors.Is(err, domain.ErrConflict):
-		return http.StatusConflict, "ENVIRONMENT_CONFLICT", "服务器 IP 与服务类型已存在", nil
+		return http.StatusConflict, "CONFLICT", "资源状态冲突", nil
 	case errors.Is(err, domain.ErrAlreadyInstalled):
 		return http.StatusConflict, "ALREADY_INSTALLED", "该服务已安装，不允许重复安装", nil
 	case errors.Is(err, domain.ErrNotInstalled):
 		return http.StatusConflict, "NOT_INSTALLED", "该服务尚未安装", nil
 	case errors.Is(err, domain.ErrOperationInProgress):
-		return http.StatusConflict, "OPERATION_IN_PROGRESS", "该环境已有操作正在执行", nil
+		return http.StatusConflict, "OPERATION_IN_PROGRESS", "该服务实例已有操作正在执行", nil
 	default:
 		return http.StatusInternalServerError, "INTERNAL_ERROR", "服务器内部错误", nil
 	}

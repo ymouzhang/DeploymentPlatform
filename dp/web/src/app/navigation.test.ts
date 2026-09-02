@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Permission, PermissionScope, User } from '../types'
 import { allowedPagePaths, documentTitleForPath, pageNameForPath } from './navigation'
 
-const businessPaths = ['/packages', '/environments', '/models', '/services', '/communications', '/operations']
+const businessPaths = ['/packages', '/hosts', '/models', '/services', '/communications', '/operations']
 const managementPaths = ['/dashboard', '/roles', '/users', '/audit', '/notifications']
 
 function roleUser(key: string, permissions: Permission[]) {
@@ -23,17 +23,17 @@ describe('built-in role navigation', () => {
   it.each(['super_admin', 'platform_admin'])('%s sees management and business pages', (role) => {
     const permissions: Permission[] = [
       'dashboard.read', 'role.read', 'account.read', 'audit.read', 'notification.read',
-      'package.read', 'environment.read', 'model.read', 'service.read', 'communication.read', 'operation.read',
+      'package.read', 'host.read', 'model.read', 'service.read', 'communication.read', 'operation.read',
     ]
     expect(allowedPagePaths(roleUser(role, permissions))).toEqual([
-      '/dashboard', '/packages', '/environments', '/models', '/services', '/communications',
+      '/dashboard', '/packages', '/hosts', '/models', '/services', '/communications',
       '/roles', '/users', '/operations', '/audit', '/notifications',
     ])
   })
 
   it.each(['operator', 'viewer'])('%s only sees own-scope business pages', (role) => {
     const permissions: Permission[] = [
-      'package.read', 'environment.read', 'model.read', 'service.read', 'communication.read', 'operation.read',
+      'package.read', 'host.read', 'model.read', 'service.read', 'communication.read', 'operation.read',
     ]
     const paths = allowedPagePaths(roleUser(role, permissions))
     expect(paths).toEqual(businessPaths)

@@ -57,7 +57,7 @@ func TestPermissionCatalogAndBuiltInRoleMatrix(t *testing.T) {
 	operator := make(map[access.Permission]access.Scope)
 	for _, definition := range definitions {
 		switch definition.Resource {
-		case "package", "environment", "tag", "model", "service", "operation":
+		case "package", "host", "tag", "model", "service", "operation":
 			operator[definition.Key] = access.ScopeOwn
 		}
 	}
@@ -67,7 +67,7 @@ func TestPermissionCatalogAndBuiltInRoleMatrix(t *testing.T) {
 
 	viewer := map[access.Permission]access.Scope{
 		access.PackageRead:       access.ScopeOwn,
-		access.EnvironmentRead:   access.ScopeOwn,
+		access.HostRead:          access.ScopeOwn,
 		access.TagRead:           access.ScopeOwn,
 		access.ModelRead:         access.ScopeOwn,
 		access.ServiceRead:       access.ScopeOwn,

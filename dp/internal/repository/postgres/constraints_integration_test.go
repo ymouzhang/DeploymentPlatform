@@ -66,16 +66,32 @@ func TestPostgreSQLConstraintsAndTransactionRollback(t *testing.T) {
 	})
 
 	t.Run("resource foreign key prevents owner deletion", func(t *testing.T) {
-		owner := createRepositoryUser(t, ctx, db, "environment-owner", access.RoleOperator, true)
-		_, err := db.CreateEnvironment(ctx, domain.Environment{
-			OwnerID: owner.ID, Name: "constraint-env", IP: "192.0.2.20", SSHUser: "dp",
-			SSHPort: 22, SSHPasswordEnc: "encrypted", InstallDir: "/opt/dp", ServiceType: "demo",
+		owner := createRepositoryUser(t, ctx, db, "serviceInstance-owner", access.RoleOperator, true)
+		host, err := db.CreateHost(ctx, domain.Host{OwnerID: owner.ID, Name: "constraint-host", IP: "192.0.2.20", SSHUser: "dp", SSHPort: 22, SSHPasswordEnc: "encrypted"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.CreateServiceInstance(ctx, domain.ServiceInstance{
+			OwnerID: owner.ID, HostID: host.ID, Name: "constraint-instance", InstallDir: "/opt/dp", ServiceType: "demo",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := db.DeleteUser(ctx, owner.ID); !errors.Is(err, domain.ErrConflict) {
 			t.Fatalf("delete referenced owner error = %v", err)
+		}
+	})
+
+	t.Run("service instance and host owners must match", func(t *testing.T) {
+		hostOwner := createRepositoryUser(t, ctx, db, "host-owner", access.RoleOperator, true)
+		instanceOwner := createRepositoryUser(t, ctx, db, "instance-owner", access.RoleOperator, true)
+		host, err := db.CreateHost(ctx, domain.Host{OwnerID: hostOwner.ID, Name: "host", IP: "192.0.2.30", SSHUser: "dp", SSHPort: 22, SSHPasswordEnc: "encrypted"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.CreateServiceInstanceWithTags(ctx, domain.ServiceInstance{OwnerID: instanceOwner.ID, HostID: host.ID, Name: "invalid-owner", InstallDir: "/opt/invalid", ServiceType: "demo"}, nil)
+		if err == nil {
+			t.Fatal("cross-owner service instance was accepted")
 		}
 	})
 }

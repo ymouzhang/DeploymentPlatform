@@ -61,7 +61,7 @@ func TestAuthenticationMiddlewareRejectsMissingSession(t *testing.T) {
 	}
 }
 
-func TestEnvironmentAuthorizationRejectsOtherOwners(t *testing.T) {
+func TestServiceInstanceAuthorizationRejectsOtherOwners(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenPostgres(t)
 	owner, err := db.CreateUser(ctx, testutil.User(t, "owner", access.RoleOperator, true))
@@ -72,7 +72,7 @@ func TestEnvironmentAuthorizationRejectsOtherOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: owner.ID, Name: "env", IP: "127.0.0.1", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/x", ServiceType: "service"})
+	env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{OwnerID: owner.ID, Name: "env", Host: domain.Host{IP: "127.0.0.1", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc"}, InstallDir: "/opt/x", ServiceType: "service"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,20 +80,20 @@ func TestEnvironmentAuthorizationRejectsOtherOwners(t *testing.T) {
 	other.Permissions = access.Grants{access.ServiceRead: access.ScopeOwn}
 	request := httptest.NewRequest("GET", "/api/v1/services/"+env.ID+"/config", nil)
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: other}))
-	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := api.authorizeServiceInstance(request, env.ID, access.ServiceRead); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-owner error=%v", err)
 	} else if status, _, _, _ := classifyHTTPError(err); status != http.StatusForbidden {
 		t.Fatalf("cross-owner status=%d", status)
 	}
-	if _, err := api.authorizeEnvironment(request, domain.NewID(), access.ServiceRead); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("missing environment error=%v", err)
+	if _, err := api.authorizeServiceInstance(request, domain.NewID(), access.ServiceRead); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing serviceInstance error=%v", err)
 	} else if status, _, _, _ := classifyHTTPError(err); status != http.StatusNotFound {
-		t.Fatalf("missing environment status=%d", status)
+		t.Fatalf("missing serviceInstance status=%d", status)
 	}
 	admin := other
 	admin.Permissions = access.Grants{access.ServiceRead: access.ScopeAll}
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: admin}))
-	if _, err := api.authorizeEnvironment(request, env.ID, access.ServiceRead); err != nil {
+	if _, err := api.authorizeServiceInstance(request, env.ID, access.ServiceRead); err != nil {
 		t.Fatalf("admin access: %v", err)
 	}
 }
@@ -132,15 +132,15 @@ func TestVisibleTagIDsRejectsCrossOwnerForOrdinaryUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := &API{store: db}
-	other.Permissions = access.Grants{access.EnvironmentRead: access.ScopeOwn}
-	owner.Permissions = access.Grants{access.EnvironmentRead: access.ScopeOwn}
-	request := httptest.NewRequest("GET", "/api/v1/environments?tag_id="+tag.ID, nil)
+	other.Permissions = access.Grants{access.HostRead: access.ScopeOwn}
+	owner.Permissions = access.Grants{access.HostRead: access.ScopeOwn}
+	request := httptest.NewRequest("GET", "/api/v1/services?tag_id="+tag.ID, nil)
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: other}))
-	if _, err := api.visibleTagIDs(request, other.ID, access.EnvironmentRead); err == nil {
+	if _, err := api.visibleTagIDs(request, other.ID, access.HostRead); err == nil {
 		t.Fatal("expected cross-owner tag rejection")
 	}
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: owner}))
-	ids, err := api.visibleTagIDs(request, owner.ID, access.EnvironmentRead)
+	ids, err := api.visibleTagIDs(request, owner.ID, access.HostRead)
 	if err != nil || len(ids) != 1 || ids[0] != tag.ID {
 		t.Fatalf("ids=%v err=%v", ids, err)
 	}

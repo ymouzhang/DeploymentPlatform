@@ -72,7 +72,7 @@ CREATE TABLE login_throttles (
 );
 CREATE INDEX idx_login_throttles_updated ON login_throttles(updated_at);
 
-CREATE TABLE environments (
+CREATE TABLE hosts (
     id UUID PRIMARY KEY,
     owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     name TEXT NOT NULL,
@@ -80,21 +80,16 @@ CREATE TABLE environments (
     ssh_user TEXT NOT NULL,
     ssh_port INTEGER NOT NULL CHECK (ssh_port BETWEEN 1 AND 65535),
     ssh_password_enc TEXT NOT NULL,
-    install_dir TEXT NOT NULL,
-    service_type VARCHAR(63) NOT NULL,
-    installed BOOLEAN NOT NULL DEFAULT FALSE,
-    installed_at TIMESTAMPTZ,
-    installed_package_sha256 CHAR(64),
-    health_port INTEGER CHECK (health_port BETWEEN 1 AND 65535),
     host_key_fingerprint TEXT NOT NULL DEFAULT '',
     arch TEXT NOT NULL DEFAULT '',
     note VARCHAR(200) NOT NULL DEFAULT '',
     last_validation_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
-    UNIQUE(owner_id, ip, service_type)
+    UNIQUE(owner_id, ip, ssh_port),
+    UNIQUE(id, owner_id)
 );
-CREATE INDEX idx_environments_owner ON environments(owner_id, created_at DESC);
+CREATE INDEX idx_hosts_owner ON hosts(owner_id, created_at DESC);
 
 CREATE TABLE packages (
     owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -132,8 +127,30 @@ CREATE TABLE package_versions (
 CREATE INDEX idx_package_versions_owner_type_time
     ON package_versions(owner_id, service_type, uploaded_at DESC, id DESC);
 
+CREATE TABLE service_instances (
+    id UUID PRIMARY KEY,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    host_id UUID NOT NULL,
+    name TEXT NOT NULL,
+    install_dir TEXT NOT NULL,
+    service_type VARCHAR(63) NOT NULL,
+    note VARCHAR(200) NOT NULL DEFAULT '',
+    installed BOOLEAN NOT NULL DEFAULT FALSE,
+    installed_at TIMESTAMPTZ,
+    installed_package_sha256 CHAR(64),
+    health_port INTEGER CHECK (health_port BETWEEN 1 AND 65535),
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(host_id, install_dir),
+    CONSTRAINT service_instances_host_owner_fkey
+        FOREIGN KEY(host_id, owner_id) REFERENCES hosts(id, owner_id)
+        ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX idx_service_instances_owner ON service_instances(owner_id, created_at DESC);
+CREATE INDEX idx_service_instances_host ON service_instances(host_id, created_at DESC);
+
 CREATE TABLE service_configs (
-    environment_id UUID PRIMARY KEY REFERENCES environments(id) ON DELETE CASCADE,
+    service_instance_id UUID PRIMARY KEY REFERENCES service_instances(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     format VARCHAR(8) NOT NULL CHECK(format IN ('json', 'yaml')),
     path TEXT NOT NULL,
@@ -144,7 +161,7 @@ CREATE TABLE service_configs (
 
 CREATE TABLE service_config_revisions (
     id UUID PRIMARY KEY,
-    environment_id UUID NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+    service_instance_id UUID NOT NULL REFERENCES service_instances(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     format VARCHAR(8) NOT NULL CHECK(format IN ('json', 'yaml')),
     path TEXT NOT NULL,
@@ -155,19 +172,19 @@ CREATE TABLE service_config_revisions (
     created_by_username VARCHAR(32) NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX idx_config_revisions_environment_time
-    ON service_config_revisions(environment_id, created_at DESC, id DESC);
+CREATE INDEX idx_config_revisions_service_instance_time
+    ON service_config_revisions(service_instance_id, created_at DESC, id DESC);
 
 CREATE TABLE operations (
     id UUID PRIMARY KEY,
-    environment_id UUID NOT NULL,
+    service_instance_id UUID NOT NULL,
     request_id UUID,
     actor_user_id UUID,
     actor_username VARCHAR(32) NOT NULL DEFAULT '',
     owner_id UUID,
     owner_username VARCHAR(32) NOT NULL DEFAULT '',
-    environment_name TEXT NOT NULL DEFAULT '',
-    environment_ip INET,
+    service_instance_name TEXT NOT NULL DEFAULT '',
+    host_ip INET,
     service_type VARCHAR(63) NOT NULL DEFAULT '',
     action VARCHAR(32) NOT NULL,
     status VARCHAR(32) NOT NULL,
@@ -180,7 +197,7 @@ CREATE TABLE operations (
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ
 );
-CREATE INDEX idx_operations_environment_created ON operations(environment_id, created_at DESC);
+CREATE INDEX idx_operations_service_instance_created ON operations(service_instance_id, created_at DESC);
 CREATE INDEX idx_operations_created ON operations(created_at DESC, id DESC);
 CREATE INDEX idx_operations_owner_created ON operations(owner_id, created_at DESC);
 CREATE INDEX idx_operations_actor_created ON operations(actor_user_id, created_at DESC);
@@ -253,25 +270,25 @@ CREATE TABLE resource_tags (
 CREATE UNIQUE INDEX idx_resource_tags_owner_name
     ON resource_tags(owner_id, lower(group_name), lower(value)) WHERE deleted_at IS NULL;
 
-CREATE TABLE environment_tags (
-    environment_id UUID NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+CREATE TABLE service_instance_tags (
+    service_instance_id UUID NOT NULL REFERENCES service_instances(id) ON DELETE CASCADE,
     tag_id UUID NOT NULL REFERENCES resource_tags(id) ON DELETE CASCADE,
-    PRIMARY KEY(environment_id, tag_id)
+    PRIMARY KEY(service_instance_id, tag_id)
 );
-CREATE INDEX idx_environment_tags_tag ON environment_tags(tag_id, environment_id);
+CREATE INDEX idx_service_instance_tags_tag ON service_instance_tags(tag_id, service_instance_id);
 
-CREATE FUNCTION check_environment_tag_owner() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION check_service_instance_tag_owner() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF (SELECT owner_id FROM environments WHERE id = NEW.environment_id) IS DISTINCT FROM
+    IF (SELECT owner_id FROM service_instances WHERE id = NEW.service_instance_id) IS DISTINCT FROM
        (SELECT owner_id FROM resource_tags WHERE id = NEW.tag_id) THEN
-        RAISE EXCEPTION 'environment and tag owners differ' USING ERRCODE = '23514';
+        RAISE EXCEPTION 'service_instance and tag owners differ' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
 END;
 $$;
-CREATE TRIGGER environment_tags_same_owner
-    BEFORE INSERT OR UPDATE ON environment_tags
-    FOR EACH ROW EXECUTE FUNCTION check_environment_tag_owner();
+CREATE TRIGGER service_instance_tags_same_owner
+    BEFORE INSERT OR UPDATE ON service_instance_tags
+    FOR EACH ROW EXECUTE FUNCTION check_service_instance_tag_owner();
 
 CREATE TABLE operation_tags (
     operation_id UUID NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
@@ -330,15 +347,15 @@ CREATE INDEX idx_communication_recipients_unread
 CREATE TABLE communication_resource_refs (
     id UUID PRIMARY KEY,
     thread_id UUID NOT NULL REFERENCES communication_threads(id) ON DELETE CASCADE,
-    resource_type VARCHAR(16) NOT NULL CHECK(resource_type IN ('package', 'environment', 'service')),
+    resource_type VARCHAR(16) NOT NULL CHECK(resource_type IN ('package', 'host', 'service')),
     resource_id UUID,
     resource_key TEXT NOT NULL DEFAULT '',
     owner_id UUID NOT NULL,
     owner_username VARCHAR(32) NOT NULL,
     resource_label TEXT NOT NULL,
     service_type VARCHAR(63) NOT NULL DEFAULT '',
-    environment_name TEXT NOT NULL DEFAULT '',
-    environment_ip INET,
+    host_name TEXT NOT NULL DEFAULT '',
+    host_ip INET,
     created_at TIMESTAMPTZ NOT NULL,
     UNIQUE NULLS NOT DISTINCT(thread_id, resource_type, resource_id, resource_key)
 );
@@ -348,9 +365,9 @@ CREATE TABLE models (
     id UUID PRIMARY KEY,
     owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     marker_owner_id UUID NOT NULL,
-    environment_id UUID NOT NULL REFERENCES environments(id) ON DELETE RESTRICT,
-    environment_name TEXT NOT NULL,
-    environment_ip INET NOT NULL,
+    host_id UUID NOT NULL REFERENCES hosts(id) ON DELETE RESTRICT,
+    host_name TEXT NOT NULL,
+    host_ip INET NOT NULL,
     name TEXT NOT NULL,
     source VARCHAR(16) NOT NULL CHECK(source IN ('offline', 'modelscope', 'huggingface')),
     target_dir TEXT NOT NULL,
@@ -369,9 +386,9 @@ CREATE TABLE models (
     deleted_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX idx_models_owner_target_active
-    ON models(owner_id, environment_ip, target_dir) WHERE deleted_at IS NULL;
+    ON models(owner_id, host_ip, target_dir) WHERE deleted_at IS NULL;
 CREATE INDEX idx_models_owner_created ON models(owner_id, created_at DESC);
-CREATE INDEX idx_models_environment_active ON models(environment_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_models_host_active ON models(host_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE model_uploads (
     id UUID PRIMARY KEY,
@@ -428,18 +445,20 @@ INSERT INTO permissions (key, resource, action, description, scoped) VALUES
     ('package.read', 'package', 'read', '查看安装包', TRUE),
     ('package.write', 'package', 'write', '上传和更新安装包', TRUE),
     ('package.delete', 'package', 'delete', '删除安装包', TRUE),
-    ('environment.read', 'environment', 'read', '查看环境', TRUE),
-    ('environment.write', 'environment', 'write', '创建和修改环境', TRUE),
-    ('environment.delete', 'environment', 'delete', '删除环境', TRUE),
-    ('environment.validate', 'environment', 'validate', '校验 SSH 环境', TRUE),
-    ('environment.import', 'environment', 'import', '导入环境', TRUE),
-    ('environment.export', 'environment', 'export', '导出环境', TRUE),
+    ('host.read', 'host', 'read', '查看主机', TRUE),
+    ('host.write', 'host', 'write', '创建和修改主机', TRUE),
+    ('host.delete', 'host', 'delete', '删除主机', TRUE),
+    ('host.validate', 'host', 'validate', '校验主机 SSH 连接', TRUE),
+    ('host.import', 'host', 'import', '导入主机', TRUE),
+    ('host.export', 'host', 'export', '导出主机', TRUE),
     ('tag.read', 'tag', 'read', '查看标签', TRUE),
     ('tag.write', 'tag', 'write', '管理标签', TRUE),
     ('model.read', 'model', 'read', '查看模型', TRUE),
     ('model.upload', 'model', 'upload', '上传和重试模型', TRUE),
     ('model.delete', 'model', 'delete', '删除模型', TRUE),
     ('service.read', 'service', 'read', '查看服务', TRUE),
+    ('service.write', 'service', 'write', '创建和修改服务实例', TRUE),
+    ('service.delete', 'service', 'delete', '删除服务实例', TRUE),
     ('service.config.read', 'service', 'config.read', '查看服务配置', TRUE),
     ('service.config.write', 'service', 'config.write', '修改服务配置', TRUE),
     ('service.install', 'service', 'install', '安装服务', TRUE),
@@ -467,12 +486,12 @@ SELECT '00000000-0000-4000-8000-000000000102', id, 'all' FROM permissions;
 INSERT INTO role_permissions (role_id, permission_id, scope)
 SELECT '00000000-0000-4000-8000-000000000103', id, 'own'
 FROM permissions
-WHERE resource IN ('package', 'environment', 'tag', 'model', 'service', 'operation', 'communication');
+WHERE resource IN ('package', 'host', 'tag', 'model', 'service', 'operation', 'communication');
 
 INSERT INTO role_permissions (role_id, permission_id, scope)
 SELECT '00000000-0000-4000-8000-000000000104', id, 'own'
 FROM permissions
 WHERE key IN (
-    'package.read', 'environment.read', 'tag.read', 'model.read', 'service.read',
+    'package.read', 'host.read', 'tag.read', 'model.read', 'service.read',
     'service.config.read', 'service.log.read', 'operation.read', 'communication.read'
 );

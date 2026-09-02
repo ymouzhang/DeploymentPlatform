@@ -19,27 +19,27 @@ func TestServiceConfigPreviewHistoryAndRollback(t *testing.T) {
 	dataDir := t.TempDir()
 	db := testutil.OpenPostgres(t)
 	manager := archive.NewManager(dataDir, 10<<20, db)
-	content := configArchive(t, `{"port":8080,"mode":"safe"}`)
+	content := configArchive(t, `{"port":8080,"api_port":8000,"mode":"safe"}`)
 	if _, err := manager.Upload(ctx, "demo", "demo.tar.gz", bytes.NewReader(content), nil); err != nil {
 		t.Fatal(err)
 	}
-	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: domain.InitialAdminID, Name: "test", IP: "192.0.2.20", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
+	env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{OwnerID: domain.InitialAdminID, Name: "test", Host: domain.Host{IP: "192.0.2.20", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc"}, InstallDir: "/opt/demo", ServiceType: "demo"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := NewServiceConfigService(db, manager, nil, nil)
 	actor := domain.User{ID: domain.InitialAdminID, Username: "admin"}
-	preview, err := service.Preview(ctx, env.ID, []byte(`{"port":8080,"mode":"safe"}`))
+	preview, err := service.Preview(ctx, env.ID, []byte(`{"port":8080,"api_port":8000,"mode":"safe"}`))
 	if err != nil || preview.Changed {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
-	first, err := service.Update(ctx, env.ID, []byte(`{"port":8080,"mode":"safe"}`), actor)
+	first, err := service.Update(ctx, env.ID, []byte(`{"port":8080,"api_port":8000,"mode":"safe"}`), actor)
 	if err != nil || first.CurrentRevisionID == "" {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
-	secondContent := `{"port":9090,"mode":"fast"}`
+	secondContent := `{"port":9090,"api_port":9000,"mode":"fast"}`
 	second, err := service.Update(ctx, env.ID, []byte(secondContent), actor)
-	if err != nil || second.Port != 9090 {
+	if err != nil || second.Port != 9090 || second.APIPort == nil || *second.APIPort != 9000 {
 		t.Fatalf("second=%+v err=%v", second, err)
 	}
 	revisions, err := service.ListRevisions(ctx, env.ID)
@@ -51,14 +51,14 @@ func TestServiceConfigPreviewHistoryAndRollback(t *testing.T) {
 		t.Fatalf("rolled=%+v err=%v", rolled, err)
 	}
 	current, err := service.Get(ctx, env.ID)
-	if err != nil || current.Content != `{"port":8080,"mode":"safe"}` {
+	if err != nil || current.Content != `{"port":8080,"api_port":8000,"mode":"safe"}` || current.APIPort == nil || *current.APIPort != 8000 {
 		t.Fatalf("current=%+v err=%v", current, err)
 	}
 	revisions, _ = service.ListRevisions(ctx, env.ID)
 	if len(revisions) != 3 || !revisions[0].Current {
 		t.Fatalf("revisions after rollback=%+v", revisions)
 	}
-	if _, err := db.DeleteEnvironment(ctx, env.ID); err != nil {
+	if _, err := db.DeleteServiceInstance(ctx, env.ID); err != nil {
 		t.Fatal(err)
 	}
 	revisions, err = db.ListServiceConfigRevisions(ctx, env.ID)
@@ -76,18 +76,18 @@ func TestPackageUpdateOnlyChangesInheritedServiceConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	createEnvironment := func(name, ip string) domain.Environment {
+	createServiceInstance := func(name, ip string) domain.ServiceInstance {
 		t.Helper()
-		env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: domain.InitialAdminID, Name: name,
-			IP: ip, SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/demo", ServiceType: "demo"})
+		env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{OwnerID: domain.InitialAdminID, Name: name,
+			Host: domain.Host{IP: ip, SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc"}, InstallDir: "/opt/demo", ServiceType: "demo"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return env
 	}
-	independent := createEnvironment("independent", "192.0.2.30")
-	inherited := createEnvironment("inherited", "192.0.2.31")
-	installedWithoutSavedConfig := createEnvironment("installed-without-saved-config", "192.0.2.32")
+	independent := createServiceInstance("independent", "192.0.2.30")
+	inherited := createServiceInstance("inherited", "192.0.2.31")
+	installedWithoutSavedConfig := createServiceInstance("installed-without-saved-config", "192.0.2.32")
 	service := NewServiceConfigService(db, manager, nil, nil)
 	actor := domain.User{ID: domain.InitialAdminID, Username: "admin"}
 	custom := `{"port":9090,"custom":true}`
@@ -138,9 +138,8 @@ func TestServiceConfigRestoresRemoteWhenLocalCommitFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := 8080
-	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		OwnerID: domain.InitialAdminID, Name: "test", IP: "192.0.2.21", SSHUser: "u", SSHPort: 22,
-		SSHPasswordEnc: encrypted, InstallDir: "/opt/demo", ServiceType: "demo", Installed: true, HealthPort: &port,
+	env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{
+		OwnerID: domain.InitialAdminID, Name: "test", Host: domain.Host{IP: "192.0.2.21", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: encrypted}, InstallDir: "/opt/demo", ServiceType: "demo", Installed: true, HealthPort: &port,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +161,7 @@ type cancelingConfigWriter struct {
 	contents [][]byte
 }
 
-func (w *cancelingConfigWriter) WriteConfig(_ context.Context, _ domain.Environment, _ []byte, _ string, content []byte) (string, error) {
+func (w *cancelingConfigWriter) WriteConfig(_ context.Context, _ domain.ServiceInstance, _ []byte, _ string, content []byte) (string, error) {
 	w.contents = append(w.contents, bytes.Clone(content))
 	if len(w.contents) == 1 {
 		w.cancel()

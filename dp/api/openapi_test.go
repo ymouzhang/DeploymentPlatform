@@ -37,7 +37,7 @@ func TestOpenAPIContractIsValidYAML(t *testing.T) {
 			t.Errorf("missing change-governance path %s", path)
 		}
 	}
-	for _, path := range []string{"/tags", "/tags/{id}", "/environments/{id}/tags"} {
+	for _, path := range []string{"/tags", "/tags/{id}", "/services/{id}/tags"} {
 		if _, ok := header.Paths[path]; !ok {
 			t.Errorf("missing resource-tag path %s", path)
 		}

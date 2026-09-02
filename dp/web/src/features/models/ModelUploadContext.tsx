@@ -5,7 +5,7 @@ import { App, Button, Card, Progress, Space, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 
-export type ModelUploadValues = { name: string; environment_id: string; target_dir: string }
+export type ModelUploadValues = { name: string; host_id: string; target_dir: string }
 export type PendingModelUpload = ModelUploadValues & {
   upload_id: string
   owner_id?: string

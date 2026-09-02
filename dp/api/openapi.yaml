@@ -359,21 +359,20 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
-  /environments:
+  /hosts:
     get:
-      operationId: listEnvironments
+      operationId: listHosts
       parameters:
         - $ref: "#/components/parameters/OwnerId"
-        - $ref: "#/components/parameters/TagIds"
       responses:
         "200":
-          description: Environment list
+          description: Host list
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EnvironmentListResponse"
+                $ref: "#/components/schemas/HostListResponse"
     post:
-      operationId: createEnvironment
+      operationId: createHost
       parameters:
         - $ref: "#/components/parameters/OwnerId"
       requestBody:
@@ -381,36 +380,36 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EnvironmentInput"
+              $ref: "#/components/schemas/HostInput"
       responses:
         "201":
-          description: Environment created
+          description: Host created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EnvironmentResponse"
+                $ref: "#/components/schemas/HostResponse"
         "409":
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
-  /environments/{id}:
+  /hosts/{id}:
     put:
-      operationId: updateEnvironment
+      operationId: updateHost
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/HostId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EnvironmentInput"
+              $ref: "#/components/schemas/HostInput"
       responses:
         "200":
-          description: Environment updated
+          description: Host updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EnvironmentResponse"
+                $ref: "#/components/schemas/HostResponse"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -418,12 +417,12 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
     delete:
-      operationId: deleteEnvironment
+      operationId: deleteHost
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/HostId"
       responses:
         "200":
-          description: Environment deleted
+          description: Host deleted
           content:
             application/json:
               schema:
@@ -432,18 +431,18 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: >
-            环境已安装服务（ENVIRONMENT_INSTALLED，需先重置）
-            或存在正在执行的操作（OPERATION_IN_PROGRESS），禁止删除
+            主机仍有关联服务实例（HOST_HAS_SERVICES）
+            或模型（HOST_HAS_MODELS），禁止删除
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /environments/{id}/tags:
+  /services/{id}/tags:
     put:
-      operationId: replaceEnvironmentTags
-      description: Atomically replaces all tags; every tag must belong to the environment owner.
+      operationId: replaceServiceInstanceTags
+      description: Atomically replaces all tags; every tag must belong to the service instance owner.
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       requestBody:
         required: true
         content:
@@ -459,7 +458,7 @@ paths:
                   maxItems: 20
                   items: { type: string, format: uuid }
       responses:
-        "200": { description: Updated environment, including tags, content: { application/json: { schema: { $ref: "#/components/schemas/EnvironmentResponse" } } } }
+        "200": { description: Updated service instance, including tags, content: { application/json: { schema: { $ref: "#/components/schemas/ServiceInstanceResponse" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationError" }
   /tags:
@@ -501,11 +500,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TagId"
       responses:
-        "200": { description: Tag deleted and environment associations removed }
+        "200": { description: Tag deleted and service instance associations removed }
         "404": { $ref: "#/components/responses/NotFound" }
-  /environments/validate:
+  /hosts/validate:
     post:
-      operationId: validateDraftEnvironment
+      operationId: validateDraftHost
       parameters:
         - $ref: "#/components/parameters/OwnerId"
       requestBody:
@@ -513,7 +512,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EnvironmentInput"
+              $ref: "#/components/schemas/HostInput"
       responses:
         "200":
           description: SSH validation result, including expected remote failures
@@ -521,11 +520,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationResponse"
-  /environments/{id}/validate:
+  /hosts/{id}/validate:
     post:
-      operationId: validateSavedEnvironment
+      operationId: validateSavedHost
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/HostId"
       responses:
         "200":
           description: SSH validation result
@@ -535,14 +534,14 @@ paths:
                 $ref: "#/components/schemas/ValidationResponse"
         "404":
           $ref: "#/components/responses/NotFound"
-  /environments/export:
+  /hosts/export:
     get:
-      operationId: exportEnvironments
+      operationId: exportHosts
       parameters:
         - $ref: "#/components/parameters/OwnerId"
       responses:
         "200":
-          description: Versioned environment JSON document
+          description: Versioned host JSON document
           headers:
             Content-Disposition:
               schema:
@@ -550,10 +549,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EnvironmentTransferDocument"
-  /environments/import:
+                $ref: "#/components/schemas/HostTransferDocument"
+  /hosts/import:
     post:
-      operationId: importEnvironments
+      operationId: importHosts
       parameters:
         - $ref: "#/components/parameters/OwnerId"
       requestBody:
@@ -561,7 +560,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EnvironmentTransferDocument"
+              $ref: "#/components/schemas/HostTransferDocument"
       responses:
         "200":
           description: Atomic import result
@@ -654,8 +653,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: >
-            该服务类型存在已安装的环境（PACKAGE_IN_USE），
-            需先重置相关环境后才允许删除安装包
+            该服务类型仍有关联服务实例（PACKAGE_IN_USE），
+            需先删除相关服务实例后才允许删除安装包
           content:
             application/json:
               schema:
@@ -731,14 +730,41 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Service"
+    post:
+      operationId: createServiceInstance
+      parameters: [{ $ref: "#/components/parameters/OwnerId" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ServiceInstanceInput" } } }
+      responses:
+        "201": { description: Service instance created, content: { application/json: { schema: { $ref: "#/components/schemas/ServiceInstanceResponse" } } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /services/{id}:
+    parameters: [{ $ref: "#/components/parameters/ServiceInstanceId" }]
+    put:
+      operationId: updateServiceInstance
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ServiceInstanceInput" } } }
+      responses:
+        "200": { description: Service instance updated, content: { application/json: { schema: { $ref: "#/components/schemas/ServiceInstanceResponse" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: deleteServiceInstance
+      responses:
+        "200": { description: Uninstalled service instance deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /services/{id}/config:
     parameters:
-      - $ref: "#/components/parameters/EnvironmentId"
+      - $ref: "#/components/parameters/ServiceInstanceId"
     get:
       operationId: getServiceConfig
       responses:
         "200":
-          description: Environment-specific config, or the package template when not customized
+          description: Service-instance-specific config, or the package template when not customized
           content:
             application/json:
               schema:
@@ -763,7 +789,7 @@ paths:
                   description: Raw JSON or YAML matching the package template format
       responses:
         "200":
-          description: Saved environment-specific config
+          description: Saved service-instance-specific config
           content:
             application/json:
               schema:
@@ -777,7 +803,7 @@ paths:
     post:
       operationId: previewServiceConfig
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       requestBody:
         required: true
         content:
@@ -798,7 +824,7 @@ paths:
     get:
       operationId: listServiceConfigRevisions
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       responses:
         "200":
           description: Configuration revision metadata ordered newest first
@@ -809,7 +835,7 @@ paths:
     get:
       operationId: getServiceConfigRevision
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
         - name: revisionId
           in: path
           required: true
@@ -825,7 +851,7 @@ paths:
     post:
       operationId: rollbackServiceConfigRevision
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
         - name: revisionId
           in: path
           required: true
@@ -842,7 +868,7 @@ paths:
     post:
       operationId: installService
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       responses:
         "202":
           $ref: "#/components/responses/OperationAccepted"
@@ -852,7 +878,7 @@ paths:
     post:
       operationId: startService
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       responses:
         "202":
           $ref: "#/components/responses/OperationAccepted"
@@ -862,7 +888,7 @@ paths:
     post:
       operationId: stopService
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       responses:
         "202":
           $ref: "#/components/responses/OperationAccepted"
@@ -873,7 +899,7 @@ paths:
       operationId: resetService
       description: Stops the service when needed, resets remote markers, and marks it uninstalled without deleting remote files.
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       responses:
         "202":
           $ref: "#/components/responses/OperationAccepted"
@@ -882,9 +908,9 @@ paths:
   /services/{id}/health-check:
     post:
       operationId: checkServiceHealth
-      description: Requests `http://<environment-ip>:<health-port>/healthz`. Only HTTP 200 with `{"status":"ok"}` is healthy.
+      description: Requests `http://<service_instance-ip>:<health-port>/healthz`. Only HTTP 200 with `{"status":"ok"}` is healthy.
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
       responses:
         "200":
           description: Health result
@@ -896,7 +922,7 @@ paths:
       operationId: streamServiceLogs
       description: Streams colored Docker Compose logs over Server-Sent Events.
       parameters:
-        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/ServiceInstanceId"
         - name: tail
           in: query
           schema: { type: integer, minimum: 0, maximum: 2000, default: 300 }
@@ -958,7 +984,7 @@ paths:
   /admin/dashboard:
     get:
       operationId: getAdminDashboard
-      description: Tag filters affect only environment, service, SSH-validation and operation metrics. Other metrics keep their permission scope; communication unread state is scoped to the current account.
+      description: Tag filters affect only service_instance, service, SSH-validation and operation metrics. Other metrics keep their permission scope; communication unread state is scoped to the current account.
       parameters:
         - $ref: "#/components/parameters/TagIds"
       responses:
@@ -1168,7 +1194,7 @@ paths:
         - $ref: "#/components/parameters/AuditTo"
         - { name: actor_id, in: query, schema: { type: string, format: uuid } }
         - { name: owner_id, in: query, schema: { type: string, format: uuid } }
-        - { name: category, in: query, schema: { type: string, enum: [authentication, authorization, account, package, environment, service, model, communication, audit] } }
+        - { name: category, in: query, schema: { type: string, enum: [authentication, authorization, account, package, host, service, model, communication, audit] } }
         - { name: action, in: query, schema: { type: string } }
         - { name: outcome, in: query, schema: { type: string, enum: [success, failure, denied] } }
         - { name: source_ip, in: query, schema: { type: string } }
@@ -1285,7 +1311,7 @@ paths:
   /model-uploads:
     post:
       operationId: createModelUpload
-      description: Creates a remote upload staging file on an existing environment; DP does not retain a local model copy.
+      description: Creates a remote upload staging file on an existing service_instance; DP does not retain a local model copy.
       parameters:
         - $ref: "#/components/parameters/OwnerId"
       requestBody:
@@ -1401,7 +1427,12 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
-    EnvironmentId:
+    ServiceInstanceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    HostId:
       name: id
       in: path
       required: true
@@ -1594,8 +1625,8 @@ components:
       additionalProperties: false
       required: [resource_type]
       properties:
-        resource_type: { type: string, enum: [package, environment, service] }
-        resource_id: { type: string, format: uuid, description: Required for environment and service }
+        resource_type: { type: string, enum: [package, host, service] }
+        resource_id: { type: string, format: uuid, description: Required for host and service }
         resource_key: { type: string, maxLength: 63, description: Service type; required for package }
     CommunicationCreateInput:
       type: object
@@ -1642,18 +1673,18 @@ components:
           items: { $ref: "#/components/schemas/CommunicationRecipient" }
     CommunicationResource:
       type: object
-      required: [id, resource_type, owner_username, resource_label, service_type, environment_name, environment_ip, available]
+      required: [id, resource_type, owner_username, resource_label, service_type, host_name, host_ip, available]
       properties:
         id: { type: string, format: uuid }
-        resource_type: { type: string, enum: [package, environment, service] }
+        resource_type: { type: string, enum: [package, host, service] }
         resource_id: { type: [string, "null"], format: uuid }
         resource_key: { type: string }
         owner_id: { type: [string, "null"], format: uuid }
         owner_username: { type: string }
         resource_label: { type: string }
         service_type: { type: string }
-        environment_name: { type: string }
-        environment_ip: { type: string }
+        host_name: { type: string }
+        host_ip: { type: string }
         available: { type: boolean }
         link: { type: string }
     Communication:
@@ -1730,10 +1761,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/User"
         - type: object
-          required: [package_count, environment_count, model_count, installed_service_count, recent_operation_count, active_session_count, login_failure_count, high_risk_count]
+          required: [package_count, host_count, service_instance_count, model_count, installed_service_count, recent_operation_count, active_session_count, login_failure_count, high_risk_count]
           properties:
             package_count: { type: integer }
-            environment_count: { type: integer }
+            host_count: { type: integer }
+            service_instance_count: { type: integer }
             model_count: { type: integer }
             installed_service_count: { type: integer }
             recent_operation_count: { type: integer, description: Operations owned by this account during the last 30 days }
@@ -1754,17 +1786,18 @@ components:
       properties:
         data:
           type: object
-          required: [source_user_id, target_user_id, packages, environments, models]
+          required: [source_user_id, target_user_id, packages, hosts, service_instances, models]
           properties:
             source_user_id: { type: string, format: uuid }
             target_user_id: { type: string, format: uuid }
             packages: { type: integer }
-            environments: { type: integer }
+            hosts: { type: integer }
+            service_instances: { type: integer }
             models: { type: integer }
-    EnvironmentInput:
+    HostInput:
       type: object
       additionalProperties: false
-      required: [name, ip, ssh_user, ssh_port, install_dir, service_type]
+      required: [name, ip, ssh_user, ssh_port]
       properties:
         name: { type: string, minLength: 1 }
         ip: { type: string }
@@ -1773,24 +1806,14 @@ components:
         ssh_password:
           type: string
           description: Required on create; omit or leave empty on update to preserve the current password.
-        install_dir: { type: string }
-        service_type:
-          type: string
-          pattern: "^[a-z][a-z0-9-]{0,62}$"
         note:
           type: string
           maxLength: 200
-          description: 环境备注（可选）
-        tag_ids:
-          type: array
-          uniqueItems: true
-          maxItems: 20
-          items: { type: string, format: uuid }
-          description: Complete environment tag set; all IDs must belong to the resource owner.
-    Environment:
+          description: 主机备注（可选）
+    Host:
       type: object
       required:
-        [id, name, ip, ssh_user, ssh_port, install_dir, service_type, installed, has_password]
+        [id, name, ip, ssh_user, ssh_port, arch, has_password]
       properties:
         id: { type: string, format: uuid }
         owner_id: { type: string, format: uuid }
@@ -1799,12 +1822,7 @@ components:
         ip: { type: string }
         ssh_user: { type: string }
         ssh_port: { type: integer }
-        install_dir: { type: string }
-        service_type: { type: string }
         note: { type: string }
-        installed: { type: boolean }
-        installed_at: { type: [string, "null"], format: date-time }
-        health_port: { type: integer }
         arch:
           type: string
           description: CPU architecture collected via SSH `uname -m`; empty string when not yet collected.
@@ -1812,23 +1830,59 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         has_password: { type: boolean }
-        tags:
-          type: array
-          items: { $ref: "#/components/schemas/ResourceTagRef" }
-    EnvironmentResponse:
+    HostResponse:
       type: object
       required: [data]
       properties:
         data:
-          $ref: "#/components/schemas/Environment"
-    EnvironmentListResponse:
+          $ref: "#/components/schemas/Host"
+    HostListResponse:
       type: object
       required: [data]
       properties:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/Environment"
+            $ref: "#/components/schemas/Host"
+    ServiceInstanceInput:
+      type: object
+      additionalProperties: false
+      required: [host_id, name, install_dir, service_type]
+      properties:
+        host_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1 }
+        install_dir: { type: string, pattern: "^/" }
+        service_type: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+        note: { type: string, maxLength: 200 }
+        tag_ids:
+          type: array
+          uniqueItems: true
+          maxItems: 20
+          items: { type: string, format: uuid }
+    ServiceInstance:
+      type: object
+      required: [id, owner_id, host_id, host, name, install_dir, service_type, installed]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        owner_username: { type: string }
+        host_id: { type: string, format: uuid }
+        host: { $ref: "#/components/schemas/Host" }
+        name: { type: string }
+        install_dir: { type: string }
+        service_type: { type: string }
+        note: { type: string }
+        installed: { type: boolean }
+        installed_at: { type: [string, "null"], format: date-time }
+        installed_package_sha256: { type: string }
+        health_port: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        tags: { type: array, items: { $ref: "#/components/schemas/ResourceTagRef" } }
+    ServiceInstanceResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: "#/components/schemas/ServiceInstance" } }
     ValidationResponse:
       type: object
       required: [data]
@@ -1847,34 +1901,25 @@ components:
                   success: { type: boolean }
                   message: { type: string }
         validation_error: { type: string }
-    EnvironmentTransferDocument:
+    HostTransferDocument:
       type: object
-      required: [schema_version, environments]
+      required: [schema_version, hosts]
       properties:
-        schema_version: { type: integer, enum: [2], description: Both export and import require schema v2. }
+        schema_version: { type: integer, enum: [1], description: Both export and import require schema v1. }
         exported_at: { type: string, format: date-time }
-        environments:
+        hosts:
           type: array
           items:
             type: object
             required:
-              [name, ip, ssh_user, ssh_port, ssh_password_encrypted, install_dir, service_type, installed]
+              [name, ip, ssh_user, ssh_port, ssh_password_encrypted]
             properties:
               name: { type: string }
               ip: { type: string }
               ssh_user: { type: string }
               ssh_port: { type: integer }
               ssh_password_encrypted: { type: string, pattern: "^enc:v1:" }
-              install_dir: { type: string }
-              service_type: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
-              installed: { type: boolean }
-              installed_at: { type: string, format: date-time }
-              installed_package_sha256: { type: string }
-              health_port: { type: integer }
-              host_key_fingerprint: { type: string }
-              tags:
-                type: array
-                items: { $ref: "#/components/schemas/ResourceTagInput" }
+              note: { type: string, maxLength: 200 }
     ResourceTagInput:
       type: object
       additionalProperties: false
@@ -1893,11 +1938,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/ResourceTagRef"
         - type: object
-          required: [owner_id, environment_count, created_at, updated_at]
+          required: [owner_id, service_instance_count, created_at, updated_at]
           properties:
             owner_id: { type: string, format: uuid }
             owner_username: { type: string }
-            environment_count: { type: integer }
+            service_instance_count: { type: integer }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
     ResourceTagResponse:
@@ -1920,11 +1965,11 @@ components:
         service_type: { type: string }
         current_version_id: { type: string, format: uuid }
         version_count: { type: integer }
-        referenced_environment_count: { type: integer }
+        referenced_service_instance_count: { type: integer }
         original_filename: { type: string }
         sha256: { type: string }
         size_bytes: { type: integer }
-        config_port: { type: integer }
+        config_port: { type: integer, description: Health-check port parsed from `port` or `server.port`. }
         note: { type: string }
         uploaded_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -1935,7 +1980,7 @@ components:
           $ref: "#/components/schemas/Package"
     PackageVersion:
       type: object
-      required: [id, owner_id, service_type, original_filename, sha256, size_bytes, config_port, config_format, config_path, validation_status, note, uploaded_by_username, uploaded_at, current, referenced_environment_count]
+      required: [id, owner_id, service_type, original_filename, sha256, size_bytes, config_port, config_format, config_path, validation_status, note, uploaded_by_username, uploaded_at, current, referenced_service_instance_count]
       properties:
         id: { type: string, format: uuid }
         owner_id: { type: string, format: uuid }
@@ -1943,7 +1988,7 @@ components:
         original_filename: { type: string }
         sha256: { type: string }
         size_bytes: { type: integer }
-        config_port: { type: integer }
+        config_port: { type: integer, description: Health-check port parsed from `port` or `server.port`. }
         config_format: { type: string, enum: [json, yaml] }
         config_path: { type: string }
         validation_status: { type: string, const: passed }
@@ -1952,7 +1997,7 @@ components:
         uploaded_by_username: { type: string }
         uploaded_at: { type: string, format: date-time }
         current: { type: boolean }
-        referenced_environment_count: { type: integer }
+        referenced_service_instance_count: { type: integer }
     PackageVersionListResponse:
       type: object
       required: [data]
@@ -1969,19 +2014,19 @@ components:
             deleted: { type: string }
     Service:
       type: object
-      required: [environment, health, busy]
+      required: [service_instance, health, busy]
       properties:
-        environment:
-          $ref: "#/components/schemas/Environment"
+        service_instance:
+          $ref: "#/components/schemas/ServiceInstance"
         health:
           $ref: "#/components/schemas/HealthResult"
-        service_port:
+        api_port:
           type: integer
-          description: Instance config port; falls back to the package default before customization.
+          description: External service API port from `api_port`; omitted when the config does not declare it.
         busy: { type: boolean }
         last_operation:
           type: object
-          description: Latest lifecycle operation of the environment; lets clients distinguish "never installed" from a failed install.
+          description: Latest lifecycle operation of the service_instance; lets clients distinguish "never installed" from a failed install.
           properties:
             action: { type: string, enum: [install, start, stop, reset] }
             status: { type: string, enum: [queued, running, succeeded, failed, timed_out, interrupted] }
@@ -2005,13 +2050,14 @@ components:
         status: { type: string, enum: [ok, error] }
     ServiceConfig:
       type: object
-      required: [environment_id, content, format, path, port, inherited]
+      required: [service_instance_id, content, format, path, port, inherited]
       properties:
-        environment_id: { type: string, format: uuid }
+        service_instance_id: { type: string, format: uuid }
         content: { type: string }
         format: { type: string, enum: [json, yaml] }
         path: { type: string }
         port: { type: integer }
+        api_port: { type: integer, description: External service API port; `port` remains the health-check port. }
         inherited: { type: boolean }
         current_revision_id: { type: string, format: uuid }
         updated_at: { type: string, format: date-time }
@@ -2031,10 +2077,10 @@ components:
             port: { type: integer }
     ServiceConfigRevision:
       type: object
-      required: [id, environment_id, format, path, port, source, created_by_username, created_at, current]
+      required: [id, service_instance_id, format, path, port, source, created_by_username, created_at, current]
       properties:
         id: { type: string, format: uuid }
-        environment_id: { type: string, format: uuid }
+        service_instance_id: { type: string, format: uuid }
         content: { type: string, description: Returned only by revision detail and rollback responses }
         format: { type: string, enum: [json, yaml] }
         path: { type: string }
@@ -2077,14 +2123,14 @@ components:
         finished_at: { type: [string, "null"], format: date-time }
     Model:
       type: object
-      required: [id, owner_id, environment_id, environment_name, environment_ip, name, source, target_dir, original_filename, size_bytes, expanded_size_bytes, file_count, status, created_at, updated_at]
+      required: [id, owner_id, host_id, host_name, host_ip, name, source, target_dir, original_filename, size_bytes, expanded_size_bytes, file_count, status, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         owner_id: { type: string, format: uuid }
         owner_username: { type: string }
-        environment_id: { type: string, format: uuid }
-        environment_name: { type: string }
-        environment_ip: { type: string }
+        host_id: { type: string, format: uuid }
+        host_name: { type: string }
+        host_ip: { type: string }
         name: { type: string }
         source: { type: string, enum: [offline, modelscope, huggingface] }
         target_dir: { type: string }
@@ -2116,10 +2162,10 @@ components:
     ModelUploadCreateInput:
       type: object
       additionalProperties: false
-      required: [name, environment_id, target_dir, original_filename, total_bytes]
+      required: [name, host_id, target_dir, original_filename, total_bytes]
       properties:
         name: { type: string, minLength: 1, maxLength: 128 }
-        environment_id: { type: string, format: uuid }
+        host_id: { type: string, format: uuid }
         target_dir: { type: string, pattern: ^/ }
         original_filename: { type: string, pattern: ".*\\.tar\\.gz$" }
         total_bytes: { type: integer, format: int64, minimum: 1 }
@@ -2140,14 +2186,14 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        environment_id: { type: string, format: uuid }
+        service_instance_id: { type: string, format: uuid }
         request_id: { type: string, format: uuid }
         actor_user_id: { type: string, format: uuid }
         actor_username: { type: string }
         owner_id: { type: string, format: uuid }
         owner_username: { type: string }
-        environment_name: { type: string }
-        environment_ip: { type: string }
+        service_instance_name: { type: string }
+        service_instance_ip: { type: string }
         service_type: { type: string }
         action: { type: string, enum: [install, start, stop, reset] }
         status:
@@ -2230,20 +2276,21 @@ components:
           properties:
             metrics:
               type: object
-              required: [users, enabled_users, disabled_users, packages, environments, installed_services, running_services, active_operations, failed_operations_24h, login_failures_24h, unvalidated_environments, stale_validation_environments, unhealthy_installed_services, high_risk_audits_24h, unread_notifications, unread_communications]
+              required: [users, enabled_users, disabled_users, packages, hosts, service_instances, installed_services, running_services, active_operations, failed_operations_24h, login_failures_24h, unvalidated_hosts, stale_validation_hosts, unhealthy_installed_services, high_risk_audits_24h, unread_notifications, unread_communications]
               properties:
                 users: { type: integer }
                 enabled_users: { type: integer }
                 disabled_users: { type: integer }
                 packages: { type: integer }
-                environments: { type: integer }
+                hosts: { type: integer }
+                service_instances: { type: integer }
                 installed_services: { type: integer }
                 running_services: { type: integer }
                 active_operations: { type: integer }
                 failed_operations_24h: { type: integer }
                 login_failures_24h: { type: integer }
-                unvalidated_environments: { type: integer }
-                stale_validation_environments: { type: integer }
+                unvalidated_hosts: { type: integer }
+                stale_validation_hosts: { type: integer }
                 unhealthy_installed_services: { type: integer }
                 high_risk_audits_24h: { type: integer }
                 unread_notifications: { type: integer }
@@ -2262,7 +2309,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         occurred_at: { type: string, format: date-time }
-        category: { type: string, enum: [authentication, authorization, account, package, environment, service, model, communication, audit] }
+        category: { type: string, enum: [authentication, authorization, account, package, host, service, model, communication, audit] }
         action: { type: string }
         outcome: { type: string, enum: [success, failure, denied] }
         risk_level: { type: string, enum: [normal, high] }

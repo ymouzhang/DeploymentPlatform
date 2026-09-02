@@ -53,41 +53,62 @@ type Session struct {
 	Current    bool      `json:"current"`
 }
 
-type Environment struct {
+// Host is one independently managed SSH endpoint. Deployment state never lives
+// on this aggregate, so credentials and host identity have one source of truth.
+type Host struct {
+	ID                 string     `json:"id"`
+	OwnerID            string     `json:"owner_id"`
+	OwnerUsername      string     `json:"owner_username,omitempty"`
+	Name               string     `json:"name"`
+	IP                 string     `json:"ip"`
+	SSHUser            string     `json:"ssh_user"`
+	SSHPort            int        `json:"ssh_port"`
+	SSHPasswordEnc     string     `json:"-"`
+	Note               string     `json:"note"`
+	Arch               string     `json:"arch"`
+	HostKeyFingerprint string     `json:"-"`
+	LastValidationAt   *time.Time `json:"last_validation_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+type HostView struct {
+	Host
+	HasPassword bool `json:"has_password"`
+}
+
+type HostInput struct {
+	Name        string `json:"name"`
+	IP          string `json:"ip"`
+	SSHUser     string `json:"ssh_user"`
+	SSHPort     int    `json:"ssh_port"`
+	SSHPassword string `json:"ssh_password,omitempty"`
+	Note        string `json:"note"`
+}
+
+// ServiceInstance is one deployment of one service package on a Host.
+type ServiceInstance struct {
 	ID                     string           `json:"id"`
 	OwnerID                string           `json:"owner_id"`
 	OwnerUsername          string           `json:"owner_username,omitempty"`
+	HostID                 string           `json:"host_id"`
+	Host                   Host             `json:"host"`
 	Name                   string           `json:"name"`
-	IP                     string           `json:"ip"`
-	SSHUser                string           `json:"ssh_user"`
-	SSHPort                int              `json:"ssh_port"`
-	SSHPasswordEnc         string           `json:"-"`
 	InstallDir             string           `json:"install_dir"`
 	ServiceType            string           `json:"service_type"`
 	Note                   string           `json:"note"`
 	Installed              bool             `json:"installed"`
-	InstalledAt            *time.Time       `json:"installed_at"`
+	InstalledAt            *time.Time       `json:"installed_at,omitempty"`
 	InstalledPackageSHA256 string           `json:"installed_package_sha256,omitempty"`
 	HealthPort             *int             `json:"health_port,omitempty"`
-	Arch                   string           `json:"arch"`
-	HostKeyFingerprint     string           `json:"-"`
-	LastValidationAt       *time.Time       `json:"last_validation_at"`
 	CreatedAt              time.Time        `json:"created_at"`
 	UpdatedAt              time.Time        `json:"updated_at"`
 	Tags                   []ResourceTagRef `json:"tags"`
 }
 
-type EnvironmentView struct {
-	Environment
-	HasPassword bool `json:"has_password"`
-}
-
-type EnvironmentInput struct {
+type ServiceInstanceInput struct {
+	HostID      string   `json:"host_id"`
 	Name        string   `json:"name"`
-	IP          string   `json:"ip"`
-	SSHUser     string   `json:"ssh_user"`
-	SSHPort     int      `json:"ssh_port"`
-	SSHPassword string   `json:"ssh_password,omitempty"`
 	InstallDir  string   `json:"install_dir"`
 	ServiceType string   `json:"service_type"`
 	Note        string   `json:"note"`
@@ -102,11 +123,11 @@ type ResourceTagRef struct {
 
 type ResourceTag struct {
 	ResourceTagRef
-	OwnerID          string    `json:"owner_id"`
-	OwnerUsername    string    `json:"owner_username,omitempty"`
-	EnvironmentCount int       `json:"environment_count"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	OwnerID              string    `json:"owner_id"`
+	OwnerUsername        string    `json:"owner_username,omitempty"`
+	ServiceInstanceCount int       `json:"service_instance_count"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 type ResourceTagInput struct {
@@ -132,7 +153,7 @@ func (in ResourceTagInput) Validate() error {
 	return nil
 }
 
-// MaxNoteLength 是备注字段允许的最大字符数（环境、安装包共用）。
+// MaxNoteLength 是备注字段允许的最大字符数（主机、服务实例、安装包共用）。
 const MaxNoteLength = 200
 
 // ValidateNote 校验备注长度。
@@ -143,12 +164,10 @@ func ValidateNote(note string) error {
 	return nil
 }
 
-func (in *EnvironmentInput) Normalize() {
+func (in *HostInput) Normalize() {
 	in.Name = strings.TrimSpace(in.Name)
 	in.IP = strings.TrimSpace(in.IP)
 	in.SSHUser = strings.TrimSpace(in.SSHUser)
-	in.InstallDir = strings.TrimSpace(in.InstallDir)
-	in.ServiceType = strings.ToLower(strings.TrimSpace(in.ServiceType))
 	in.Note = strings.TrimSpace(in.Note)
 	if in.SSHUser == "" {
 		in.SSHUser = "aaron"
@@ -161,9 +180,9 @@ func (in *EnvironmentInput) Normalize() {
 	}
 }
 
-func (in EnvironmentInput) Validate(requirePassword bool) error {
+func (in HostInput) Validate(requirePassword bool) error {
 	if in.Name == "" {
-		return FieldError("name", "环境名称不能为空")
+		return FieldError("name", "主机名称不能为空")
 	}
 	if net.ParseIP(in.IP) == nil {
 		return FieldError("ip", "服务器 IP 格式不正确")
@@ -177,8 +196,28 @@ func (in EnvironmentInput) Validate(requirePassword bool) error {
 	if requirePassword && in.SSHPassword == "" {
 		return FieldError("ssh_password", "SSH 密码不能为空")
 	}
-	if !strings.HasPrefix(in.InstallDir, "/") || path.Clean(in.InstallDir) != in.InstallDir ||
-		strings.ContainsAny(in.InstallDir, "\x00\r\n") {
+	if err := ValidateNote(in.Note); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (in *ServiceInstanceInput) Normalize() {
+	in.HostID = strings.TrimSpace(in.HostID)
+	in.Name = strings.TrimSpace(in.Name)
+	in.InstallDir = strings.TrimSpace(in.InstallDir)
+	in.ServiceType = strings.ToLower(strings.TrimSpace(in.ServiceType))
+	in.Note = strings.TrimSpace(in.Note)
+}
+
+func (in ServiceInstanceInput) Validate() error {
+	if in.HostID == "" {
+		return FieldError("host_id", "请选择目标主机")
+	}
+	if in.Name == "" {
+		return FieldError("name", "服务实例名称不能为空")
+	}
+	if !strings.HasPrefix(in.InstallDir, "/") || path.Clean(in.InstallDir) != in.InstallDir || strings.ContainsAny(in.InstallDir, "\x00\r\n") {
 		return FieldError("install_dir", "安装目录必须是规范的绝对路径")
 	}
 	if err := ValidateServiceType(in.ServiceType); err != nil {
@@ -188,7 +227,7 @@ func (in EnvironmentInput) Validate(requirePassword bool) error {
 		return err
 	}
 	if len(in.TagIDs) > 20 {
-		return FieldError("tag_ids", "每个环境最多关联 20 个标签")
+		return FieldError("tag_ids", "每个服务实例最多关联 20 个标签")
 	}
 	seenTags := make(map[string]struct{}, len(in.TagIDs))
 	for _, id := range in.TagIDs {
@@ -230,7 +269,7 @@ type Package struct {
 	ServiceType      string    `json:"service_type"`
 	CurrentVersionID string    `json:"current_version_id"`
 	VersionCount     int       `json:"version_count"`
-	ReferencedCount  int       `json:"referenced_environment_count"`
+	ReferencedCount  int       `json:"referenced_service_instance_count"`
 	OriginalFilename string    `json:"original_filename"`
 	StoragePath      string    `json:"-"`
 	SHA256           string    `json:"sha256"`
@@ -259,15 +298,16 @@ type PackageVersion struct {
 	UploadedByName   string    `json:"uploaded_by_username"`
 	UploadedAt       time.Time `json:"uploaded_at"`
 	Current          bool      `json:"current"`
-	ReferencedCount  int       `json:"referenced_environment_count"`
+	ReferencedCount  int       `json:"referenced_service_instance_count"`
 }
 
 type ServiceConfig struct {
-	EnvironmentID     string    `json:"environment_id"`
+	ServiceInstanceID string    `json:"service_instance_id"`
 	Content           string    `json:"content"`
 	Format            string    `json:"format"`
 	Path              string    `json:"path"`
 	Port              int       `json:"port"`
+	APIPort           *int      `json:"api_port,omitempty"`
 	Inherited         bool      `json:"inherited"`
 	CurrentRevisionID string    `json:"current_revision_id,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
@@ -288,18 +328,18 @@ type ServiceConfigPreview struct {
 }
 
 type ServiceConfigRevision struct {
-	ID             string    `json:"id"`
-	EnvironmentID  string    `json:"environment_id"`
-	Content        string    `json:"content,omitempty"`
-	Format         string    `json:"format"`
-	Path           string    `json:"path"`
-	Port           int       `json:"port"`
-	Source         string    `json:"source"`
-	RestoredFromID string    `json:"restored_from_id,omitempty"`
-	CreatedBy      string    `json:"created_by,omitempty"`
-	CreatedByName  string    `json:"created_by_username"`
-	CreatedAt      time.Time `json:"created_at"`
-	Current        bool      `json:"current"`
+	ID                string    `json:"id"`
+	ServiceInstanceID string    `json:"service_instance_id"`
+	Content           string    `json:"content,omitempty"`
+	Format            string    `json:"format"`
+	Path              string    `json:"path"`
+	Port              int       `json:"port"`
+	Source            string    `json:"source"`
+	RestoredFromID    string    `json:"restored_from_id,omitempty"`
+	CreatedBy         string    `json:"created_by,omitempty"`
+	CreatedByName     string    `json:"created_by_username"`
+	CreatedAt         time.Time `json:"created_at"`
+	Current           bool      `json:"current"`
 }
 
 type OperationAction string
@@ -320,27 +360,27 @@ const (
 )
 
 type Operation struct {
-	ID              string           `json:"id"`
-	EnvironmentID   string           `json:"environment_id"`
-	RequestID       string           `json:"request_id,omitempty"`
-	ActorUserID     string           `json:"actor_user_id,omitempty"`
-	ActorUsername   string           `json:"actor_username,omitempty"`
-	OwnerID         string           `json:"owner_id,omitempty"`
-	OwnerUsername   string           `json:"owner_username,omitempty"`
-	EnvironmentName string           `json:"environment_name,omitempty"`
-	EnvironmentIP   string           `json:"environment_ip,omitempty"`
-	ServiceType     string           `json:"service_type,omitempty"`
-	Action          OperationAction  `json:"action"`
-	Status          OperationStatus  `json:"status"`
-	Stage           string           `json:"stage"`
-	ExitCode        *int             `json:"exit_code"`
-	ErrorCode       string           `json:"error_code,omitempty"`
-	ErrorMessage    string           `json:"error_message,omitempty"`
-	LogPath         string           `json:"-"`
-	CreatedAt       time.Time        `json:"created_at"`
-	StartedAt       *time.Time       `json:"started_at"`
-	FinishedAt      *time.Time       `json:"finished_at"`
-	Tags            []ResourceTagRef `json:"tags"`
+	ID                  string           `json:"id"`
+	ServiceInstanceID   string           `json:"service_instance_id"`
+	RequestID           string           `json:"request_id,omitempty"`
+	ActorUserID         string           `json:"actor_user_id,omitempty"`
+	ActorUsername       string           `json:"actor_username,omitempty"`
+	OwnerID             string           `json:"owner_id,omitempty"`
+	OwnerUsername       string           `json:"owner_username,omitempty"`
+	ServiceInstanceName string           `json:"service_instance_name,omitempty"`
+	HostIP              string           `json:"host_ip,omitempty"`
+	ServiceType         string           `json:"service_type,omitempty"`
+	Action              OperationAction  `json:"action"`
+	Status              OperationStatus  `json:"status"`
+	Stage               string           `json:"stage"`
+	ExitCode            *int             `json:"exit_code"`
+	ErrorCode           string           `json:"error_code,omitempty"`
+	ErrorMessage        string           `json:"error_message,omitempty"`
+	LogPath             string           `json:"-"`
+	CreatedAt           time.Time        `json:"created_at"`
+	StartedAt           *time.Time       `json:"started_at"`
+	FinishedAt          *time.Time       `json:"finished_at"`
+	Tags                []ResourceTagRef `json:"tags"`
 }
 
 type OperationFilter struct {
@@ -372,9 +412,9 @@ type Model struct {
 	OwnerID           string      `json:"owner_id"`
 	MarkerOwnerID     string      `json:"-"`
 	OwnerUsername     string      `json:"owner_username,omitempty"`
-	EnvironmentID     string      `json:"environment_id"`
-	EnvironmentName   string      `json:"environment_name"`
-	EnvironmentIP     string      `json:"environment_ip"`
+	HostID            string      `json:"host_id"`
+	HostName          string      `json:"host_name"`
+	HostIP            string      `json:"host_ip"`
 	Name              string      `json:"name"`
 	Source            string      `json:"source"`
 	TargetDir         string      `json:"target_dir"`
@@ -427,7 +467,7 @@ type ModelTask struct {
 
 type ModelUploadCreateInput struct {
 	Name             string `json:"name"`
-	EnvironmentID    string `json:"environment_id"`
+	HostID           string `json:"host_id"`
 	TargetDir        string `json:"target_dir"`
 	OriginalFilename string `json:"original_filename"`
 	TotalBytes       int64  `json:"total_bytes"`
@@ -435,7 +475,7 @@ type ModelUploadCreateInput struct {
 
 func (in *ModelUploadCreateInput) Normalize() {
 	in.Name = strings.TrimSpace(in.Name)
-	in.EnvironmentID = strings.TrimSpace(in.EnvironmentID)
+	in.HostID = strings.TrimSpace(in.HostID)
 	in.TargetDir = strings.TrimSpace(in.TargetDir)
 	in.OriginalFilename = strings.TrimSpace(in.OriginalFilename)
 }
@@ -444,8 +484,8 @@ func (in ModelUploadCreateInput) Validate(maxBytes int64) error {
 	if utf8.RuneCountInString(in.Name) < 1 || utf8.RuneCountInString(in.Name) > 128 || strings.ContainsAny(in.Name, "\x00\r\n") {
 		return FieldError("name", "模型名称长度必须为 1 到 128 个字符且不能包含换行")
 	}
-	if in.EnvironmentID == "" {
-		return FieldError("environment_id", "请选择目标环境")
+	if in.HostID == "" {
+		return FieldError("host_id", "请选择目标主机")
 	}
 	if !strings.HasSuffix(strings.ToLower(in.OriginalFilename), ".tar.gz") {
 		return FieldError("original_filename", "模型文件必须是 .tar.gz 压缩包")
@@ -545,19 +585,19 @@ type CommunicationMessage struct {
 }
 
 type CommunicationResource struct {
-	ID              string `json:"id"`
-	ThreadID        string `json:"-"`
-	ResourceType    string `json:"resource_type"`
-	ResourceID      string `json:"resource_id,omitempty"`
-	ResourceKey     string `json:"resource_key,omitempty"`
-	OwnerID         string `json:"owner_id,omitempty"`
-	OwnerUsername   string `json:"owner_username"`
-	ResourceLabel   string `json:"resource_label"`
-	ServiceType     string `json:"service_type"`
-	EnvironmentName string `json:"environment_name"`
-	EnvironmentIP   string `json:"environment_ip"`
-	Available       bool   `json:"available"`
-	Link            string `json:"link,omitempty"`
+	ID            string `json:"id"`
+	ThreadID      string `json:"-"`
+	ResourceType  string `json:"resource_type"`
+	ResourceID    string `json:"resource_id,omitempty"`
+	ResourceKey   string `json:"resource_key,omitempty"`
+	OwnerID       string `json:"owner_id,omitempty"`
+	OwnerUsername string `json:"owner_username"`
+	ResourceLabel string `json:"resource_label"`
+	ServiceType   string `json:"service_type"`
+	HostName      string `json:"host_name"`
+	HostIP        string `json:"host_ip"`
+	Available     bool   `json:"available"`
+	Link          string `json:"link,omitempty"`
 }
 
 type Communication struct {
@@ -599,7 +639,8 @@ type CommunicationSummary struct {
 type UserDetail struct {
 	User
 	PackageCount          int        `json:"package_count"`
-	EnvironmentCount      int        `json:"environment_count"`
+	HostCount             int        `json:"host_count"`
+	ServiceInstanceCount  int        `json:"service_instance_count"`
 	ModelCount            int        `json:"model_count"`
 	InstalledServiceCount int        `json:"installed_service_count"`
 	RecentOperationCount  int        `json:"recent_operation_count"`
@@ -612,30 +653,32 @@ type UserDetail struct {
 }
 
 type TransferResult struct {
-	SourceUserID string `json:"source_user_id"`
-	TargetUserID string `json:"target_user_id"`
-	Packages     int    `json:"packages"`
-	Environments int    `json:"environments"`
-	Models       int    `json:"models"`
+	SourceUserID     string `json:"source_user_id"`
+	TargetUserID     string `json:"target_user_id"`
+	Packages         int    `json:"packages"`
+	Hosts            int    `json:"hosts"`
+	ServiceInstances int    `json:"service_instances"`
+	Models           int    `json:"models"`
 }
 
 type DashboardMetrics struct {
-	Users                       int `json:"users"`
-	EnabledUsers                int `json:"enabled_users"`
-	DisabledUsers               int `json:"disabled_users"`
-	Packages                    int `json:"packages"`
-	Environments                int `json:"environments"`
-	InstalledServices           int `json:"installed_services"`
-	RunningServices             int `json:"running_services"`
-	ActiveOperations            int `json:"active_operations"`
-	FailedOperations24h         int `json:"failed_operations_24h"`
-	LoginFailures24h            int `json:"login_failures_24h"`
-	UnvalidatedEnvironments     int `json:"unvalidated_environments"`
-	StaleValidationEnvironments int `json:"stale_validation_environments"`
-	UnhealthyInstalledServices  int `json:"unhealthy_installed_services"`
-	HighRiskAudits24h           int `json:"high_risk_audits_24h"`
-	UnreadNotifications         int `json:"unread_notifications"`
-	UnreadCommunications        int `json:"unread_communications"`
+	Users                      int `json:"users"`
+	EnabledUsers               int `json:"enabled_users"`
+	DisabledUsers              int `json:"disabled_users"`
+	Packages                   int `json:"packages"`
+	Hosts                      int `json:"hosts"`
+	ServiceInstances           int `json:"service_instances"`
+	InstalledServices          int `json:"installed_services"`
+	RunningServices            int `json:"running_services"`
+	ActiveOperations           int `json:"active_operations"`
+	FailedOperations24h        int `json:"failed_operations_24h"`
+	LoginFailures24h           int `json:"login_failures_24h"`
+	UnvalidatedHosts           int `json:"unvalidated_hosts"`
+	StaleValidationHosts       int `json:"stale_validation_hosts"`
+	UnhealthyInstalledServices int `json:"unhealthy_installed_services"`
+	HighRiskAudits24h          int `json:"high_risk_audits_24h"`
+	UnreadNotifications        int `json:"unread_notifications"`
+	UnreadCommunications       int `json:"unread_communications"`
 }
 
 type AdminDashboard struct {
@@ -705,11 +748,11 @@ type HealthResult struct {
 }
 
 type ServiceView struct {
-	Environment EnvironmentView `json:"environment"`
-	Health      HealthResult    `json:"health"`
-	ServicePort *int            `json:"service_port,omitempty"`
-	Busy        bool            `json:"busy"`
-	// LastOperation 是该环境最近一次生命周期操作，用于区分“从未安装”与“安装失败”。
+	ServiceInstance ServiceInstance `json:"service_instance"`
+	Health          HealthResult    `json:"health"`
+	APIPort         *int            `json:"api_port,omitempty"`
+	Busy            bool            `json:"busy"`
+	// LastOperation 是该实例最近一次生命周期操作，用于区分“从未安装”与“安装失败”。
 	LastOperation *OperationSummary `json:"last_operation,omitempty"`
 }
 

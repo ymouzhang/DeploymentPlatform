@@ -16,7 +16,7 @@ func TestValidateServiceType(t *testing.T) {
 }
 
 func TestModelUploadCreateInputValidation(t *testing.T) {
-	valid := ModelUploadCreateInput{Name: "Qwen3", EnvironmentID: "env", TargetDir: "/opt/models/Qwen3", OriginalFilename: "qwen.tar.gz", TotalBytes: 40 << 30}
+	valid := ModelUploadCreateInput{Name: "Qwen3", HostID: "env", TargetDir: "/opt/models/Qwen3", OriginalFilename: "qwen.tar.gz", TotalBytes: 40 << 30}
 	if err := valid.Validate(1 << 40); err != nil {
 		t.Fatalf("valid input: %v", err)
 	}

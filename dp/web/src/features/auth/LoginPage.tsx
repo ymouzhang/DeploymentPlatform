@@ -35,12 +35,12 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
           <div className="login-hero-copy">
             <div className="login-eyebrow"><span /> DEPLOYMENT PLATFORM</div>
             <h1>让每一次部署<br />都清晰、可靠、可追踪。</h1>
-            <p>在一个安全的工作台中管理交付物、服务器环境与远程服务生命周期。</p>
+            <p>在一个安全的工作台中管理交付物、SSH 主机与远程服务生命周期。</p>
           </div>
 
           <div className="login-capabilities">
             <Capability icon={<FileZipOutlined />} label="安装包" detail="版本集中管理" />
-            <Capability icon={<CloudServerOutlined />} label="服务器" detail="环境独立隔离" />
+            <Capability icon={<CloudServerOutlined />} label="服务器" detail="主机凭据统一复用" />
             <Capability icon={<SafetyCertificateOutlined />} label="凭据安全" detail="AES 加密存储" />
           </div>
 

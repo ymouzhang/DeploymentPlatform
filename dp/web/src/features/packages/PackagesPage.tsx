@@ -196,7 +196,7 @@ export function PackagesPage() {
           ),
       },
       {
-        title: '默认配置端口',
+        title: '默认健康端口',
         dataIndex: 'config_port',
         width: 125,
         render: (value: number) => <Typography.Text code>{value}</Typography.Text>,
@@ -317,7 +317,7 @@ export function PackagesPage() {
       </Card>
 
       <Modal title={`版本历史 · ${versionPackage?.service_type ?? ''}`} width={1200} open={Boolean(versionPackage)} footer={null} onCancel={() => setVersionPackage(undefined)} destroyOnHidden>
-        <Typography.Paragraph type="secondary">切换当前版本只影响后续安装；已安装环境继续固定使用原 SHA-256 版本。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">切换当前版本只影响后续安装；已安装服务实例继续固定使用原 SHA-256 版本。</Typography.Paragraph>
         <Table<PackageVersion>
           rowKey="id"
           loading={versionsQuery.isLoading}
@@ -328,11 +328,11 @@ export function PackagesPage() {
           columns={[
             { title: '版本', width: 130, render: (_, item) => <div className="table-stacked-cell"><Typography.Text code>{item.id.slice(0, 8)}</Typography.Text>{item.current && <Tag color="success">当前</Tag>}</div> },
             { title: '文件 / 摘要', width: 300, render: (_, item) => <div className="table-stacked-cell"><Typography.Text ellipsis={{ tooltip: item.original_filename }}>{item.original_filename}</Typography.Text><Typography.Text type="secondary" className="cell-caption table-mono-line">{item.sha256.slice(0, 16)}… · {formatBytes(item.size_bytes)}</Typography.Text></div> },
-            { title: '配置 / 校验', width: 150, render: (_, item) => <div className="table-stacked-cell"><span>{item.config_format || '-'} · {item.config_port}</span><Tag color="success">校验通过</Tag></div> },
+            { title: '配置 / 健康端口', width: 170, render: (_, item) => <div className="table-stacked-cell"><span>{item.config_format || '-'} · {item.config_port}</span><Tag color="success">校验通过</Tag></div> },
             { title: '上传人', dataIndex: 'uploaded_by_username', width: 110, render: (value: string) => value || '升级迁移' },
             { title: '上传时间', dataIndex: 'uploaded_at', width: 170, render: formatTime },
-            { title: '引用', dataIndex: 'referenced_environment_count', width: 80, render: (value: number) => `${value} 个` },
-            { title: '操作', width: 200, fixed: 'right', render: (_, item) => <div className="row-actions">{can('package.write', item.owner_id) && <Button size="small" disabled={item.current} loading={activateMutation.isPending && activateMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '切换当前版本？', content: '只影响后续安装，不会自动重装现有环境。', onOk: () => activateMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>设为当前</Button>}{can('package.delete', item.owner_id) && <Button size="small" danger disabled={item.current || item.referenced_environment_count > 0} loading={deleteVersionMutation.isPending && deleteVersionMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '删除历史版本？', content: '版本文件将从本地存储永久删除。', okButtonProps: { danger: true }, onOk: () => deleteVersionMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>删除</Button>}</div> },
+            { title: '引用', dataIndex: 'referenced_service_instance_count', width: 80, render: (value: number) => `${value} 个` },
+            { title: '操作', width: 200, fixed: 'right', render: (_, item) => <div className="row-actions">{can('package.write', item.owner_id) && <Button size="small" disabled={item.current} loading={activateMutation.isPending && activateMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '切换当前版本？', content: '只影响后续安装，不会自动重装现有服务实例。', onOk: () => activateMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>设为当前</Button>}{can('package.delete', item.owner_id) && <Button size="small" danger disabled={item.current || item.referenced_service_instance_count > 0} loading={deleteVersionMutation.isPending && deleteVersionMutation.variables?.versionId === item.id} onClick={() => modal.confirm({ title: '删除历史版本？', content: '版本文件将从本地存储永久删除。', okButtonProps: { danger: true }, onOk: () => deleteVersionMutation.mutate({ serviceType: item.service_type, versionId: item.id, ownerId: item.owner_id }) })}>删除</Button>}</div> },
           ]}
         />
       </Modal>

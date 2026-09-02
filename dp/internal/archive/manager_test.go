@@ -61,9 +61,8 @@ func TestDeletePackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		Name: "installed", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
-		SSHPasswordEnc: "encrypted", InstallDir: "/opt/service",
+	env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{
+		Name: "installed", Host: domain.Host{IP: "127.0.0.1", SSHUser: "user", SSHPort: 22, SSHPasswordEnc: "encrypted"}, InstallDir: "/opt/service",
 		ServiceType: "dp-demo",
 	})
 	if err != nil {
@@ -77,6 +76,9 @@ func TestDeletePackage(t *testing.T) {
 		t.Fatalf("expected PACKAGE_IN_USE, got %v", err)
 	}
 	if err := db.MarkUninstalled(ctx, env.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DeleteServiceInstance(ctx, env.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Delete(ctx, "dp-demo"); err != nil {
@@ -249,7 +251,7 @@ func TestPackageVersionLifecycle(t *testing.T) {
 	if err := manager.DeleteVersion(ctx, domain.InitialAdminID, "versioned", first.CurrentVersionID); appErrorCode(err) != "PACKAGE_VERSION_CURRENT" {
 		t.Fatalf("delete current err=%v", err)
 	}
-	env, err := db.CreateEnvironment(ctx, domain.Environment{OwnerID: domain.InitialAdminID, Name: "installed", IP: "192.0.2.30", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc", InstallDir: "/opt/versioned", ServiceType: "versioned", Installed: true, InstalledPackageSHA256: second.SHA256})
+	env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{OwnerID: domain.InitialAdminID, Name: "installed", Host: domain.Host{IP: "192.0.2.30", SSHUser: "u", SSHPort: 22, SSHPasswordEnc: "enc"}, InstallDir: "/opt/versioned", ServiceType: "versioned", Installed: true, InstalledPackageSHA256: second.SHA256})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,6 +363,20 @@ func TestConfigPortString(t *testing.T) {
 	port, err := configPort(bytes.TrimSpace([]byte(`{"port":"18080"}`)), "json")
 	if err != nil || port != 18080 {
 		t.Fatalf("port=%d err=%v", port, err)
+	}
+}
+
+func TestConfigAPIPortIsIndependentFromHealthPort(t *testing.T) {
+	port, exists, err := ConfigAPIPort([]byte(`{"port":18080,"api_port":"8000"}`), "json")
+	if err != nil || !exists || port != 8000 {
+		t.Fatalf("api port=%d exists=%v err=%v", port, exists, err)
+	}
+	_, exists, err = ConfigAPIPort([]byte("port: 18080\n"), "yaml")
+	if err != nil || exists {
+		t.Fatalf("missing api port exists=%v err=%v", exists, err)
+	}
+	if _, _, err := ConfigAPIPort([]byte("port: 18080\napi_port: invalid\n"), "yaml"); err == nil {
+		t.Fatal("invalid api_port was accepted")
 	}
 }
 

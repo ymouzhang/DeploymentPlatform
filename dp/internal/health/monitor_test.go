@@ -42,7 +42,7 @@ func TestCheckRequiresHTTP200AndOK(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"status": test.status})
 			}))
 			defer server.Close()
-			result := NewMonitor(nil, "", time.Minute).check(context.Background(), testEnvironment(t, server))
+			result := NewMonitor(nil, "", time.Minute).check(context.Background(), testServiceInstance(t, server))
 			if result.Status != test.want {
 				t.Fatalf("status = %q, want %q", result.Status, test.want)
 			}
@@ -64,7 +64,7 @@ func TestCheckRejectsInvalidResponses(t *testing.T) {
 				_, _ = w.Write([]byte(test.body))
 			}))
 			defer server.Close()
-			result := NewMonitor(nil, "", time.Minute).check(context.Background(), testEnvironment(t, server))
+			result := NewMonitor(nil, "", time.Minute).check(context.Background(), testServiceInstance(t, server))
 			if result.Status != "error" {
 				t.Fatalf("result = %#v", result)
 			}
@@ -79,7 +79,7 @@ func TestCheckTimeout(t *testing.T) {
 	defer server.Close()
 	monitor := NewMonitor(nil, "", time.Minute)
 	monitor.client.Timeout = 20 * time.Millisecond
-	if result := monitor.check(context.Background(), testEnvironment(t, server)); result.Status != "error" {
+	if result := monitor.check(context.Background(), testServiceInstance(t, server)); result.Status != "error" {
 		t.Fatalf("result = %#v", result)
 	}
 }
@@ -87,8 +87,8 @@ func TestCheckTimeout(t *testing.T) {
 func TestSnapshotMarksStaleResultUnknown(t *testing.T) {
 	monitor := NewMonitor(nil, "", time.Second)
 	checkedAt := time.Now().Add(-time.Minute)
-	monitor.results["environment"] = domain.HealthResult{Status: "ok", CheckedAt: &checkedAt}
-	if result := monitor.Snapshot("environment"); result.Status != "unknown" {
+	monitor.results["serviceInstance"] = domain.HealthResult{Status: "ok", CheckedAt: &checkedAt}
+	if result := monitor.Snapshot("serviceInstance"); result.Status != "unknown" {
 		t.Fatalf("result = %#v", result)
 	}
 }
@@ -120,7 +120,7 @@ func TestHealthNotificationResolvesAfterRecovery(t *testing.T) {
 	dataDir := t.TempDir()
 	db := testutil.OpenPostgres(t)
 	monitor := NewMonitor(db, dataDir, time.Minute)
-	env := domain.Environment{ID: "environment", Name: "service", Installed: true}
+	env := domain.ServiceInstance{ID: "serviceInstance", Name: "service", Installed: true}
 	for range 3 {
 		monitor.recordResult(ctx, env, domain.HealthResult{Status: "error"})
 	}
@@ -145,9 +145,8 @@ func TestCheckAllClearsAndRemovesResults(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	db := testutil.OpenPostgres(t)
-	env, err := db.CreateEnvironment(ctx, domain.Environment{
-		OwnerID: domain.InitialAdminID, Name: "reset", IP: "127.0.0.1", SSHUser: "user", SSHPort: 22,
-		SSHPasswordEnc: "encrypted", InstallDir: "/opt/reset", ServiceType: "dp-demo",
+	env, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{
+		OwnerID: domain.InitialAdminID, Name: "reset", Host: domain.Host{IP: "127.0.0.1", SSHUser: "user", SSHPort: 22, SSHPasswordEnc: "encrypted"}, InstallDir: "/opt/reset", ServiceType: "dp-demo",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -160,11 +159,11 @@ func TestCheckAllClearsAndRemovesResults(t *testing.T) {
 		t.Fatalf("uninstalled result = %#v", result)
 	}
 	if _, exists := monitor.results["deleted"]; exists {
-		t.Fatal("deleted environment result was retained")
+		t.Fatal("deleted serviceInstance result was retained")
 	}
 }
 
-func testEnvironment(t *testing.T, server *httptest.Server) domain.Environment {
+func testServiceInstance(t *testing.T, server *httptest.Server) domain.ServiceInstance {
 	t.Helper()
 	host, rawPort, err := net.SplitHostPort(server.Listener.Addr().String())
 	if err != nil {
@@ -174,5 +173,5 @@ func testEnvironment(t *testing.T, server *httptest.Server) domain.Environment {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return domain.Environment{IP: host, HealthPort: &port, Installed: true}
+	return domain.ServiceInstance{Host: domain.Host{IP: host}, HealthPort: &port, Installed: true}
 }

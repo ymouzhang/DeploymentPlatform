@@ -69,7 +69,8 @@ func run() error {
 	remoteExecutor := remote.NewExecutor(cfg.UploadTimeout)
 	packageManager := archive.NewManager(cfg.DataDir, cfg.UploadMaxBytes, db)
 	packageManager.ConfigureRetention(cfg.PackageVersionRetention)
-	environmentService := application.NewEnvironmentService(db, passwordCipher, remoteExecutor)
+	hostService := application.NewHostService(db, passwordCipher, remoteExecutor)
+	serviceInstanceService := application.NewServiceInstanceService(db)
 	serviceConfigService := application.NewServiceConfigService(
 		db, packageManager, passwordCipher, remoteExecutor,
 	)
@@ -115,7 +116,8 @@ func run() error {
 		roleService,
 		communicationService,
 		realtimeHub,
-		environmentService, serviceConfigService, serviceLogService, packageManager, operationManager, modelManager, healthMonitor,
+		hostService,
+		serviceInstanceService, serviceConfigService, serviceLogService, packageManager, operationManager, modelManager, healthMonitor,
 		db, auditService, cfg.UploadMaxBytes, cfg.AuditExportMaxRows, cfg.TrustedProxyCIDRs, log,
 	)
 	server := &http.Server{

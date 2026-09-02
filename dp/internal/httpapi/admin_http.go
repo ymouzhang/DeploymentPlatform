@@ -81,7 +81,7 @@ func (a *API) transferUserResources(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	setAuditTarget(r, source, "user", source.ID, source.Username, map[string]any{"target_user_id": target.ID, "target_username": target.Username, "packages": result.Packages, "environments": result.Environments})
+	setAuditTarget(r, source, "user", source.ID, source.Username, map[string]any{"target_user_id": target.ID, "target_username": target.Username, "packages": result.Packages, "hosts": result.Hosts, "service_instances": result.ServiceInstances, "models": result.Models})
 	writeData(w, http.StatusOK, result)
 }
 
@@ -178,22 +178,17 @@ func (a *API) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, err)
 		return
 	}
-	environments, err := a.store.ListEnvironments(r.Context())
+	instances, err := a.store.ListServiceInstances(r.Context())
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
 	if len(tagIDs) > 0 {
-		environments = application.FilterEnvironmentsByTagIDs(environments, tagIDs)
-		metrics.Environments, metrics.InstalledServices, metrics.UnvalidatedEnvironments, metrics.StaleValidationEnvironments = len(environments), 0, 0, 0
-		for _, env := range environments {
-			if env.Installed {
+		instances = application.FilterServiceInstancesByTagIDs(instances, tagIDs)
+		metrics.ServiceInstances, metrics.InstalledServices = len(instances), 0
+		for _, instance := range instances {
+			if instance.Installed {
 				metrics.InstalledServices++
-			}
-			if env.LastValidationAt == nil {
-				metrics.UnvalidatedEnvironments++
-			} else if env.LastValidationAt.Before(now.Add(-30 * 24 * time.Hour)) {
-				metrics.StaleValidationEnvironments++
 			}
 		}
 		metrics.ActiveOperations, metrics.FailedOperations24h, err = a.store.CountOperationsByTags(r.Context(), tagIDs, now.Add(-24*time.Hour))
@@ -203,11 +198,11 @@ func (a *API) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	metrics.RunningServices, metrics.UnhealthyInstalledServices = 0, 0
-	for _, env := range environments {
-		if !env.Installed {
+	for _, instance := range instances {
+		if !instance.Installed {
 			continue
 		}
-		health := a.health.Snapshot(env.ID)
+		health := a.health.Snapshot(instance.ID)
 		if health.Status == "ok" {
 			metrics.RunningServices++
 		} else {

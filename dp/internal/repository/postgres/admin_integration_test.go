@@ -44,16 +44,19 @@ func TestAdminRepositoryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create source tag: %v", err)
 	}
-	environment, err := db.CreateEnvironmentWithTags(ctx, domain.Environment{
-		OwnerID: source.ID, Name: "source-environment", IP: "192.0.2.21", SSHUser: "root",
-		SSHPort: 22, SSHPasswordEnc: "ciphertext", InstallDir: "/opt/service", ServiceType: "demo",
+	host, err := db.CreateHost(ctx, domain.Host{OwnerID: source.ID, Name: "source-host", IP: "192.0.2.21", SSHUser: "root", SSHPort: 22, SSHPasswordEnc: "ciphertext"})
+	if err != nil {
+		t.Fatalf("create source host: %v", err)
+	}
+	instance, err := db.CreateServiceInstanceWithTags(ctx, domain.ServiceInstance{
+		OwnerID: source.ID, HostID: host.ID, Name: "source-instance", InstallDir: "/opt/service", ServiceType: "demo",
 	}, []string{tag.ID})
 	if err != nil {
-		t.Fatalf("create source environment: %v", err)
+		t.Fatalf("create source instance: %v", err)
 	}
 	model, _, err := db.CreateModelUpload(ctx, domain.Model{
-		OwnerID: source.ID, EnvironmentID: environment.ID, EnvironmentName: environment.Name,
-		EnvironmentIP: environment.IP, Name: "source-model", Source: "offline",
+		OwnerID: source.ID, HostID: instance.HostID, HostName: instance.Host.Name,
+		HostIP: instance.Host.IP, Name: "source-model", Source: "offline",
 		TargetDir: "/models/source", OriginalFilename: "model.tar.gz", SizeBytes: 100,
 		Status: domain.ModelUploading, CreatedBy: source.ID, CreatedByUsername: source.Username,
 	}, domain.ModelUpload{RemotePath: "/models/.upload", TotalBytes: 100, Status: "uploading",
@@ -70,16 +73,16 @@ func TestAdminRepositoryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transfer resources: %v", err)
 	}
-	if result.Environments != 1 || result.Models != 1 {
+	if result.ServiceInstances != 1 || result.Models != 1 {
 		t.Fatalf("unexpected transfer result: %+v", result)
 	}
-	transferredEnvironment, err := db.GetEnvironment(ctx, environment.ID)
-	if err != nil || transferredEnvironment.OwnerID != target.ID || len(transferredEnvironment.Tags) != 1 {
-		t.Fatalf("environment was not transferred with tags: environment=%+v err=%v", transferredEnvironment, err)
+	transferredServiceInstance, err := db.GetServiceInstance(ctx, instance.ID)
+	if err != nil || transferredServiceInstance.OwnerID != target.ID || len(transferredServiceInstance.Tags) != 1 {
+		t.Fatalf("instance was not transferred with tags: instance=%+v err=%v", transferredServiceInstance, err)
 	}
 	targetTags, err := db.ListResourceTags(ctx, target.ID)
-	if err != nil || len(targetTags) != 1 || targetTags[0].ID != transferredEnvironment.Tags[0].ID {
-		t.Fatalf("environment tag ownership was not transferred: tags=%+v err=%v", targetTags, err)
+	if err != nil || len(targetTags) != 1 || targetTags[0].ID != transferredServiceInstance.Tags[0].ID {
+		t.Fatalf("instance tag ownership was not transferred: tags=%+v err=%v", targetTags, err)
 	}
 	transferredModel, err := db.GetModel(ctx, model.ID)
 	if err != nil || transferredModel.OwnerID != target.ID {
@@ -90,7 +93,7 @@ func TestAdminRepositoryIntegration(t *testing.T) {
 	}
 
 	metrics, err := db.DashboardMetrics(ctx, time.Now().UTC().Add(-24*time.Hour), time.Now().UTC().Add(-30*24*time.Hour))
-	if err != nil || metrics.Users != 3 || metrics.Environments != 1 {
+	if err != nil || metrics.Users != 3 || metrics.ServiceInstances != 1 {
 		t.Fatalf("unexpected dashboard metrics: metrics=%+v err=%v", metrics, err)
 	}
 	staleUsers, err := db.ListStaleUsers(ctx, time.Now().UTC().Add(time.Hour))

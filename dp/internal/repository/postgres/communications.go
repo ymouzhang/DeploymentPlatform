@@ -56,12 +56,14 @@ const communicationResourceSelect = `SELECT
 	r.owner_username,
 	r.resource_label,
 	r.service_type,
-	r.environment_name,
-	COALESCE(host(r.environment_ip), ''),
+	r.host_name,
+	COALESCE(host(r.host_ip), ''),
 	CASE WHEN r.resource_type = 'package' THEN EXISTS(
 		SELECT 1 FROM packages p WHERE p.owner_id = r.owner_id AND p.service_type = r.resource_key
+	) WHEN r.resource_type = 'host' THEN EXISTS(
+		SELECT 1 FROM hosts h WHERE h.id = r.resource_id AND h.owner_id = r.owner_id
 	) ELSE EXISTS(
-		SELECT 1 FROM environments e WHERE e.id = r.resource_id AND e.owner_id = r.owner_id
+		SELECT 1 FROM service_instances e WHERE e.id = r.resource_id AND e.owner_id = r.owner_id
 	) END
 	FROM communication_resource_refs r`
 
@@ -99,12 +101,12 @@ func (db *DB) CreateCommunication(
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO communication_resource_refs (
 			id, thread_id, resource_type, resource_id, resource_key, owner_id, owner_username,
-			resource_label, service_type, environment_name, environment_ip, created_at
+			resource_label, service_type, host_name, host_ip, created_at
 		) VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, $8, $9, $10,
 			NULLIF($11, '')::inet, $12)`, resource.ID, threadID, resource.ResourceType,
 			resource.ResourceID, resource.ResourceKey, resource.OwnerID, resource.OwnerUsername,
-			resource.ResourceLabel, resource.ServiceType, resource.EnvironmentName,
-			resource.EnvironmentIP, now)
+			resource.ResourceLabel, resource.ServiceType, resource.HostName,
+			resource.HostIP, now)
 		if isPostgresError(err, "23505") {
 			return domain.Communication{}, domain.FieldError("resources", "关联资源不能重复")
 		}
@@ -496,25 +498,35 @@ func postgresCommunicationResourceSnapshot(
 			return item, fmt.Errorf("query communication package: %w", err)
 		}
 		item.ResourceLabel = item.ServiceType
-	case "environment", "service":
+	case "host":
 		if input.ResourceID == "" || input.ResourceKey != "" {
-			return item, domain.FieldError("resources", "环境或服务关联必须提供 resource_id 且不能提供 resource_key")
+			return item, domain.FieldError("resources", "主机关联必须提供 resource_id 且不能提供 resource_key")
 		}
-		err := tx.QueryRow(ctx, `SELECT name, host(ip), service_type FROM environments
-			WHERE id = $1 AND owner_id = $2`, input.ResourceID, target.ID).
-			Scan(&item.EnvironmentName, &item.EnvironmentIP, &item.ServiceType)
+		err := tx.QueryRow(ctx, `SELECT name, host(ip) FROM hosts WHERE id=$1 AND owner_id=$2`, input.ResourceID, target.ID).Scan(&item.HostName, &item.HostIP)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return item, &domain.AppError{Code: "COMMUNICATION_RESOURCE_INVALID", Message: "关联环境或服务不存在或不属于目标账号"}
+			return item, &domain.AppError{Code: "COMMUNICATION_RESOURCE_INVALID", Message: "关联主机不存在或不属于目标账号"}
 		}
 		if err != nil {
-			return item, fmt.Errorf("query communication environment: %w", err)
+			return item, fmt.Errorf("query communication host: %w", err)
 		}
-		item.ResourceLabel = item.EnvironmentName
-		if input.ResourceType == "service" {
-			item.ResourceLabel = item.ServiceType + " · " + item.EnvironmentName
+		item.ResourceLabel = item.HostName
+	case "service":
+		if input.ResourceID == "" || input.ResourceKey != "" {
+			return item, domain.FieldError("resources", "服务关联必须提供 resource_id 且不能提供 resource_key")
 		}
+		var instanceName string
+		err := tx.QueryRow(ctx, `SELECT s.name, h.name, host(h.ip), s.service_type FROM service_instances s JOIN hosts h ON h.id=s.host_id
+			WHERE s.id = $1 AND s.owner_id = $2`, input.ResourceID, target.ID).
+			Scan(&instanceName, &item.HostName, &item.HostIP, &item.ServiceType)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return item, &domain.AppError{Code: "COMMUNICATION_RESOURCE_INVALID", Message: "关联服务实例不存在或不属于目标账号"}
+		}
+		if err != nil {
+			return item, fmt.Errorf("query communication service_instance: %w", err)
+		}
+		item.ResourceLabel = item.ServiceType + " · " + instanceName
 	default:
-		return item, domain.FieldError("resources", "资源类型必须是 package、environment 或 service")
+		return item, domain.FieldError("resources", "资源类型必须是 package、host 或 service")
 	}
 	return item, nil
 }
@@ -753,7 +765,7 @@ func scanPostgresCommunicationResource(
 	var item domain.CommunicationResource
 	err := row.Scan(&item.ID, &item.ThreadID, &item.ResourceType, &item.ResourceID,
 		&item.ResourceKey, &item.OwnerID, &item.OwnerUsername, &item.ResourceLabel,
-		&item.ServiceType, &item.EnvironmentName, &item.EnvironmentIP, &item.Available)
+		&item.ServiceType, &item.HostName, &item.HostIP, &item.Available)
 	if err != nil {
 		return domain.CommunicationResource{}, fmt.Errorf("scan communication resource: %w", err)
 	}
@@ -761,8 +773,8 @@ func scanPostgresCommunicationResource(
 		switch item.ResourceType {
 		case "package":
 			item.Link = "/packages?owner_id=" + url.QueryEscape(item.OwnerID)
-		case "environment":
-			item.Link = "/environments?owner_id=" + url.QueryEscape(item.OwnerID)
+		case "host":
+			item.Link = "/hosts?owner_id=" + url.QueryEscape(item.OwnerID)
 		case "service":
 			item.Link = "/services?owner_id=" + url.QueryEscape(item.OwnerID)
 		}

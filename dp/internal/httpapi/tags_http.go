@@ -151,7 +151,7 @@ func (a *API) deleteResourceTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owner, _ := a.store.GetUser(r.Context(), item.OwnerID)
-	setAuditTarget(r, owner, "tag", item.ID, item.GroupName+" / "+item.Value, map[string]any{"environment_count": item.EnvironmentCount})
+	setAuditTarget(r, owner, "tag", item.ID, item.GroupName+" / "+item.Value, map[string]any{"service_instance_count": item.ServiceInstanceCount})
 	if err := a.store.DeleteResourceTag(r.Context(), item.ID); err != nil {
 		a.writeError(w, r, err)
 		return
@@ -159,8 +159,8 @@ func (a *API) deleteResourceTag(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]string{"deleted": item.ID})
 }
 
-func (a *API) replaceEnvironmentTags(w http.ResponseWriter, r *http.Request) {
-	env, err := a.authorizeEnvironment(r, r.PathValue("id"), access.TagWrite)
+func (a *API) replaceServiceInstanceTags(w http.ResponseWriter, r *http.Request) {
+	env, err := a.authorizeServiceInstance(r, r.PathValue("id"), access.TagWrite)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
@@ -173,23 +173,23 @@ func (a *API) replaceEnvironmentTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(input.TagIDs) > 20 {
-		a.writeError(w, r, domain.FieldError("tag_ids", "每个环境最多关联 20 个标签"))
+		a.writeError(w, r, domain.FieldError("tag_ids", "每个服务实例最多关联 20 个标签"))
 		return
 	}
 	if err := a.store.ValidateTagIDs(r.Context(), env.OwnerID, input.TagIDs); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	if err := a.store.ReplaceEnvironmentTags(r.Context(), env.ID, input.TagIDs); err != nil {
+	if err := a.store.ReplaceServiceInstanceTags(r.Context(), env.ID, input.TagIDs); err != nil {
 		a.writeError(w, r, err)
 		return
 	}
-	updated, err := a.store.GetEnvironment(r.Context(), env.ID)
+	updated, err := a.store.GetServiceInstance(r.Context(), env.ID)
 	if err != nil {
 		a.writeError(w, r, err)
 		return
 	}
 	owner, _ := a.store.GetUser(r.Context(), env.OwnerID)
-	setAuditTarget(r, owner, "environment", env.ID, env.Name, map[string]any{"before": tagLabels(env.Tags), "after": tagLabels(updated.Tags)})
-	writeData(w, http.StatusOK, domain.EnvironmentView{Environment: updated, HasPassword: true})
+	setAuditTarget(r, owner, "service", env.ID, env.Name, map[string]any{"before": tagLabels(env.Tags), "after": tagLabels(updated.Tags)})
+	writeData(w, http.StatusOK, updated)
 }

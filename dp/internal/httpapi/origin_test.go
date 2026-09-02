@@ -29,7 +29,7 @@ func TestSameOriginRequest(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, "http://"+test.host+"/api/v1/environments", nil)
+			request := httptest.NewRequest(http.MethodPost, "http://"+test.host+"/api/v1/hosts", nil)
 			request.RemoteAddr = "10.0.0.2:1234"
 			request.Host = test.host
 			if test.origin != "" {

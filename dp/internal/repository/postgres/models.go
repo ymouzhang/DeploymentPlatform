@@ -16,9 +16,9 @@ const modelSelect = `SELECT
 	m.owner_id::text,
 	m.marker_owner_id::text,
 	COALESCE(u.username, ''),
-	COALESCE(m.environment_id::text, ''),
-	m.environment_name,
-	host(m.environment_ip),
+	COALESCE(m.host_id::text, ''),
+	m.host_name,
+	host(m.host_ip),
 	m.name,
 	m.source,
 	m.target_dir,
@@ -76,12 +76,12 @@ func (db *DB) CreateModelUpload(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `INSERT INTO models (
-		id, owner_id, marker_owner_id, environment_id, environment_name, environment_ip,
+		id, owner_id, marker_owner_id, host_id, host_name, host_ip,
 		name, source, target_dir, original_filename, size_bytes, status, created_by,
 		created_by_username, created_at, updated_at
 	) VALUES ($1, $2, $3, $4, $5, $6::inet, $7, $8, $9, $10, $11, $12,
 		NULLIF($13, '')::uuid, $14, $15, $15)`, model.ID, model.OwnerID, model.MarkerOwnerID,
-		model.EnvironmentID, model.EnvironmentName, model.EnvironmentIP, model.Name, model.Source,
+		model.HostID, model.HostName, model.HostIP, model.Name, model.Source,
 		model.TargetDir, model.OriginalFilename, model.SizeBytes, model.Status, model.CreatedBy,
 		model.CreatedByUsername, now)
 	if isPostgresError(err, "23505") {
@@ -296,12 +296,12 @@ func (db *DB) InterruptActiveModelTasks(ctx context.Context) error {
 	return nil
 }
 
-func (db *DB) EnvironmentHasModels(ctx context.Context, environmentID string) (bool, error) {
+func (db *DB) HostHasModels(ctx context.Context, hostID string) (bool, error) {
 	var exists bool
 	if err := db.pool.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM models WHERE environment_id = $1 AND deleted_at IS NULL
-	)`, environmentID).Scan(&exists); err != nil {
-		return false, fmt.Errorf("query environment models: %w", err)
+		SELECT 1 FROM models WHERE host_id = $1 AND deleted_at IS NULL
+	)`, hostID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("query host models: %w", err)
 	}
 	return exists, nil
 }
@@ -310,7 +310,7 @@ func scanPostgresModel(row interface{ Scan(...any) error }) (domain.Model, error
 	var item domain.Model
 	var readyAt, deletedAt sql.NullTime
 	err := row.Scan(&item.ID, &item.OwnerID, &item.MarkerOwnerID, &item.OwnerUsername,
-		&item.EnvironmentID, &item.EnvironmentName, &item.EnvironmentIP, &item.Name,
+		&item.HostID, &item.HostName, &item.HostIP, &item.Name,
 		&item.Source, &item.TargetDir, &item.OriginalFilename, &item.SizeBytes,
 		&item.ExpandedSizeBytes, &item.FileCount, &item.SHA256, &item.Status,
 		&item.ErrorMessage, &item.CreatedBy, &item.CreatedByUsername, &item.CreatedAt,

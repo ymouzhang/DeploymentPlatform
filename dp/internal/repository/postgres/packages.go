@@ -24,7 +24,7 @@ const packageSelect = `SELECT
 	p.uploaded_at,
 	p.updated_at,
 	(SELECT count(*) FROM package_versions v WHERE v.owner_id = p.owner_id AND v.service_type = p.service_type),
-	(SELECT count(*) FROM environments e WHERE e.owner_id = p.owner_id
+	(SELECT count(*) FROM service_instances e WHERE e.owner_id = p.owner_id
 		AND e.service_type = p.service_type AND e.installed_package_sha256 = p.sha256)
 	FROM packages p
 	LEFT JOIN users u ON u.id = p.owner_id`
@@ -46,7 +46,7 @@ const packageVersionSelect = `SELECT
 	v.uploaded_by_username,
 	v.uploaded_at,
 	p.current_version_id = v.id,
-	(SELECT count(*) FROM environments e WHERE e.owner_id = v.owner_id
+	(SELECT count(*) FROM service_instances e WHERE e.owner_id = v.owner_id
 		AND e.service_type = v.service_type AND e.installed_package_sha256 = v.sha256)
 	FROM package_versions v
 	JOIN packages p ON p.owner_id = v.owner_id AND p.service_type = v.service_type`
@@ -160,19 +160,19 @@ func (db *DB) DeletePackageByOwner(ctx context.Context, ownerID, serviceType str
 	return nil
 }
 
-func (db *DB) CountInstalledEnvironments(ctx context.Context, serviceType string) (int, error) {
-	return db.CountInstalledEnvironmentsByOwner(ctx, domain.InitialAdminID, serviceType)
+func (db *DB) CountServiceInstances(ctx context.Context, serviceType string) (int, error) {
+	return db.CountServiceInstancesByOwner(ctx, domain.InitialAdminID, serviceType)
 }
 
-func (db *DB) CountInstalledEnvironmentsByOwner(
+func (db *DB) CountServiceInstancesByOwner(
 	ctx context.Context,
 	ownerID string,
 	serviceType string,
 ) (int, error) {
 	var count int
-	if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM environments
-		WHERE owner_id = $1 AND service_type = $2 AND installed`, ownerID, serviceType).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count installed environments: %w", err)
+	if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM service_instances
+		WHERE owner_id = $1 AND service_type = $2`, ownerID, serviceType).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count service_instances: %w", err)
 	}
 	return count, nil
 }
@@ -333,7 +333,7 @@ func (db *DB) DeletePackageVersion(ctx context.Context, ownerID, serviceType, id
 		return &domain.AppError{Code: "PACKAGE_VERSION_CURRENT", Message: "当前版本不能删除，请先切换其他版本"}
 	}
 	if version.ReferencedCount > 0 {
-		return &domain.AppError{Code: "PACKAGE_VERSION_IN_USE", Message: "该版本仍被环境引用，不能删除"}
+		return &domain.AppError{Code: "PACKAGE_VERSION_IN_USE", Message: "该版本仍被服务实例引用，不能删除"}
 	}
 	command, err := db.pool.Exec(ctx, `DELETE FROM package_versions
 		WHERE id = $1 AND owner_id = $2 AND service_type = $3`, id, ownerID, serviceType)

@@ -9,8 +9,8 @@ import (
 )
 
 type ServiceLogRepository interface {
-	GetEnvironment(context.Context, string) (domain.Environment, error)
-	RecordValidation(context.Context, string, string, string) error
+	GetServiceInstance(context.Context, string) (domain.ServiceInstance, error)
+	RecordHostValidation(context.Context, string, string, string) error
 }
 
 type ServiceLogService struct {
@@ -29,25 +29,25 @@ func NewServiceLogService(
 
 func (s *ServiceLogService) Stream(
 	ctx context.Context,
-	environmentID string,
+	serviceInstanceID string,
 	tail int,
 	emit remote.EmitFunc,
 ) error {
-	env, err := s.store.GetEnvironment(ctx, environmentID)
+	instance, err := s.store.GetServiceInstance(ctx, serviceInstanceID)
 	if err != nil {
 		return err
 	}
-	if !env.Installed {
+	if !instance.Installed {
 		return domain.ErrNotInstalled
 	}
-	password, err := s.cipher.Decrypt(env.SSHPasswordEnc)
+	password, err := s.cipher.Decrypt(instance.Host.SSHPasswordEnc)
 	if err != nil {
 		return err
 	}
 	defer clear(password)
-	fingerprint, err := s.remote.FollowComposeLogs(ctx, env, password, tail, emit)
-	if fingerprint != "" && (env.HostKeyFingerprint == "" || env.HostKeyFingerprint == fingerprint) {
-		_ = s.store.RecordValidation(context.Background(), env.ID, fingerprint, env.Arch)
+	fingerprint, err := s.remote.FollowComposeLogs(ctx, instance, password, tail, emit)
+	if fingerprint != "" && (instance.Host.HostKeyFingerprint == "" || instance.Host.HostKeyFingerprint == fingerprint) {
+		_ = s.store.RecordHostValidation(context.Background(), instance.HostID, fingerprint, instance.Host.Arch)
 	}
 	return err
 }

@@ -29,10 +29,10 @@ func TestAuditMiddlewareRecordsSanitizedTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := api.auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		setAuditTarget(r, user, "environment", "env-1", "production", map[string]any{"ssh_password_changed": true})
+		setAuditTarget(r, user, "host", "host-1", "production", map[string]any{"ssh_password_changed": true})
 		writeData(w, http.StatusCreated, map[string]bool{"ok": true})
 	}))
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/environments", strings.NewReader(`{"ssh_password":"secret"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/hosts", strings.NewReader(`{"ssh_password":"secret"}`))
 	request.RemoteAddr = "192.0.2.10:1234"
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, authenticated{User: user}))
 	request = request.WithContext(context.WithValue(request.Context(), requestIDKey, domain.NewID()))
@@ -50,6 +50,20 @@ func TestAuditMiddlewareRecordsSanitizedTarget(t *testing.T) {
 	encoded := event.Changes["ssh_password_changed"]
 	if encoded != true || strings.Contains(string(mustJSON(t, event.Changes)), "secret") {
 		t.Fatalf("changes=%+v", event.Changes)
+	}
+}
+
+func TestServiceAuditRoutesKeepSpecificActions(t *testing.T) {
+	tests := []struct{ method, path, action string }{
+		{http.MethodPut, "/api/v1/services/instance-1", "service.update"},
+		{http.MethodPut, "/api/v1/services/instance-1/config", "service.config.update"},
+		{http.MethodPut, "/api/v1/services/instance-1/tags", "service.tags.update"},
+	}
+	for _, test := range tests {
+		_, action, _, ok := auditAction(test.method, test.path)
+		if !ok || action != test.action {
+			t.Fatalf("auditAction(%s, %s)=(%s, %v), want %s", test.method, test.path, action, ok, test.action)
+		}
 	}
 }
 

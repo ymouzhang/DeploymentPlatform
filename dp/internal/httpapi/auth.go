@@ -317,20 +317,32 @@ func (a *API) createOwnerScope(r *http.Request, permission access.Permission) (s
 	return target.ID, nil
 }
 
-func (a *API) authorizeEnvironment(
+func (a *API) authorizeServiceInstance(
 	r *http.Request,
 	id string,
 	permission access.Permission,
-) (domain.Environment, error) {
-	env, err := a.store.GetEnvironment(r.Context(), id)
+) (domain.ServiceInstance, error) {
+	env, err := a.store.GetServiceInstance(r.Context(), id)
 	if err != nil {
-		return domain.Environment{}, err
+		return domain.ServiceInstance{}, err
 	}
 	user := currentUser(r)
 	if !user.Permissions.Allows(permission, user.ID, env.OwnerID) {
-		return domain.Environment{}, domain.ErrForbidden
+		return domain.ServiceInstance{}, domain.ErrForbidden
 	}
 	return env, nil
+}
+
+func (a *API) authorizeHost(r *http.Request, id string, permission access.Permission) (domain.Host, error) {
+	host, err := a.store.GetHost(r.Context(), id)
+	if err != nil {
+		return domain.Host{}, err
+	}
+	user := currentUser(r)
+	if !user.Permissions.Allows(permission, user.ID, host.OwnerID) {
+		return domain.Host{}, domain.ErrForbidden
+	}
+	return host, nil
 }
 
 func (a *API) authorizeOperation(r *http.Request, id string) (domain.Operation, error) {
@@ -347,7 +359,7 @@ func (a *API) authorizeOperation(r *http.Request, id string) (domain.Operation, 
 		return op, nil
 	}
 	if op.OwnerID == "" {
-		_, err = a.authorizeEnvironment(r, op.EnvironmentID, access.OperationRead)
+		_, err = a.authorizeServiceInstance(r, op.ServiceInstanceID, access.OperationRead)
 		return op, err
 	}
 	return domain.Operation{}, domain.ErrForbidden

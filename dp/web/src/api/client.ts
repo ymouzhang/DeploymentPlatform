@@ -1,6 +1,8 @@
 import type {
-  Environment,
-  EnvironmentInput,
+  ServiceInstance,
+  ServiceInstanceInput,
+	Host,
+	HostInput,
   Operation,
   PackageInfo,
   Service,
@@ -79,7 +81,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (payload as DataEnvelope<T>).data
 }
 
-async function validationRequest(url: string, input?: EnvironmentInput): Promise<ValidationResponse> {
+async function validationRequest(url: string, input?: HostInput): Promise<ValidationResponse> {
   const response = await fetch(url, {
     method: 'POST',
     headers: input ? { 'Content-Type': 'application/json' } : undefined,
@@ -123,38 +125,37 @@ export const api = {
   listUserSessions: (id: string) => request<Session[]>(`/api/v1/users/${id}/sessions`),
   revokeUserSession: (id: string, sessionId: string) => request(`/api/v1/users/${id}/sessions/${sessionId}`, { method: 'DELETE' }),
   transferUserResources: (id: string, target_user_id: string) =>
-    request<{ source_user_id: string; target_user_id: string; packages: number; environments: number; models: number }>(`/api/v1/users/${id}/transfer`, { method: 'POST', body: JSON.stringify({ target_user_id }) }),
-  listEnvironments: (ownerId?: string, tagIds?: string[]) =>
-    request<Environment[]>(withScope('/api/v1/environments', ownerId, tagIds)),
-  createEnvironment: (input: EnvironmentInput, ownerId?: string) =>
-    request<Environment>(withOwner('/api/v1/environments', ownerId), {
+    request<{ source_user_id: string; target_user_id: string; packages: number; hosts: number; service_instances: number; models: number }>(`/api/v1/users/${id}/transfer`, { method: 'POST', body: JSON.stringify({ target_user_id }) }),
+  listHosts: (ownerId?: string) => request<Host[]>(withOwner('/api/v1/hosts', ownerId)),
+  createHost: (input: HostInput, ownerId?: string) =>
+    request<Host>(withOwner('/api/v1/hosts', ownerId), { method: 'POST', body: JSON.stringify(input) }),
+  updateHost: (id: string, input: HostInput) =>
+    request<Host>(`/api/v1/hosts/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+  deleteHost: (id: string) => request<null>(`/api/v1/hosts/${id}`, { method: 'DELETE' }),
+  validateDraftHost: (input: HostInput) => validationRequest('/api/v1/hosts/validate', input),
+  validateHost: (id: string) => validationRequest(`/api/v1/hosts/${id}/validate`),
+  importHosts: (document: unknown, ownerId?: string) =>
+    request<{ created: number; updated: number; total: number }>(withOwner('/api/v1/hosts/import', ownerId), { method: 'POST', body: JSON.stringify(document) }),
+  createServiceInstance: (input: ServiceInstanceInput, ownerId?: string) =>
+    request<ServiceInstance>(withOwner('/api/v1/services', ownerId), {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  updateEnvironment: (id: string, input: EnvironmentInput) =>
-    request<Environment>(`/api/v1/environments/${id}`, {
+  updateServiceInstance: (id: string, input: ServiceInstanceInput) =>
+    request<ServiceInstance>(`/api/v1/services/${id}`, {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
-  deleteEnvironment: (id: string) =>
-    request<null>(`/api/v1/environments/${id}`, { method: 'DELETE' }),
-  replaceEnvironmentTags: (id: string, tag_ids: string[]) =>
-    request<Environment>(`/api/v1/environments/${id}/tags`, { method: 'PUT', body: JSON.stringify({ tag_ids }) }),
+  deleteServiceInstance: (id: string) =>
+    request<null>(`/api/v1/services/${id}`, { method: 'DELETE' }),
+  replaceServiceInstanceTags: (id: string, tag_ids: string[]) =>
+    request<ServiceInstance>(`/api/v1/services/${id}/tags`, { method: 'PUT', body: JSON.stringify({ tag_ids }) }),
   listTags: (ownerId?: string) => request<ResourceTag[]>(withOwner('/api/v1/tags', ownerId)),
   createTag: (input: { group_name: string; value: string }, ownerId?: string) =>
     request<ResourceTag>(withOwner('/api/v1/tags', ownerId), { method: 'POST', body: JSON.stringify(input) }),
   updateTag: (id: string, input: { group_name: string; value: string }) =>
     request<ResourceTag>(`/api/v1/tags/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
   deleteTag: (id: string) => request(`/api/v1/tags/${id}`, { method: 'DELETE' }),
-  validateDraft: (input: EnvironmentInput, ownerId?: string) =>
-    validationRequest(withOwner('/api/v1/environments/validate', ownerId), input),
-  validateEnvironment: (id: string) =>
-    validationRequest(`/api/v1/environments/${id}/validate`),
-  importEnvironments: (document: unknown, ownerId?: string) =>
-    request<{ created: number; overwritten: number; total: number }>(
-      withOwner('/api/v1/environments/import', ownerId),
-      { method: 'POST', body: JSON.stringify(document) },
-    ),
   listServiceTypes: (ownerId?: string) => request<ServiceTypeInfo[]>(withOwner('/api/v1/service-types', ownerId)),
   listPackages: (ownerId?: string) => request<PackageInfo[]>(withOwner('/api/v1/packages', ownerId)),
   uploadPackage: ({
@@ -193,7 +194,7 @@ export const api = {
     request(withOwner(`/api/v1/service-types/${encodeURIComponent(serviceType)}/package/versions/${versionId}`, ownerId), { method: 'DELETE' }),
   listServices: (ownerId?: string, tagIds?: string[]) => request<Service[]>(withScope('/api/v1/services', ownerId, tagIds)),
 	listModels: (ownerId?: string) => request<Model[]>(withOwner('/api/v1/models', ownerId)),
-	createModelUpload: (input: { name: string; environment_id: string; target_dir: string; original_filename: string; total_bytes: number }, ownerId?: string) =>
+	createModelUpload: (input: { name: string; host_id: string; target_dir: string; original_filename: string; total_bytes: number }, ownerId?: string) =>
 		request<ModelUploadCreated>(withOwner('/api/v1/model-uploads', ownerId), { method: 'POST', body: JSON.stringify(input) }),
 	modelUploadOffset: async (id: string) => {
 		const response = await fetch(`/api/v1/model-uploads/${id}`, { method: 'HEAD' })
@@ -213,28 +214,28 @@ export const api = {
 	retryModel: (id: string) => request<ModelTask>(`/api/v1/models/${id}/retry`, { method: 'POST', body: '{}' }),
 	deleteModel: (id: string, confirm_name: string) => request<ModelTask | { deleted: string }>(`/api/v1/models/${id}`, { method: 'DELETE', body: JSON.stringify({ confirm_name }) }),
 	getModelTask: (id: string) => request<ModelTask>(`/api/v1/model-tasks/${id}`),
-  getServiceConfig: (environmentId: string) =>
-    request<ServiceConfig>(`/api/v1/services/${environmentId}/config`),
-  updateServiceConfig: ({ environmentId, content }: { environmentId: string; content: string }) =>
-    request<ServiceConfig>(`/api/v1/services/${environmentId}/config`, {
+  getServiceConfig: (serviceInstanceId: string) =>
+    request<ServiceConfig>(`/api/v1/services/${serviceInstanceId}/config`),
+  updateServiceConfig: ({ serviceInstanceId, content }: { serviceInstanceId: string; content: string }) =>
+    request<ServiceConfig>(`/api/v1/services/${serviceInstanceId}/config`, {
       method: 'PUT',
       body: JSON.stringify({ content }),
     }),
-  previewServiceConfig: ({ environmentId, content }: { environmentId: string; content: string }) =>
-    request<ServiceConfigPreview>(`/api/v1/services/${environmentId}/config/preview`, { method: 'POST', body: JSON.stringify({ content }) }),
-  listServiceConfigRevisions: (environmentId: string) =>
-    request<ServiceConfigRevision[]>(`/api/v1/services/${environmentId}/config/revisions`),
-  getServiceConfigRevision: (environmentId: string, revisionId: string) =>
-    request<ServiceConfigRevision>(`/api/v1/services/${environmentId}/config/revisions/${revisionId}`),
-  rollbackServiceConfigRevision: (environmentId: string, revisionId: string) =>
-    request<ServiceConfigRevision>(`/api/v1/services/${environmentId}/config/revisions/${revisionId}/rollback`, { method: 'POST', body: '{}' }),
-  startOperation: (environmentId: string, action: 'install' | 'start' | 'stop' | 'reset') =>
+  previewServiceConfig: ({ serviceInstanceId, content }: { serviceInstanceId: string; content: string }) =>
+    request<ServiceConfigPreview>(`/api/v1/services/${serviceInstanceId}/config/preview`, { method: 'POST', body: JSON.stringify({ content }) }),
+  listServiceConfigRevisions: (serviceInstanceId: string) =>
+    request<ServiceConfigRevision[]>(`/api/v1/services/${serviceInstanceId}/config/revisions`),
+  getServiceConfigRevision: (serviceInstanceId: string, revisionId: string) =>
+    request<ServiceConfigRevision>(`/api/v1/services/${serviceInstanceId}/config/revisions/${revisionId}`),
+  rollbackServiceConfigRevision: (serviceInstanceId: string, revisionId: string) =>
+    request<ServiceConfigRevision>(`/api/v1/services/${serviceInstanceId}/config/revisions/${revisionId}/rollback`, { method: 'POST', body: '{}' }),
+  startOperation: (serviceInstanceId: string, action: 'install' | 'start' | 'stop' | 'reset') =>
     request<{ operation_id: string; status: string }>(
-      `/api/v1/services/${environmentId}/${action}`,
+      `/api/v1/services/${serviceInstanceId}/${action}`,
       { method: 'POST', body: '{}' },
     ),
-  checkHealth: (environmentId: string) =>
-    request(`/api/v1/services/${environmentId}/health-check`, {
+  checkHealth: (serviceInstanceId: string) =>
+    request(`/api/v1/services/${serviceInstanceId}/health-check`, {
       method: 'POST',
       body: '{}',
     }),

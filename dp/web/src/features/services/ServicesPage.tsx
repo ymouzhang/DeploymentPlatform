@@ -11,6 +11,9 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
   RollbackOutlined,
+	PlusOutlined,
+	EditOutlined,
+	DeleteOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { mainTablePagination, modalTablePagination } from '../../components/ListPagination'
@@ -18,9 +21,12 @@ import {
   App,
   Button,
   Card,
+	Drawer,
   Empty,
+	Form,
   Input,
   Modal,
+	Select,
   Space,
   Spin,
   Table,
@@ -30,7 +36,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../../api/client'
-import type { Permission, Service, ServiceConfigPreview, ServiceConfigRevision } from '../../types'
+import type { Permission, Service, ServiceConfigPreview, ServiceConfigRevision, ServiceInstance, ServiceInstanceInput } from '../../types'
 import { OperationModal } from '../operations/OperationModal'
 import { ServiceLogModal } from './ServiceLogModal'
 import { useAuth } from '../../app/AuthContext'
@@ -47,11 +53,11 @@ export function ServicesPage() {
   const queryClient = useQueryClient()
   const { ownerId, user, users, can, hasAll } = useAuth()
   const [search] = useSearchParams()
-  const highlightedEnvironmentId = search.get('environment_id')
+  const highlightedServiceInstanceId = search.get('service_instance_id')
   const [operationId, setOperationId] = useState<string | null>(null)
   const [operationOpen, setOperationOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
-  const [configEnvironment, setConfigEnvironment] = useState<Service['environment'] | null>(null)
+  const [configServiceInstance, setConfigServiceInstance] = useState<Service['service_instance'] | null>(null)
   const [configContent, setConfigContent] = useState('')
   const [configFormat, setConfigFormat] = useState<'json' | 'yaml'>('json')
   const [configPath, setConfigPath] = useState('')
@@ -69,6 +75,9 @@ export function ServicesPage() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [revisionDetail, setRevisionDetail] = useState<ServiceConfigRevision>()
   const [tagFilter, setTagFilter] = useState<string[]>(() => search.getAll('tag_id'))
+	const [instanceOpen, setInstanceOpen] = useState(false)
+	const [editingInstance, setEditingInstance] = useState<ServiceInstance>()
+	const [instanceForm] = Form.useForm<ServiceInstanceInput>()
 
   const packagesQuery = useQuery({
     queryKey: ['packages', ownerId],
@@ -80,6 +89,23 @@ export function ServicesPage() {
     refetchInterval: 10_000,
   })
   const tagsQuery = useQuery({ queryKey: ['tags', ownerId], queryFn: () => api.listTags(ownerId) })
+	const hostsQuery = useQuery({ queryKey: ['hosts', ownerId], queryFn: () => api.listHosts(ownerId) })
+	const serviceTypesQuery = useQuery({ queryKey: ['service-types', ownerId], queryFn: () => api.listServiceTypes(ownerId) })
+	const saveInstance = useMutation({
+		mutationFn: (input: ServiceInstanceInput) => editingInstance ? api.updateServiceInstance(editingInstance.id, input) : api.createServiceInstance(input, ownerId),
+		onSuccess: () => { message.success(editingInstance ? '服务实例已更新' : '服务实例已创建'); setInstanceOpen(false); void queryClient.invalidateQueries({ queryKey: ['services'] }) },
+		onError: (error: Error) => message.error(error.message),
+	})
+	const deleteInstance = useMutation({
+		mutationFn: api.deleteServiceInstance,
+		onSuccess: () => { message.success('服务实例已删除'); void queryClient.invalidateQueries({ queryKey: ['services'] }) },
+		onError: (error: Error) => message.error(error.message),
+	})
+	const openInstance = (instance?: ServiceInstance) => {
+		setEditingInstance(instance)
+		instanceForm.setFieldsValue(instance ? { host_id: instance.host_id, name: instance.name, install_dir: instance.install_dir, service_type: instance.service_type, note: instance.note, tag_ids: instance.tags?.map((tag) => tag.id!).filter(Boolean) } : { host_id: undefined!, name: '', install_dir: '/opt/services/service-name', service_type: undefined!, note: '', tag_ids: [] })
+		setInstanceOpen(true)
+	}
   useEffect(() => {
     if (!tagsQuery.data) return
     const allowed = new Set(tagsQuery.data.map((tag) => tag.id))
@@ -118,7 +144,7 @@ export function ServicesPage() {
     onSuccess: (config) => {
       setConfigInherited(false)
       setConfigContent(config.content)
-      message.success(configEnvironment?.installed ? '配置已保存并同步到服务器' : '配置已保存')
+      message.success(configServiceInstance?.installed ? '配置已保存并同步到服务器' : '配置已保存')
       setConfigOpen(false)
       void queryClient.invalidateQueries({ queryKey: ['services'] })
     },
@@ -130,18 +156,18 @@ export function ServicesPage() {
     onError: (error: Error) => message.error(error.message),
   })
   const revisionsQuery = useQuery({
-    queryKey: ['service-config-revisions', configEnvironment?.id],
-    queryFn: () => api.listServiceConfigRevisions(configEnvironment!.id),
-    enabled: historyOpen && Boolean(configEnvironment),
+    queryKey: ['service-config-revisions', configServiceInstance?.id],
+    queryFn: () => api.listServiceConfigRevisions(configServiceInstance!.id),
+    enabled: historyOpen && Boolean(configServiceInstance),
   })
   const rollbackMutation = useMutation({
-    mutationFn: ({ environmentId, revisionId }: { environmentId: string; revisionId: string }) => api.rollbackServiceConfigRevision(environmentId, revisionId),
+    mutationFn: ({ serviceInstanceId, revisionId }: { serviceInstanceId: string; revisionId: string }) => api.rollbackServiceConfigRevision(serviceInstanceId, revisionId),
     onSuccess: async () => {
       message.success('配置已回滚，并创建了新的修订')
       setRevisionDetail(undefined)
       setHistoryOpen(false)
-      if (configEnvironment) {
-        const config = await api.getServiceConfig(configEnvironment.id)
+      if (configServiceInstance) {
+        const config = await api.getServiceConfig(configServiceInstance.id)
         setConfigContent(config.content); setConfigOriginalContent(config.content); setConfigFormat(config.format); setConfigPath(config.path); setConfigInherited(false)
         setConfigPackageContent(config.package_content); setConfigPackageFilename(config.package_filename)
         setConfigPackageChanged(config.package_changed); setConfigPackageUpdated(config.package_updated)
@@ -153,13 +179,13 @@ export function ServicesPage() {
   })
 
   const openConfig = async (service: Service) => {
-    setConfigEnvironment(service.environment)
+    setConfigServiceInstance(service.service_instance)
     setConfigOpen(true)
     setConfigLoading(true)
     try {
       const config = await queryClient.fetchQuery({
-        queryKey: ['service-config', service.environment.id],
-        queryFn: () => api.getServiceConfig(service.environment.id),
+        queryKey: ['service-config', service.service_instance.id],
+        queryFn: () => api.getServiceConfig(service.service_instance.id),
         staleTime: 0,
       })
       setConfigContent(config.content)
@@ -181,7 +207,7 @@ export function ServicesPage() {
   }
 
   const saveConfig = () => {
-    if (!configEnvironment) return
+    if (!configServiceInstance) return
     if (configFormat === 'json') {
       try {
         JSON.parse(configContent)
@@ -190,15 +216,15 @@ export function ServicesPage() {
         return
       }
     }
-    previewConfigMutation.mutate({ environmentId: configEnvironment.id, content: configContent })
+    previewConfigMutation.mutate({ serviceInstanceId: configServiceInstance.id, content: configContent })
   }
 
   const commitConfig = () => {
-    if (!configEnvironment || !configPreview) return
-    const save = () => saveConfigMutation.mutate({ environmentId: configEnvironment.id, content: configPreview.proposed_content }, { onSuccess: () => setConfigPreview(undefined) })
-    if (hasAll('service.config.write') && configEnvironment.owner_id !== user.id) {
-      const owner = users.find((item) => item.id === configEnvironment.owner_id)?.username ?? configEnvironment.owner_id
-      modal.confirm({ title: `修改 ${owner} 的服务配置？`, content: `目标环境：${configEnvironment.name}（${configEnvironment.ip}）。保存后配置归属不变，并记录高风险审计。`, okText: '确认保存', onOk: save })
+    if (!configServiceInstance || !configPreview) return
+    const save = () => saveConfigMutation.mutate({ serviceInstanceId: configServiceInstance.id, content: configPreview.proposed_content }, { onSuccess: () => setConfigPreview(undefined) })
+    if (hasAll('service.config.write') && configServiceInstance.owner_id !== user.id) {
+      const owner = users.find((item) => item.id === configServiceInstance.owner_id)?.username ?? configServiceInstance.owner_id
+      modal.confirm({ title: `修改 ${owner} 的服务配置？`, content: `目标服务实例：${configServiceInstance.name}（${configServiceInstance.host.ip}）。保存后配置归属不变，并记录高风险审计。`, okText: '确认保存', onOk: save })
       return
     }
     save()
@@ -206,7 +232,7 @@ export function ServicesPage() {
 
   const completeOperation = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['services'] })
-    void queryClient.invalidateQueries({ queryKey: ['environments'] })
+    void queryClient.invalidateQueries({ queryKey: ['services'] })
   }, [queryClient])
 
   const columns = useMemo<ColumnsType<Service>>(
@@ -219,8 +245,8 @@ export function ServicesPage() {
           <div className="service-cell">
             <div className="service-cell-icon"><DeploymentUnitOutlined /></div>
             <div>
-              <Typography.Text strong>{record.environment.name}</Typography.Text>
-              <div className="cell-caption">{record.environment.service_type}</div>
+              <Typography.Text strong>{record.service_instance.name}</Typography.Text>
+              <div className="cell-caption">{record.service_instance.service_type}</div>
             </div>
           </div>
         ),
@@ -230,18 +256,18 @@ export function ServicesPage() {
         key: 'owner',
         width: 150,
         render: (_, record) => (
-          <Tag>{users.find((item) => item.id === record.environment.owner_id)?.username ?? (record.environment.owner_id === user.id ? user.username : record.environment.owner_id)}</Tag>
+          <Tag>{users.find((item) => item.id === record.service_instance.owner_id)?.username ?? (record.service_instance.owner_id === user.id ? user.username : record.service_instance.owner_id)}</Tag>
         ),
       },
       {
-        title: '服务端口',
-        dataIndex: 'service_port',
+        title: 'API 端口',
+        dataIndex: 'api_port',
         width: 110,
         render: (value?: number) => (
           <Typography.Text className="server-address">{value ?? '-'}</Typography.Text>
         ),
       },
-      { title: '标签', key: 'tags', width: 220, render: (_, record) => <TagList tags={record.environment.tags} /> },
+      { title: '标签', key: 'tags', width: 220, render: (_, record) => <TagList tags={record.service_instance.tags} /> },
       {
         title: '服务器与安装目录',
         key: 'server',
@@ -249,10 +275,10 @@ export function ServicesPage() {
         render: (_, record) => (
           <div className="table-stacked-cell">
             <Typography.Text className="server-address">
-              {record.environment.ip}
+              {record.service_instance.host.ip}
             </Typography.Text>
-            <Typography.Text type="secondary" className="cell-caption table-ellipsis-line" ellipsis={{ tooltip: record.environment.install_dir }}>
-              {record.environment.install_dir}
+            <Typography.Text type="secondary" className="cell-caption table-ellipsis-line" ellipsis={{ tooltip: record.service_instance.install_dir }}>
+              {record.service_instance.install_dir}
             </Typography.Text>
           </div>
         ),
@@ -264,7 +290,7 @@ export function ServicesPage() {
         render: (_, record) => {
           const lastOperation = record.last_operation
           const installFailed =
-            !record.environment.installed &&
+            !record.service_instance.installed &&
             lastOperation?.action === 'install' &&
             (lastOperation.status === 'failed' ||
               lastOperation.status === 'timed_out' ||
@@ -279,8 +305,8 @@ export function ServicesPage() {
             )
           }
           return (
-            <Tooltip title={record.environment.installed_at ? formatTime(record.environment.installed_at) : undefined}>
-              {record.environment.installed ? (
+            <Tooltip title={record.service_instance.installed_at ? formatTime(record.service_instance.installed_at) : undefined}>
+              {record.service_instance.installed ? (
                 <Tag color="processing" icon={<CheckCircleFilled />}>已安装</Tag>
               ) : (
                 <Tag>未安装</Tag>
@@ -298,14 +324,14 @@ export function ServicesPage() {
             <Tooltip title={healthTooltip(record.health)}>
               {healthTag(record)}
             </Tooltip>
-            {record.environment.installed && can('service.health', record.environment.owner_id) && (
+            {record.service_instance.installed && can('service.health', record.service_instance.owner_id) && (
               <Tooltip title="立即检查">
                 <Button
                   type="text"
                   size="small"
                   icon={<ReloadOutlined />}
-                  loading={healthMutation.isPending && healthMutation.variables === record.environment.id}
-                  onClick={() => healthMutation.mutate(record.environment.id)}
+                  loading={healthMutation.isPending && healthMutation.variables === record.service_instance.id}
+                  onClick={() => healthMutation.mutate(record.service_instance.id)}
                 />
               </Tooltip>
             )}
@@ -318,28 +344,30 @@ export function ServicesPage() {
         width: 390,
         fixed: 'right',
         render: (_, record) => {
-          const { environment, busy } = record
-          const pending = actionMutation.isPending && actionMutation.variables?.id === environment.id
+          const { service_instance: serviceInstance, busy } = record
+          const pending = actionMutation.isPending && actionMutation.variables?.id === serviceInstance.id
           const execute = (action: 'install' | 'start' | 'stop') => {
-            const run = () => actionMutation.mutate({ id: environment.id, action })
-            if (hasAll(serviceActionPermission(action)) && environment.owner_id !== user.id) {
-              const owner = users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id
-              modal.confirm({ title: `${action === 'install' ? '安装' : action === 'start' ? '启动' : '停止'}其他账号的服务？`, content: `目标：${environment.name}（所属账号：${owner}）。操作将记录高风险审计。`, okText: '确认执行', onOk: run })
+            const run = () => actionMutation.mutate({ id: serviceInstance.id, action })
+            if (hasAll(serviceActionPermission(action)) && serviceInstance.owner_id !== user.id) {
+              const owner = users.find((item) => item.id === serviceInstance.owner_id)?.username ?? serviceInstance.owner_id
+              modal.confirm({ title: `${action === 'install' ? '安装' : action === 'start' ? '启动' : '停止'}其他账号的服务？`, content: `目标：${serviceInstance.name}（所属账号：${owner}）。操作将记录高风险审计。`, okText: '确认执行', onOk: run })
             } else run()
           }
           return (
             <div className="row-actions">
-              {can('service.config.read', environment.owner_id) && <Button
+			  {can('service.write', serviceInstance.owner_id) && <Button size="small" icon={<EditOutlined />} disabled={busy} onClick={() => openInstance(serviceInstance)}>编辑</Button>}
+			  {can('service.delete', serviceInstance.owner_id) && <Button danger size="small" icon={<DeleteOutlined />} disabled={busy || serviceInstance.installed} onClick={() => modal.confirm({ title: `删除服务实例“${serviceInstance.name}”？`, content: '已安装实例需要先执行重置。', okButtonProps: { danger: true }, onOk: () => deleteInstance.mutateAsync(serviceInstance.id) })}>删除</Button>}
+              {can('service.config.read', serviceInstance.owner_id) && <Button
                 size="small"
                 icon={<CodeOutlined />}
-                disabled={busy || !packageTypes.has(`${environment.owner_id}:${environment.service_type}`)}
+                disabled={busy || !packageTypes.has(`${serviceInstance.owner_id}:${serviceInstance.service_type}`)}
                 onClick={() => void openConfig(record)}
               >
                 配置
               </Button>}
-              {environment.installed ? (
+              {serviceInstance.installed ? (
                 <>
-                  {can('service.start', environment.owner_id) && <Button
+                  {can('service.start', serviceInstance.owner_id) && <Button
                     size="small"
                     type="primary"
                     ghost
@@ -350,7 +378,7 @@ export function ServicesPage() {
                   >
                     启动
                   </Button>}
-                  {can('service.stop', environment.owner_id) && <Button
+                  {can('service.stop', serviceInstance.owner_id) && <Button
                     size="small"
                     danger
                     type="text"
@@ -361,7 +389,7 @@ export function ServicesPage() {
                   >
                     停止
                   </Button>}
-                  {can('service.log.read', environment.owner_id) && <Tooltip title={record.health.status === 'ok' ? undefined : '服务未运行'}>
+                  {can('service.log.read', serviceInstance.owner_id) && <Tooltip title={record.health.status === 'ok' ? undefined : '服务未运行'}>
                     <span>
                       <Button
                         size="small"
@@ -376,17 +404,17 @@ export function ServicesPage() {
                   </Tooltip>}
                 </>
               ) : (
-                can('service.install', environment.owner_id) && <Button
+                can('service.install', serviceInstance.owner_id) && <Button
                   size="small"
                   type="primary"
-                  disabled={busy || !packageTypes.has(`${environment.owner_id}:${environment.service_type}`)}
+                  disabled={busy || !packageTypes.has(`${serviceInstance.owner_id}:${serviceInstance.service_type}`)}
                   loading={pending && actionMutation.variables?.action === 'install'}
                   onClick={() => execute('install')}
                 >
                   安装
                 </Button>
               )}
-              {can('service.reset', environment.owner_id) && <Button
+              {can('service.reset', serviceInstance.owner_id) && <Button
                 size="small"
                 type="text"
                 icon={<RollbackOutlined />}
@@ -394,17 +422,17 @@ export function ServicesPage() {
                 loading={pending && actionMutation.variables?.action === 'reset'}
                 onClick={() => {
                   modal.confirm({
-                    title: `重置 ${environment.name}？`,
-                    content: environment.installed ? (
+                    title: `重置 ${serviceInstance.name}？`,
+                    content: serviceInstance.installed ? (
                       <div className="reset-confirm">
-                        {hasAll('service.reset') && environment.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id}</strong></p>}
+                        {hasAll('service.reset') && serviceInstance.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === serviceInstance.owner_id)?.username ?? serviceInstance.owner_id}</strong></p>}
                         <p>如果服务最近没有成功停止，系统会先执行 stop.sh。</p>
                         <p>重置后服务变为“未安装”，可修改 IP、服务类型或安装目录并重新安装。</p>
                         <p>远端安装目录和业务文件不会被删除。</p>
                       </div>
                     ) : (
                       <div className="reset-confirm">
-                        {hasAll('service.reset') && environment.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === environment.owner_id)?.username ?? environment.owner_id}</strong></p>}
+                        {hasAll('service.reset') && serviceInstance.owner_id !== user.id && <p><strong>所属账号：{users.find((item) => item.id === serviceInstance.owner_id)?.username ?? serviceInstance.owner_id}</strong></p>}
                         <p>将尝试停止远端服务并清理安装标记，可用于强制停止安装失败后反复重启的服务。</p>
                         <p>远端安装目录和业务文件不会被删除。</p>
                       </div>
@@ -414,7 +442,7 @@ export function ServicesPage() {
                     okButtonProps: { danger: true },
                     onOk: () =>
                       actionMutation.mutate({
-                        id: environment.id,
+                        id: serviceInstance.id,
                         action: 'reset',
                       }),
                   })
@@ -447,13 +475,13 @@ export function ServicesPage() {
   const services = keywordNormalized
     ? allServices.filter(
         (item) =>
-          item.environment.ip.toLowerCase().includes(keywordNormalized) ||
-          item.environment.service_type.toLowerCase().includes(keywordNormalized),
+          item.service_instance.host.ip.toLowerCase().includes(keywordNormalized) ||
+          item.service_instance.service_type.toLowerCase().includes(keywordNormalized),
       )
     : allServices
-  const installedCount = services.filter((item) => item.environment.installed).length
+  const installedCount = services.filter((item) => item.service_instance.installed).length
   const runningCount = services.filter(
-    (item) => item.environment.installed && item.health.status === 'ok',
+    (item) => item.service_instance.installed && item.health.status === 'ok',
   ).length
   const busyCount = services.filter((item) => item.busy).length
 
@@ -468,6 +496,7 @@ export function ServicesPage() {
           </Typography.Paragraph>
         </div>
         <Space>
+		  {can('service.write', ownerId) && <Button type="primary" icon={<PlusOutlined />} onClick={() => openInstance()}>创建实例</Button>}
           <TagFilter tags={tagsQuery.data ?? []} value={tagFilter} onChange={setTagFilter} />
           <Input.Search
             allowClear
@@ -506,8 +535,8 @@ export function ServicesPage() {
         styles={{ body: { padding: 0 } }}
       >
         <Table
-          rowKey={(record) => record.environment.id}
-          rowClassName={(record) => record.environment.id === highlightedEnvironmentId ? 'target-row' : ''}
+          rowKey={(record) => record.service_instance.id}
+          rowClassName={(record) => record.service_instance.id === highlightedServiceInstanceId ? 'target-row' : ''}
           columns={columns}
           dataSource={services}
           loading={servicesQuery.isLoading}
@@ -518,12 +547,23 @@ export function ServicesPage() {
             emptyText: (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="暂无服务实例，请先到环境管理中创建环境"
+				description="暂无服务实例，请选择已注册主机并创建实例"
               />
             ),
           }}
         />
       </Card>
+
+	  <Drawer width={560} title={editingInstance ? '编辑服务实例' : '创建服务实例'} open={instanceOpen} onClose={() => setInstanceOpen(false)} extra={<Space><Button onClick={() => setInstanceOpen(false)}>取消</Button><Button type="primary" loading={saveInstance.isPending} onClick={() => instanceForm.validateFields().then((value) => saveInstance.mutate(value))}>保存</Button></Space>}>
+		<Form form={instanceForm} layout="vertical">
+		  <Form.Item name="name" label="实例名称" rules={[{ required: true, message: '请输入实例名称' }]}><Input placeholder="例如：vLLM-Qwen3-主实例" /></Form.Item>
+		  <Form.Item name="host_id" label="目标主机" rules={[{ required: true, message: '请选择目标主机' }]}><Select showSearch optionFilterProp="label" options={(hostsQuery.data ?? []).map((host) => ({ value: host.id, label: `${host.name} · ${host.ip}` }))} /></Form.Item>
+		  <Form.Item name="service_type" label="服务类型" rules={[{ required: true, message: '请选择服务类型' }]}><Select options={(serviceTypesQuery.data ?? []).map((type) => ({ value: type.name, label: type.display_name }))} /></Form.Item>
+		  <Form.Item name="install_dir" label="安装目录" rules={[{ required: true }, { pattern: /^\//, message: '请输入绝对路径' }]}><Input placeholder="/opt/services/vllm-qwen3" /></Form.Item>
+		  <Form.Item name="tag_ids" label="资源标签"><Select mode="multiple" allowClear options={(tagsQuery.data ?? []).map((tag) => ({ value: tag.id, label: `${tag.group_name} / ${tag.value}` }))} /></Form.Item>
+		  <Form.Item name="note" label="备注"><Input.TextArea rows={3} maxLength={200} showCount /></Form.Item>
+		</Form>
+	  </Drawer>
 
       <OperationModal
         operationId={operationId}
@@ -543,7 +583,7 @@ export function ServicesPage() {
         title={
           <div className="config-modal-title">
             <span className="config-modal-title-icon"><CodeOutlined /></span>
-            <span><strong>服务配置</strong><small>{configEnvironment ? `${configEnvironment.name} · ${configEnvironment.ip}` : '实例配置'}</small></span>
+            <span><strong>服务配置</strong><small>{configServiceInstance ? `${configServiceInstance.name} · ${configServiceInstance.host.ip}` : '实例配置'}</small></span>
           </div>
         }
         width={1180}
@@ -551,14 +591,14 @@ export function ServicesPage() {
         onCancel={() => setConfigOpen(false)}
         footer={
           <div className="config-modal-footer">
-            <Button type="text" icon={<HistoryOutlined />} disabled={!configEnvironment || configInherited} onClick={() => setHistoryOpen(true)}>配置历史</Button>
+            <Button type="text" icon={<HistoryOutlined />} disabled={!configServiceInstance || configInherited} onClick={() => setHistoryOpen(true)}>配置历史</Button>
             <Space><Button onClick={() => setConfigOpen(false)}>取消</Button><Button type="primary" loading={previewConfigMutation.isPending} disabled={configLoading} onClick={saveConfig}>检查并预览</Button></Space>
           </div>
         }
       >
         <div className="config-modal-meta">
           <div>
-            <Typography.Text strong>{configEnvironment?.name}</Typography.Text>
+            <Typography.Text strong>{configServiceInstance?.name}</Typography.Text>
             <Typography.Text type="secondary"> · {configPath}</Typography.Text>
           </div>
           <Space>
@@ -567,7 +607,7 @@ export function ServicesPage() {
             {configInherited && <Tag color="gold">来自安装包模板，保存后转为实例独立配置</Tag>}
           </Space>
         </div>
-        {configEnvironment?.installed && (
+        {configServiceInstance?.installed && (
           <div className="inline-alert compact">
             保存后将立即覆盖服务器上的配置文件，服务是否需要重启由配置项决定。
           </div>
@@ -604,18 +644,18 @@ export function ServicesPage() {
       </Modal>
 
       <Modal title="确认配置变更" width={1100} open={Boolean(configPreview)} onCancel={() => setConfigPreview(undefined)} okText="确认保存" confirmLoading={saveConfigMutation.isPending} onOk={commitConfig} destroyOnHidden>
-        <Typography.Paragraph type="secondary">左侧为当前有效配置，右侧为待保存配置。确认后将创建不可变配置修订{configEnvironment?.installed ? '并同步到远端服务器' : ''}。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">左侧为当前有效配置，右侧为待保存配置。确认后将创建不可变配置修订{configServiceInstance?.installed ? '并同步到远端服务器' : ''}。</Typography.Paragraph>
         {configPreview && <Suspense fallback={<div className="editor-loading">正在加载差异编辑器…</div>}><ConfigDiffEditor height="520px" language={configPreview.format} original={configPreview.current_content} modified={configPreview.proposed_content} /></Suspense>}
       </Modal>
 
-      <Modal title={`配置历史 · ${configEnvironment?.name ?? ''}`} width={940} open={historyOpen} footer={null} onCancel={() => setHistoryOpen(false)} destroyOnHidden>
+      <Modal title={`配置历史 · ${configServiceInstance?.name ?? ''}`} width={940} open={historyOpen} footer={null} onCancel={() => setHistoryOpen(false)} destroyOnHidden>
         <Table<ServiceConfigRevision> rowKey="id" loading={revisionsQuery.isLoading} dataSource={revisionsQuery.data ?? []} pagination={modalTablePagination} columns={[
           { title: '修订', width: 150, render: (_, item) => <Space><Typography.Text code>{item.id.slice(0, 8)}</Typography.Text>{item.current && <Tag color="success">当前</Tag>}</Space> },
           { title: '来源', dataIndex: 'source', width: 100, render: (value: string) => value === 'rollback' ? <Tag color="gold">回滚</Tag> : <Tag>保存</Tag> },
           { title: '操作者', dataIndex: 'created_by_username', width: 130, render: (value: string) => value || '升级迁移' },
           { title: '端口', dataIndex: 'port', width: 90 },
           { title: '时间', dataIndex: 'created_at', width: 180, render: formatTime },
-          { title: '操作', width: 170, render: (_, item) => <Space><Button onClick={async () => { try { setRevisionDetail(await api.getServiceConfigRevision(item.environment_id, item.id)) } catch (error) { message.error((error as Error).message) } }}>查看</Button><Button disabled={item.current} onClick={() => modal.confirm({ title: '回滚到该修订？', content: configEnvironment?.installed ? '将先写入远端配置，成功后创建新的回滚修订。' : '将创建新的回滚修订，不会删除后续历史。', onOk: () => rollbackMutation.mutate({ environmentId: item.environment_id, revisionId: item.id }) })}>回滚</Button></Space> },
+          { title: '操作', width: 170, render: (_, item) => <Space><Button onClick={async () => { try { setRevisionDetail(await api.getServiceConfigRevision(item.service_instance_id, item.id)) } catch (error) { message.error((error as Error).message) } }}>查看</Button><Button disabled={item.current} onClick={() => modal.confirm({ title: '回滚到该修订？', content: configServiceInstance?.installed ? '将先写入远端配置，成功后创建新的回滚修订。' : '将创建新的回滚修订，不会删除后续历史。', onOk: () => rollbackMutation.mutate({ serviceInstanceId: item.service_instance_id, revisionId: item.id }) })}>回滚</Button></Space> },
         ]} />
       </Modal>
 
@@ -651,7 +691,7 @@ function MetricCard({
 }
 
 function healthTag(record: Service) {
-  if (!record.environment.installed) {
+  if (!record.service_instance.installed) {
     return <Tag>未安装</Tag>
   }
   switch (record.health.status) {

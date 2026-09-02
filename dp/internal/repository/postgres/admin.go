@@ -67,13 +67,14 @@ func (db *DB) DashboardMetrics(
 		(SELECT count(*) FROM users WHERE enabled = TRUE),
 		(SELECT count(*) FROM users WHERE enabled = FALSE),
 		(SELECT count(*) FROM packages),
-		(SELECT count(*) FROM environments),
-		(SELECT count(*) FROM environments WHERE installed = TRUE),
+		(SELECT count(*) FROM hosts),
+		(SELECT count(*) FROM service_instances),
+		(SELECT count(*) FROM service_instances WHERE installed = TRUE),
 		(SELECT count(*) FROM operations WHERE status IN ($1, $2)),
 		(SELECT count(*) FROM operations WHERE status IN ($3, $4, $5) AND created_at >= $6),
 		(SELECT count(*) FROM audit_events WHERE action = 'auth.login' AND outcome <> 'success' AND occurred_at >= $6),
-		(SELECT count(*) FROM environments WHERE last_validation_at IS NULL),
-		(SELECT count(*) FROM environments WHERE last_validation_at IS NOT NULL AND last_validation_at < $7),
+		(SELECT count(*) FROM hosts WHERE last_validation_at IS NULL),
+		(SELECT count(*) FROM hosts WHERE last_validation_at IS NOT NULL AND last_validation_at < $7),
 		(SELECT count(*) FROM audit_events WHERE risk_level = 'high' AND occurred_at >= $6),
 		(SELECT count(*) FROM notifications WHERE read_at IS NULL)`,
 		domain.OperationQueued,
@@ -88,13 +89,14 @@ func (db *DB) DashboardMetrics(
 		&metrics.EnabledUsers,
 		&metrics.DisabledUsers,
 		&metrics.Packages,
-		&metrics.Environments,
+		&metrics.Hosts,
+		&metrics.ServiceInstances,
 		&metrics.InstalledServices,
 		&metrics.ActiveOperations,
 		&metrics.FailedOperations24h,
 		&metrics.LoginFailures24h,
-		&metrics.UnvalidatedEnvironments,
-		&metrics.StaleValidationEnvironments,
+		&metrics.UnvalidatedHosts,
+		&metrics.StaleValidationHosts,
 		&metrics.HighRiskAudits24h,
 		&metrics.UnreadNotifications,
 	)
@@ -177,10 +179,14 @@ func (db *DB) TransferResources(
 	if _, err := tx.Exec(ctx, `UPDATE package_versions SET owner_id = $1 WHERE owner_id = $2`, targetID, sourceID); err != nil {
 		return domain.TransferResult{}, mapTransferWriteError("transfer package versions", err)
 	}
-	environmentCommand, err := tx.Exec(ctx, `UPDATE environments SET owner_id = $1, updated_at = $2 WHERE owner_id = $3`,
+	hostCommand, err := tx.Exec(ctx, `UPDATE hosts SET owner_id=$1, updated_at=$2 WHERE owner_id=$3`, targetID, time.Now().UTC(), sourceID)
+	if err != nil {
+		return domain.TransferResult{}, mapTransferWriteError("transfer hosts", err)
+	}
+	service_instanceCommand, err := tx.Exec(ctx, `UPDATE service_instances SET owner_id = $1, updated_at = $2 WHERE owner_id = $3`,
 		targetID, time.Now().UTC(), sourceID)
 	if err != nil {
-		return domain.TransferResult{}, mapTransferWriteError("transfer environments", err)
+		return domain.TransferResult{}, mapTransferWriteError("transfer service_instances", err)
 	}
 	modelCommand, err := tx.Exec(ctx, `UPDATE models SET owner_id = $1, updated_at = $2 WHERE owner_id = $3`,
 		targetID, time.Now().UTC(), sourceID)
@@ -193,7 +199,7 @@ func (db *DB) TransferResources(
 	if _, err := tx.Exec(ctx, `UPDATE model_tasks SET owner_id = $1 WHERE owner_id = $2`, targetID, sourceID); err != nil {
 		return domain.TransferResult{}, fmt.Errorf("transfer model tasks: %w", err)
 	}
-	if err := transferEnvironmentTags(ctx, tx, targetID, tags); err != nil {
+	if err := transferServiceInstanceTags(ctx, tx, targetID, tags); err != nil {
 		return domain.TransferResult{}, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, sourceID); err != nil {
@@ -204,19 +210,20 @@ func (db *DB) TransferResources(
 	}
 
 	return domain.TransferResult{
-		SourceUserID: sourceID,
-		TargetUserID: targetID,
-		Packages:     int(packageCommand.RowsAffected()),
-		Environments: int(environmentCommand.RowsAffected()),
-		Models:       int(modelCommand.RowsAffected()),
+		SourceUserID:     sourceID,
+		TargetUserID:     targetID,
+		Packages:         int(packageCommand.RowsAffected()),
+		Hosts:            int(hostCommand.RowsAffected()),
+		ServiceInstances: int(service_instanceCommand.RowsAffected()),
+		Models:           int(modelCommand.RowsAffected()),
 	}, nil
 }
 
 type postgresTransferTag struct {
-	environmentID string
-	sourceTagID   string
-	groupName     string
-	value         string
+	service_instanceID string
+	sourceTagID        string
+	groupName          string
+	value              string
 }
 
 func validatePostgresTransfer(ctx context.Context, tx pgx.Tx, sourceID, targetID string) error {
@@ -274,11 +281,11 @@ func validatePostgresTransfer(ctx context.Context, tx pgx.Tx, sourceID, targetID
 		(SELECT count(*) FROM packages source JOIN packages target
 			ON target.owner_id = $1 AND target.service_type = source.service_type
 			WHERE source.owner_id = $2) +
-		(SELECT count(*) FROM environments source JOIN environments target
-			ON target.owner_id = $1 AND target.ip = source.ip AND target.service_type = source.service_type
+		(SELECT count(*) FROM hosts source JOIN hosts target
+			ON target.owner_id = $1 AND target.ip = source.ip AND target.ssh_port = source.ssh_port
 			WHERE source.owner_id = $2) +
 		(SELECT count(*) FROM models source JOIN models target
-			ON target.owner_id = $1 AND target.environment_ip = source.environment_ip
+			ON target.owner_id = $1 AND target.host_ip = source.host_ip
 				AND target.target_dir = source.target_dir AND target.deleted_at IS NULL
 			WHERE source.owner_id = $2 AND source.deleted_at IS NULL)`, targetID, sourceID).Scan(&conflicts)
 	if err != nil {
@@ -291,11 +298,11 @@ func validatePostgresTransfer(ctx context.Context, tx pgx.Tx, sourceID, targetID
 }
 
 func transferTags(ctx context.Context, tx pgx.Tx, sourceID string) ([]postgresTransferTag, error) {
-	rows, err := tx.Query(ctx, `SELECT et.environment_id::text, tag.id::text, tag.group_name, tag.value
-		FROM environment_tags et
+	rows, err := tx.Query(ctx, `SELECT et.service_instance_id::text, tag.id::text, tag.group_name, tag.value
+		FROM service_instance_tags et
 		JOIN resource_tags tag ON tag.id = et.tag_id
-		JOIN environments environment ON environment.id = et.environment_id
-		WHERE environment.owner_id = $1`, sourceID)
+		JOIN service_instances service_instance ON service_instance.id = et.service_instance_id
+		WHERE service_instance.owner_id = $1`, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("query transfer tags: %w", err)
 	}
@@ -303,7 +310,7 @@ func transferTags(ctx context.Context, tx pgx.Tx, sourceID string) ([]postgresTr
 	tags := make([]postgresTransferTag, 0)
 	for rows.Next() {
 		var tag postgresTransferTag
-		if err := rows.Scan(&tag.environmentID, &tag.sourceTagID, &tag.groupName, &tag.value); err != nil {
+		if err := rows.Scan(&tag.service_instanceID, &tag.sourceTagID, &tag.groupName, &tag.value); err != nil {
 			return nil, fmt.Errorf("scan transfer tag: %w", err)
 		}
 		tags = append(tags, tag)
@@ -314,7 +321,7 @@ func transferTags(ctx context.Context, tx pgx.Tx, sourceID string) ([]postgresTr
 	return tags, nil
 }
 
-func transferEnvironmentTags(
+func transferServiceInstanceTags(
 	ctx context.Context,
 	tx pgx.Tx,
 	targetID string,
@@ -335,13 +342,13 @@ func transferEnvironmentTags(
 		if err != nil {
 			return mapTransferWriteError("resolve target resource tag", err)
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM environment_tags
-			WHERE environment_id = $1 AND tag_id = $2`, tag.environmentID, tag.sourceTagID); err != nil {
-			return fmt.Errorf("remove source environment tag: %w", err)
+		if _, err := tx.Exec(ctx, `DELETE FROM service_instance_tags
+			WHERE service_instance_id = $1 AND tag_id = $2`, tag.service_instanceID, tag.sourceTagID); err != nil {
+			return fmt.Errorf("remove source service_instance tag: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO environment_tags(environment_id, tag_id)
-			VALUES ($1, $2) ON CONFLICT DO NOTHING`, tag.environmentID, targetTagID); err != nil {
-			return fmt.Errorf("assign target environment tag: %w", err)
+		if _, err := tx.Exec(ctx, `INSERT INTO service_instance_tags(service_instance_id, tag_id)
+			VALUES ($1, $2) ON CONFLICT DO NOTHING`, tag.service_instanceID, targetTagID); err != nil {
+			return fmt.Errorf("assign target service_instance tag: %w", err)
 		}
 	}
 	return nil

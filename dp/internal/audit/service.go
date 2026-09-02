@@ -130,13 +130,13 @@ func notificationFor(event domain.AuditEvent) (domain.Notification, bool) {
 		item.Category, item.Title, item.Message, item.Link = "account", "管理员重置密码", "账号 "+event.TargetLabel+" 的密码已由管理员重置", "/users?user_id="+event.TargetID
 	case event.Action == "account.resources.transfer":
 		item.Category, item.Title, item.Message, item.Link = "account", "账号资源已交接", "账号 "+event.TargetLabel+" 的业务资源已完成交接", "/users?user_id="+event.TargetID
-	case event.Action == "environment.validate" && event.ErrorCode == "HOST_KEY_CHANGED":
-		item.Category, item.Title, item.Message, item.Link = "security", "SSH 主机指纹变化", "环境 "+event.TargetLabel+" 的 SSH 主机指纹与已信任值不一致", "/environments?owner_id="+event.OwnerID
+	case event.Action == "host.validate" && event.ErrorCode == "HOST_KEY_CHANGED":
+		item.Category, item.Title, item.Message, item.Link = "security", "SSH 主机指纹变化", "主机 "+event.TargetLabel+" 的 SSH 主机指纹与已信任值不一致", "/hosts?owner_id="+event.OwnerID
 		item.DedupeKey = "host-key:" + event.TargetID
 	case strings.HasPrefix(event.Action, "service.") && strings.HasSuffix(event.Action, ".completed") && event.Outcome != "success":
 		item.Category, item.Title, item.Message, item.Link = "operation", "服务操作失败", event.TargetLabel+" 操作失败："+event.ErrorCode, "/operations?operation_id="+event.OperationID
 		item.DedupeKey = "operation-failure:" + event.OperationID
-	case event.Action == "package.delete" || event.Action == "environment.delete":
+	case event.Action == "package.delete" || event.Action == "host.delete" || event.Action == "service.delete":
 		item.Category, item.Title, item.Message, item.Link = "resource", "资源已删除", event.TargetLabel+" 已被删除", "/audit"
 	case strings.HasSuffix(event.Action, ".export"):
 		item.Category, item.Title, item.Message, item.Link = "resource", "数据已导出", event.ActorUsername+" 执行了数据导出", "/audit"
@@ -314,10 +314,10 @@ func riskLevel(event domain.AuditEvent) string {
 		event.ErrorCode == "HOST_KEY_CHANGED" ||
 		event.Action == "account.disable" || event.Action == "account.delete" ||
 		event.Action == "account.resources.transfer" ||
-		event.Action == "package.delete" || event.Action == "environment.delete" ||
+		event.Action == "package.delete" || event.Action == "host.delete" || event.Action == "service.delete" ||
 		strings.HasSuffix(event.Action, ".export") ||
 		(event.ActorUserID != "" && event.OwnerID != "" && event.ActorUserID != event.OwnerID &&
-			(event.TargetType == "package" || event.TargetType == "environment" || event.TargetType == "service")) {
+			(event.TargetType == "package" || event.TargetType == "host" || event.TargetType == "service")) {
 		return "high"
 	}
 	return "normal"

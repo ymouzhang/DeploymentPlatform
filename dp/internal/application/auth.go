@@ -342,12 +342,12 @@ func (s *AuthService) DeleteUser(ctx context.Context, actor domain.User, id stri
 	if err := authorizePrivilegedAccountMutation(actor, target); err != nil {
 		return err
 	}
-	packages, environments, err := s.store.UserBusinessCounts(ctx, id)
+	packages, resources, err := s.store.UserBusinessCounts(ctx, id)
 	if err != nil {
 		return err
 	}
-	if packages > 0 || environments > 0 {
-		return &domain.AppError{Code: "USER_IN_USE", Message: "该账号仍有安装包或环境，请先清理业务数据"}
+	if packages > 0 || resources > 0 {
+		return &domain.AppError{Code: "USER_IN_USE", Message: "该账号仍有安装包、主机、服务实例或模型，请先完成资源交接"}
 	}
 	err = s.store.DeleteUser(ctx, id)
 	if errors.Is(err, access.ErrProtected) {

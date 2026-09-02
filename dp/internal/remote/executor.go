@@ -53,8 +53,8 @@ func NewExecutor(uploadTimeout time.Duration) *Executor {
 	}
 }
 
-func (e *Executor) Validate(ctx context.Context, env domain.Environment, password []byte) (result ValidationResult, err error) {
-	client, fingerprint, err := e.connect(ctx, env, password)
+func (e *Executor) ValidateHost(ctx context.Context, host domain.Host, password []byte) (result ValidationResult, err error) {
+	client, fingerprint, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		result.Stages = append(result.Stages, ValidationStage{
 			Name: "connect", Success: false, Message: userRemoteError(err),
@@ -80,21 +80,11 @@ func (e *Executor) Validate(ctx context.Context, env domain.Environment, passwor
 		return result, fmt.Errorf("start SFTP: %w", err)
 	}
 	defer sftpClient.Close()
-	if err := sftpClient.MkdirAll(env.InstallDir); err != nil {
-		result.Stages = append(result.Stages, ValidationStage{
-			Name: "directory", Success: false, Message: "安装目录无法创建",
-		})
-		return result, fmt.Errorf("create install directory: %w", err)
-	}
-	result.Stages = append(result.Stages, ValidationStage{
-		Name: "directory", Success: true, Message: "安装目录可用",
-	})
-
-	testName := path.Join(env.InstallDir, ".dp-write-test-"+randomSuffix())
+	testName := path.Join("/tmp", ".dp-write-test-"+randomSuffix())
 	testFile, err := sftpClient.OpenFile(testName, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 	if err != nil {
 		result.Stages = append(result.Stages, ValidationStage{
-			Name: "upload", Success: false, Message: "安装目录没有上传权限",
+			Name: "upload", Success: false, Message: "主机临时目录没有写入权限",
 		})
 		return result, fmt.Errorf("create write test: %w", err)
 	}
@@ -108,13 +98,13 @@ func (e *Executor) Validate(ctx context.Context, env domain.Environment, passwor
 		return result, errors.Join(writeErr, closeErr)
 	}
 	result.Stages = append(result.Stages, ValidationStage{
-		Name: "upload", Success: true, Message: "文件上传权限正常",
+		Name: "upload", Success: true, Message: "SFTP 文件传输正常",
 	})
 	return result, nil
 }
 
 // DetectArch 通过 SSH 在目标服务器执行 uname -m 获取 CPU 架构，供安装流程使用。
-func (e *Executor) DetectArch(ctx context.Context, env domain.Environment, password []byte) (string, error) {
+func (e *Executor) DetectArch(ctx context.Context, env domain.ServiceInstance, password []byte) (string, error) {
 	client, _, err := e.connect(ctx, env, password)
 	if err != nil {
 		return "", err
@@ -138,7 +128,7 @@ func detectArch(client *ssh.Client) (string, error) {
 
 func (e *Executor) Install(
 	ctx context.Context,
-	env domain.Environment,
+	env domain.ServiceInstance,
 	password []byte,
 	packagePath, packageSHA string,
 	healthPort int,
@@ -253,7 +243,7 @@ func (e *Executor) Install(
 
 func (e *Executor) RunScript(
 	ctx context.Context,
-	env domain.Environment,
+	env domain.ServiceInstance,
 	password []byte,
 	script string,
 	emit EmitFunc,
@@ -272,7 +262,7 @@ func (e *Executor) RunScript(
 // until the caller cancels the context or the remote command exits.
 func (e *Executor) FollowComposeLogs(
 	ctx context.Context,
-	env domain.Environment,
+	env domain.ServiceInstance,
 	password []byte,
 	tail int,
 	emit EmitFunc,
@@ -289,7 +279,7 @@ func (e *Executor) FollowComposeLogs(
 
 func (e *Executor) ResetInstallation(
 	ctx context.Context,
-	env domain.Environment,
+	env domain.ServiceInstance,
 	password []byte,
 	runStop bool,
 	emit EmitFunc,
@@ -321,7 +311,7 @@ func (e *Executor) ResetInstallation(
 		emit("system", "检测到最近一次成功操作为停止，跳过 stop.sh")
 	}
 
-	// 未安装过的环境远端目录可能不存在，写标记前确保目录可用。
+	// 未安装过的服务实例目录可能不存在，写标记前确保目录可用。
 	if err := sftpClient.MkdirAll(env.InstallDir); err != nil {
 		return fingerprint, exitCode, fmt.Errorf("create install directory: %w", err)
 	}
@@ -362,7 +352,7 @@ func (e *Executor) runScript(
 
 func (e *Executor) WriteConfig(
 	ctx context.Context,
-	env domain.Environment,
+	env domain.ServiceInstance,
 	password []byte,
 	configPath string,
 	content []byte,
@@ -408,11 +398,19 @@ func writeSFTPConfig(sftpClient *sftp.Client, target string, content []byte) err
 
 func (e *Executor) connect(
 	ctx context.Context,
-	env domain.Environment,
+	env domain.ServiceInstance,
+	password []byte,
+) (*ssh.Client, string, error) {
+	return e.connectHost(ctx, env.Host, password)
+}
+
+func (e *Executor) connectHost(
+	ctx context.Context,
+	host domain.Host,
 	password []byte,
 ) (*ssh.Client, string, error) {
 	dialer := net.Dialer{Timeout: e.connectTimeout}
-	address := net.JoinHostPort(env.IP, fmt.Sprintf("%d", env.SSHPort))
+	address := net.JoinHostPort(host.IP, fmt.Sprintf("%d", host.SSHPort))
 	connection, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, "", fmt.Errorf("connect SSH: %w", err)
@@ -420,13 +418,13 @@ func (e *Executor) connect(
 	var observed string
 	callback := func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		observed = ssh.FingerprintSHA256(key)
-		if env.HostKeyFingerprint != "" && env.HostKeyFingerprint != observed {
-			return fmt.Errorf("SSH 主机指纹已变化（期望 %s，实际 %s）", env.HostKeyFingerprint, observed)
+		if host.HostKeyFingerprint != "" && host.HostKeyFingerprint != observed {
+			return fmt.Errorf("SSH 主机指纹已变化（期望 %s，实际 %s）", host.HostKeyFingerprint, observed)
 		}
 		return nil
 	}
 	config := &ssh.ClientConfig{
-		User:            env.SSHUser,
+		User:            host.SSHUser,
 		Auth:            []ssh.AuthMethod{ssh.Password(string(password))},
 		HostKeyCallback: callback,
 		Timeout:         e.connectTimeout,

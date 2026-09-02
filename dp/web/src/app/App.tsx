@@ -31,9 +31,9 @@ import { documentTitleForPath, firstAllowedPath, pageNameForPath } from './navig
 import { PageErrorBoundary } from './PageErrorBoundary'
 
 const { Header, Sider, Content } = Layout
-const EnvironmentsPage = lazy(() =>
-  import('../features/environments/EnvironmentsPage').then((module) => ({
-    default: module.EnvironmentsPage,
+const HostsPage = lazy(() =>
+  import('../features/hosts/HostsPage').then((module) => ({
+    default: module.HostsPage,
   })),
 )
 const ServicesPage = lazy(() =>
@@ -57,7 +57,7 @@ const RolesPage = lazy(() => import('../features/roles/RolesPage').then((module)
 
 const scopedPagePermissions: Partial<Record<string, Permission>> = {
   '/packages': 'package.read',
-  '/environments': 'environment.read',
+  '/hosts': 'host.read',
   '/models': 'model.read',
   '/services': 'service.read',
 }
@@ -150,7 +150,7 @@ function Shell() {
           items={[
             ...(can('dashboard.read') ? [{ key: '/dashboard', icon: <DashboardOutlined />, label: '管理总览' }] : []),
             ...(can('package.read') ? [{ key: '/packages', icon: <FileZipOutlined />, label: '安装包管理' }] : []),
-            ...(can('environment.read') ? [{ key: '/environments', icon: <CloudServerOutlined />, label: '环境管理' }] : []),
+            ...(can('host.read') ? [{ key: '/hosts', icon: <CloudServerOutlined />, label: '主机管理' }] : []),
             ...(can('model.read') ? [{ key: '/models', icon: <DatabaseOutlined />, label: '模型管理' }] : []),
             ...(can('service.read') ? [{ key: '/services', icon: <DeploymentUnitOutlined />, label: '服务管理' }] : []),
             ...(can('communication.read') ? [{ key: '/communications', icon: <SidebarMessageIcon unread={communicationUnread} />, label: <SidebarMessageLabel unread={communicationUnread} /> }] : []),
@@ -204,7 +204,7 @@ function Shell() {
                   <Routes>
                     <Route path="/dashboard" element={can('dashboard.read') ? <DashboardPage /> : <ForbiddenPage />} />
                     <Route path="/packages" element={can('package.read') ? <PackagesPage /> : <ForbiddenPage />} />
-                    <Route path="/environments" element={can('environment.read') ? <EnvironmentsPage /> : <ForbiddenPage />} />
+                    <Route path="/hosts" element={can('host.read') ? <HostsPage /> : <ForbiddenPage />} />
                     <Route path="/models" element={can('model.read') ? <ModelsPage /> : <ForbiddenPage />} />
                     <Route path="/services" element={can('service.read') ? <ServicesPage /> : <ForbiddenPage />} />
                     <Route path="/communications" element={can('communication.read') ? <CommunicationsPage /> : <ForbiddenPage />} />

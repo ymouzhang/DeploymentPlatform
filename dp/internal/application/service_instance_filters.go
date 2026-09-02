@@ -2,27 +2,27 @@ package application
 
 import "DP/internal/domain"
 
-func FilterEnvironmentsByTagIDs(
-	environments []domain.Environment,
+func FilterServiceInstancesByTagIDs(
+	instances []domain.ServiceInstance,
 	tagIDs []string,
-) []domain.Environment {
+) []domain.ServiceInstance {
 	if len(tagIDs) == 0 {
-		return environments
+		return instances
 	}
 	required := make(map[string]struct{}, len(tagIDs))
 	for _, id := range tagIDs {
 		required[id] = struct{}{}
 	}
-	result := make([]domain.Environment, 0, len(environments))
-	for _, environment := range environments {
+	result := make([]domain.ServiceInstance, 0, len(instances))
+	for _, instance := range instances {
 		matched := 0
-		for _, tag := range environment.Tags {
+		for _, tag := range instance.Tags {
 			if _, ok := required[tag.ID]; ok {
 				matched++
 			}
 		}
 		if matched == len(required) {
-			result = append(result, environment)
+			result = append(result, instance)
 		}
 	}
 	return result

@@ -64,7 +64,7 @@ describe('ModelUploadProvider', () => {
 function StartUpload() {
   const { start } = useModelUpload()
   return <button onClick={() => void start(
-    { name: 'Qwen', environment_id: 'env-1', target_dir: '/data/models/Qwen' },
+    { name: 'Qwen', host_id: 'env-1', target_dir: '/data/models/Qwen' },
     new File(['test'], 'Qwen.tar.gz'),
   )}>start</button>
 }

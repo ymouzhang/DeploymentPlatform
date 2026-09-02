@@ -41,8 +41,8 @@ func ModelUploadRemotePath(targetDir, uploadID string) string {
 	return path.Join(path.Dir(targetDir), ".dp-model-upload-"+uploadID+".tar.gz")
 }
 
-func (e *Executor) PrepareModelUpload(ctx context.Context, env domain.Environment, password []byte, targetDir, remotePath string, totalBytes int64) error {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) PrepareModelUpload(ctx context.Context, host domain.Host, password []byte, targetDir, remotePath string, totalBytes int64) error {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return err
 	}
@@ -88,8 +88,8 @@ func (e *Executor) PrepareModelUpload(ctx context.Context, env domain.Environmen
 	return closeErr
 }
 
-func (e *Executor) ModelUploadOffset(ctx context.Context, env domain.Environment, password []byte, remotePath string) (int64, error) {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) ModelUploadOffset(ctx context.Context, host domain.Host, password []byte, remotePath string) (int64, error) {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return 0, err
 	}
@@ -109,8 +109,8 @@ func (e *Executor) ModelUploadOffset(ctx context.Context, env domain.Environment
 	return info.Size(), nil
 }
 
-func (e *Executor) AppendModelChunk(ctx context.Context, env domain.Environment, password []byte, remotePath string, expectedOffset, size int64, reader io.Reader) (int64, error) {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) AppendModelChunk(ctx context.Context, host domain.Host, password []byte, remotePath string, expectedOffset, size int64, reader io.Reader) (int64, error) {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return 0, err
 	}
@@ -161,8 +161,8 @@ func (e *Executor) AppendModelChunk(ctx context.Context, env domain.Environment,
 	return expectedOffset + written, nil
 }
 
-func (e *Executor) RemoveModelUpload(ctx context.Context, env domain.Environment, password []byte, remotePath string) error {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) RemoveModelUpload(ctx context.Context, host domain.Host, password []byte, remotePath string) error {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return err
 	}
@@ -179,8 +179,8 @@ func (e *Executor) RemoveModelUpload(ctx context.Context, env domain.Environment
 	return err
 }
 
-func (e *Executor) InspectModelArchive(ctx context.Context, env domain.Environment, password []byte, remotePath string, maxExpanded int64, progress ModelValidationProgress, emit EmitFunc) (ModelArchiveInspection, error) {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) InspectModelArchive(ctx context.Context, host domain.Host, password []byte, remotePath string, maxExpanded int64, progress ModelValidationProgress, emit EmitFunc) (ModelArchiveInspection, error) {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return ModelArchiveInspection{}, err
 	}
@@ -191,7 +191,7 @@ func (e *Executor) InspectModelArchive(ctx context.Context, env domain.Environme
 	}
 	defer sftpClient.Close()
 
-	validatorPath, toolErr := ensureRemoteModelValidator(ctx, client, sftpClient, env, emit)
+	validatorPath, toolErr := ensureRemoteModelValidator(ctx, client, sftpClient, path.Dir(remotePath), emit)
 	if toolErr == nil {
 		inspection, validationErr, structured := runRemoteModelValidator(ctx, client, validatorPath, remotePath, maxExpanded, progress)
 		if validationErr == nil || structured {
@@ -272,7 +272,7 @@ func localModelValidatorInfo() (string, string, int64, error) {
 	return localModelValidator.path, localModelValidator.sha, localModelValidator.size, localModelValidator.err
 }
 
-func ensureRemoteModelValidator(ctx context.Context, client *ssh.Client, sftpClient *sftp.Client, env domain.Environment, emit EmitFunc) (string, error) {
+func ensureRemoteModelValidator(ctx context.Context, client *ssh.Client, sftpClient *sftp.Client, baseDir string, emit EmitFunc) (string, error) {
 	targetArch, err := detectArch(client)
 	if err != nil {
 		return "", err
@@ -285,7 +285,7 @@ func ensureRemoteModelValidator(ctx context.Context, client *ssh.Client, sftpCli
 	if err != nil {
 		return "", err
 	}
-	toolDir := path.Join(env.InstallDir, ".dp-tools")
+	toolDir := path.Join(baseDir, ".dp-tools")
 	if err := sftpClient.MkdirAll(toolDir); err != nil {
 		return "", fmt.Errorf("创建远端工具目录失败: %w", err)
 	}
@@ -521,8 +521,8 @@ func inspectModelArchive(reader io.Reader, maxExpanded int64) (ModelArchiveInspe
 	return result, nil
 }
 
-func (e *Executor) DeployModelArchive(ctx context.Context, env domain.Environment, password []byte, model domain.Model, uploadID string, inspection ModelArchiveInspection, emit EmitFunc) error {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) DeployModelArchive(ctx context.Context, host domain.Host, password []byte, model domain.Model, uploadID string, inspection ModelArchiveInspection, emit EmitFunc) error {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return err
 	}
@@ -601,8 +601,8 @@ func (e *Executor) DeployModelArchive(ctx context.Context, env domain.Environmen
 	return nil
 }
 
-func (e *Executor) DeleteModel(ctx context.Context, env domain.Environment, password []byte, model domain.Model, taskID string, emit EmitFunc) error {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) DeleteModel(ctx context.Context, host domain.Host, password []byte, model domain.Model, taskID string, emit EmitFunc) error {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return err
 	}
@@ -639,8 +639,8 @@ func (e *Executor) DeleteModel(ctx context.Context, env domain.Environment, pass
 	return nil
 }
 
-func (e *Executor) ModelTargetOwned(ctx context.Context, env domain.Environment, password []byte, model domain.Model) (bool, error) {
-	client, _, err := e.connect(ctx, env, password)
+func (e *Executor) ModelTargetOwned(ctx context.Context, host domain.Host, password []byte, model domain.Model) (bool, error) {
+	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {
 		return false, err
 	}

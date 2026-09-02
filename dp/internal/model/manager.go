@@ -24,7 +24,7 @@ type Repository interface {
 	CompleteModelUpload(context.Context, string) error
 	CreateModelTask(context.Context, domain.ModelTask) (domain.ModelTask, error)
 	CreateModelUpload(context.Context, domain.Model, domain.ModelUpload) (domain.Model, domain.ModelUpload, error)
-	GetEnvironment(context.Context, string) (domain.Environment, error)
+	GetHost(context.Context, string) (domain.Host, error)
 	GetModel(context.Context, string) (domain.Model, error)
 	GetModelTask(context.Context, string) (domain.ModelTask, error)
 	GetModelUpload(context.Context, string) (domain.ModelUpload, error)
@@ -77,7 +77,7 @@ func (m *Manager) CreateUpload(ctx context.Context, owner domain.User, actor dom
 	if err := input.Validate(m.maxBytes); err != nil {
 		return UploadCreated{}, err
 	}
-	env, err := m.store.GetEnvironment(ctx, input.EnvironmentID)
+	env, err := m.store.GetHost(ctx, input.HostID)
 	if err != nil {
 		return UploadCreated{}, err
 	}
@@ -85,10 +85,10 @@ func (m *Manager) CreateUpload(ctx context.Context, owner domain.User, actor dom
 		return UploadCreated{}, domain.ErrNotFound
 	}
 	if env.SSHPasswordEnc == "" {
-		return UploadCreated{}, &domain.AppError{Code: "ENVIRONMENT_CREDENTIALS_MISSING", Message: "目标环境没有可用的 SSH 凭据"}
+		return UploadCreated{}, &domain.AppError{Code: "HOST_CREDENTIALS_MISSING", Message: "目标主机没有可用的 SSH 凭据"}
 	}
 	if env.HostKeyFingerprint == "" {
-		return UploadCreated{}, &domain.AppError{Code: "ENVIRONMENT_NOT_VALIDATED", Message: "请先在环境管理中完成 SSH 校验，再上传模型"}
+		return UploadCreated{}, &domain.AppError{Code: "HOST_NOT_VALIDATED", Message: "请先在主机管理中完成 SSH 校验，再上传模型"}
 	}
 	modelID, uploadID := domain.NewID(), domain.NewID()
 	remotePath := remote.ModelUploadRemotePath(input.TargetDir, uploadID)
@@ -100,8 +100,8 @@ func (m *Manager) CreateUpload(ctx context.Context, owner domain.User, actor dom
 	if err := m.remote.PrepareModelUpload(ctx, env, password, input.TargetDir, remotePath, input.TotalBytes); err != nil {
 		return UploadCreated{}, err
 	}
-	model := domain.Model{ID: modelID, OwnerID: owner.ID, EnvironmentID: env.ID,
-		EnvironmentName: env.Name, EnvironmentIP: env.IP, Name: input.Name, Source: "offline",
+	model := domain.Model{ID: modelID, OwnerID: owner.ID, HostID: env.ID,
+		HostName: env.Name, HostIP: env.IP, Name: input.Name, Source: "offline",
 		TargetDir: input.TargetDir, OriginalFilename: input.OriginalFilename, SizeBytes: input.TotalBytes,
 		Status: domain.ModelUploading, CreatedBy: actor.ID, CreatedByUsername: actor.Username}
 	upload := domain.ModelUpload{ID: uploadID, RemotePath: remotePath, TotalBytes: input.TotalBytes,
@@ -274,7 +274,7 @@ func (m *Manager) Delete(ctx context.Context, modelID string, actor domain.User)
 		if err != nil {
 			return domain.ModelTask{}, err
 		}
-		env, err := m.store.GetEnvironment(ctx, model.EnvironmentID)
+		env, err := m.store.GetHost(ctx, model.HostID)
 		if err != nil {
 			return domain.ModelTask{}, err
 		}
@@ -336,7 +336,7 @@ func (m *Manager) CancelUpload(ctx context.Context, id string) error {
 }
 
 func (m *Manager) cancelUpload(ctx context.Context, upload domain.ModelUpload, model domain.Model) error {
-	env, err := m.store.GetEnvironment(ctx, model.EnvironmentID)
+	env, err := m.store.GetHost(ctx, model.HostID)
 	if err != nil {
 		return err
 	}
@@ -409,9 +409,9 @@ func (m *Manager) run(task domain.ModelTask) {
 		m.finishLogged(&task, logger, domain.OperationFailed, "prepare", "MODEL_NOT_FOUND", err.Error())
 		return
 	}
-	env, err := m.store.GetEnvironment(m.ctx, model.EnvironmentID)
+	env, err := m.store.GetHost(m.ctx, model.HostID)
 	if err != nil {
-		m.finishLogged(&task, logger, domain.OperationFailed, "prepare", "ENVIRONMENT_NOT_FOUND", err.Error())
+		m.finishLogged(&task, logger, domain.OperationFailed, "prepare", "HOST_NOT_FOUND", err.Error())
 		return
 	}
 	password, err := m.cipher.Decrypt(env.SSHPasswordEnc)
@@ -511,25 +511,25 @@ func (m *Manager) finish(task *domain.ModelTask, status domain.OperationStatus, 
 				ActorUserID: task.ActorUserID, ActorUsername: task.ActorUsername,
 				OwnerID: task.OwnerID, OwnerUsername: model.OwnerUsername,
 				TargetType: "model", TargetID: model.ID, TargetLabel: model.Name, ErrorCode: code,
-				Changes: map[string]any{"task_id": task.ID, "target_dir": model.TargetDir, "environment_id": model.EnvironmentID, "status": status},
+				Changes: map[string]any{"task_id": task.ID, "target_dir": model.TargetDir, "host_id": model.HostID, "status": status},
 			})
 		}
 	}
 }
 
-func (m *Manager) uploadContext(ctx context.Context, id string) (domain.ModelUpload, domain.Model, domain.Environment, []byte, error) {
+func (m *Manager) uploadContext(ctx context.Context, id string) (domain.ModelUpload, domain.Model, domain.Host, []byte, error) {
 	upload, err := m.store.GetModelUpload(ctx, id)
 	if err != nil {
-		return upload, domain.Model{}, domain.Environment{}, nil, err
+		return upload, domain.Model{}, domain.Host{}, nil, err
 	}
 	if upload.Status != "uploading" {
-		return upload, domain.Model{}, domain.Environment{}, nil, &domain.AppError{Code: "MODEL_UPLOAD_CLOSED", Message: "上传会话已结束"}
+		return upload, domain.Model{}, domain.Host{}, nil, &domain.AppError{Code: "MODEL_UPLOAD_CLOSED", Message: "上传会话已结束"}
 	}
 	model, err := m.store.GetModel(ctx, upload.ModelID)
 	if err != nil {
-		return upload, model, domain.Environment{}, nil, err
+		return upload, model, domain.Host{}, nil, err
 	}
-	env, err := m.store.GetEnvironment(ctx, model.EnvironmentID)
+	env, err := m.store.GetHost(ctx, model.HostID)
 	if err != nil {
 		return upload, model, env, nil, err
 	}
@@ -581,7 +581,7 @@ func (m *Manager) cleanupExpired(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		env, err := m.store.GetEnvironment(ctx, model.EnvironmentID)
+		env, err := m.store.GetHost(ctx, model.HostID)
 		if err != nil {
 			continue
 		}

@@ -41,13 +41,13 @@ func TestRBACRepositoryIntegration(t *testing.T) {
 
 	created, err := db.CreateRole(ctx, actorID, access.Role{
 		Key: "integration_reader", Name: "集成测试只读",
-		Grants: []access.Grant{{Permission: access.EnvironmentRead, Scope: access.ScopeOwn}},
+		Grants: []access.Grant{{Permission: access.HostRead, Scope: access.ScopeOwn}},
 	})
 	if err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 	created.Name = "集成测试查看者"
-	created.Grants = []access.Grant{{Permission: access.EnvironmentRead, Scope: access.ScopeAll}}
+	created.Grants = []access.Grant{{Permission: access.HostRead, Scope: access.ScopeAll}}
 	updated, err := db.UpdateRole(ctx, created)
 	if err != nil {
 		t.Fatalf("update role: %v", err)

@@ -43,7 +43,7 @@ export function ServiceLogModal({ service, open, onClose }: Props) {
     setStatus('connecting')
     setError('')
     const source = new EventSource(
-      `/api/v1/services/${service.environment.id}/logs/stream?tail=300`,
+      `/api/v1/services/${service.service_instance.id}/logs/stream?tail=300`,
     )
     source.onopen = () => setStatus('connected')
     source.addEventListener('log', (raw) => {
@@ -74,7 +74,7 @@ export function ServiceLogModal({ service, open, onClose }: Props) {
   }, [follow, logs])
 
   const meta = statusMeta[status]
-  const title = service ? `实时日志 - ${service.environment.name}` : '实时日志'
+  const title = service ? `实时日志 - ${service.service_instance.name}` : '实时日志'
 
   return (
     <Modal
@@ -102,9 +102,9 @@ export function ServiceLogModal({ service, open, onClose }: Props) {
       }
     >
       <div className="operation-meta">
-        <Typography.Text type="secondary">{service?.environment.ip}</Typography.Text>
+        <Typography.Text type="secondary">{service?.service_instance.host.ip}</Typography.Text>
         <Typography.Text type="secondary" copyable>
-          {service?.environment.install_dir}
+          {service?.service_instance.install_dir}
         </Typography.Text>
       </div>
       <div

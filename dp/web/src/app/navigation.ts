@@ -4,7 +4,7 @@ import { canAccess } from './AuthContext'
 export const pagePermissions: ReadonlyArray<readonly [string, Permission]> = [
   ['/dashboard', 'dashboard.read'],
   ['/packages', 'package.read'],
-  ['/environments', 'environment.read'],
+  ['/hosts', 'host.read'],
   ['/models', 'model.read'],
   ['/services', 'service.read'],
   ['/communications', 'communication.read'],
@@ -19,7 +19,7 @@ const pageNames: Readonly<Record<string, string>> = {
   '/login': '登录',
   '/dashboard': '管理总览',
   '/packages': '安装包管理',
-  '/environments': '环境管理',
+  '/hosts': '主机管理',
   '/models': '模型管理',
   '/services': '服务管理',
   '/communications': '消息中心',

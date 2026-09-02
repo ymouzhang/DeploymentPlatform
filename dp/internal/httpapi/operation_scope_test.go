@@ -22,8 +22,8 @@ func TestOperationOwnScopeIncludesOwnedAndActorOperationsOnly(t *testing.T) {
 	first := mustCreateOperationUser(t, ctx, db, "operation-first")
 	second := mustCreateOperationUser(t, ctx, db, "operation-second")
 	third := mustCreateOperationUser(t, ctx, db, "operation-third")
-	firstEnv := mustCreateOperationEnvironment(t, ctx, db, first.ID, "192.0.2.31")
-	secondEnv := mustCreateOperationEnvironment(t, ctx, db, second.ID, "192.0.2.32")
+	firstEnv := mustCreateOperationServiceInstance(t, ctx, db, first.ID, "192.0.2.31")
+	secondEnv := mustCreateOperationServiceInstance(t, ctx, db, second.ID, "192.0.2.32")
 
 	owned := mustCreateOperation(t, ctx, db, firstEnv.ID, first.ID, first.ID)
 	acted := mustCreateOperation(t, ctx, db, secondEnv.ID, first.ID, second.ID)
@@ -79,39 +79,39 @@ func mustCreateOperationUser(t *testing.T, ctx context.Context, db operationTest
 
 type operationTestRepository interface {
 	CreateUser(context.Context, domain.User) (domain.User, error)
-	CreateEnvironment(context.Context, domain.Environment) (domain.Environment, error)
+	CreateHost(context.Context, domain.Host) (domain.Host, error)
+	CreateServiceInstance(context.Context, domain.ServiceInstance) (domain.ServiceInstance, error)
 	CreateOperation(context.Context, domain.Operation) error
 }
 
-func mustCreateOperationEnvironment(
+func mustCreateOperationServiceInstance(
 	t *testing.T,
 	ctx context.Context,
 	db operationTestRepository,
 	ownerID string,
 	ip string,
-) domain.Environment {
+) domain.ServiceInstance {
 	t.Helper()
-	environment, err := db.CreateEnvironment(ctx, domain.Environment{
-		OwnerID: ownerID, Name: "operation-env-" + ip, IP: ip, SSHUser: "dp", SSHPort: 22,
-		SSHPasswordEnc: "encrypted", InstallDir: "/opt/dp", ServiceType: "demo",
+	serviceInstance, err := testutil.CreateServiceInstance(t, ctx, db, domain.ServiceInstance{
+		OwnerID: ownerID, Name: "operation-env-" + ip, Host: domain.Host{IP: ip, SSHUser: "dp", SSHPort: 22, SSHPasswordEnc: "encrypted"}, InstallDir: "/opt/dp", ServiceType: "demo",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return environment
+	return serviceInstance
 }
 
 func mustCreateOperation(
 	t *testing.T,
 	ctx context.Context,
 	db operationTestRepository,
-	environmentID string,
+	serviceInstanceID string,
 	actorID string,
 	ownerID string,
 ) domain.Operation {
 	t.Helper()
 	item := domain.Operation{
-		ID: domain.NewID(), EnvironmentID: environmentID, ActorUserID: actorID, OwnerID: ownerID,
+		ID: domain.NewID(), ServiceInstanceID: serviceInstanceID, ActorUserID: actorID, OwnerID: ownerID,
 		Action: domain.ActionStart, Status: domain.OperationSucceeded, Stage: "done",
 		LogPath: "operations/test.jsonl", CreatedAt: time.Now().UTC(),
 	}

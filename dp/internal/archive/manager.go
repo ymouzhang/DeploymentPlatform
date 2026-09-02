@@ -53,7 +53,7 @@ type Manager struct {
 // Repository is the package persistence required by Manager.
 type Repository interface {
 	ActivatePackageVersion(context.Context, domain.PackageVersion) error
-	CountInstalledEnvironmentsByOwner(context.Context, string, string) (int, error)
+	CountServiceInstancesByOwner(context.Context, string, string) (int, error)
 	DeletePackageByOwner(context.Context, string, string) error
 	DeletePackageVersion(context.Context, string, string, string) error
 	GetPackageByOwner(context.Context, string, string) (domain.Package, error)
@@ -303,7 +303,7 @@ func (m *Manager) deleteVersionLocked(ctx context.Context, ownerID, serviceType,
 		return &domain.AppError{Code: "PACKAGE_VERSION_CURRENT", Message: "当前版本不能删除，请先切换其他版本"}
 	}
 	if version.ReferencedCount > 0 {
-		return &domain.AppError{Code: "PACKAGE_VERSION_IN_USE", Message: "该版本仍被环境引用，不能删除"}
+		return &domain.AppError{Code: "PACKAGE_VERSION_IN_USE", Message: "该版本仍被服务实例引用，不能删除"}
 	}
 	path := filepath.Join(m.dataDir, filepath.Clean(version.StoragePath))
 	trash := path + ".deleting"
@@ -361,14 +361,14 @@ func (m *Manager) DeleteForOwner(ctx context.Context, ownerID, serviceType strin
 	if err != nil {
 		return err
 	}
-	installed, err := m.repository.CountInstalledEnvironmentsByOwner(ctx, ownerID, serviceType)
+	referenced, err := m.repository.CountServiceInstancesByOwner(ctx, ownerID, serviceType)
 	if err != nil {
 		return err
 	}
-	if installed > 0 {
+	if referenced > 0 {
 		return &domain.AppError{
 			Code:    "PACKAGE_IN_USE",
-			Message: "该服务类型存在已安装的环境，请先重置后再删除安装包",
+			Message: "该服务类型仍有关联服务实例，请先删除实例再删除安装包",
 		}
 	}
 	if err := m.repository.DeletePackageByOwner(ctx, ownerID, serviceType); err != nil {
@@ -518,7 +518,14 @@ func ValidateConfig(content []byte, configType string) (int, error) {
 	if len(content) == 0 || len(content) > maxConfig {
 		return 0, domain.FieldError("content", "配置文件为空或过大")
 	}
-	return configPort(content, configType)
+	port, err := configPort(content, configType)
+	if err != nil {
+		return 0, err
+	}
+	if _, _, err := ConfigAPIPort(content, configType); err != nil {
+		return 0, err
+	}
+	return port, nil
 }
 
 func RelativeConfigPath(inspection Inspection) string {
@@ -594,7 +601,7 @@ func inspect(filename string, maxExpanded int64, includeConfig bool) (Inspection
 			if err != nil {
 				return Inspection{}, err
 			}
-			port, err := configPort(content, configType)
+			port, err := ValidateConfig(content, configType)
 			if err != nil {
 				return Inspection{}, err
 			}
@@ -701,28 +708,9 @@ func matchRootFile(name, filename string) (rootPrefix, matchedPath string, ok bo
 }
 
 func configPort(content []byte, configType string) (int, error) {
-	var root map[string]any
-	switch configType {
-	case "json":
-		if err := json.Unmarshal(content, &root); err != nil {
-			var syntax *json.SyntaxError
-			if errors.As(err, &syntax) {
-				return 0, domain.FieldError("content",
-					fmt.Sprintf("JSON 配置格式错误，位置 %d", syntax.Offset))
-			}
-			return 0, domain.FieldError("content", "JSON 配置必须是对象")
-		}
-	case "yaml":
-		decoder := yaml.NewDecoder(strings.NewReader(string(content)))
-		if err := decoder.Decode(&root); err != nil {
-			return 0, domain.FieldError("content", "YAML 配置格式错误: "+err.Error())
-		}
-		var trailing any
-		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-			return 0, domain.FieldError("content", "YAML 配置只能包含一个文档")
-		}
-	default:
-		return 0, errors.New("unsupported config type")
+	root, err := parseConfigRoot(content, configType)
+	if err != nil {
+		return 0, err
 	}
 	portValue := root["port"]
 	if portValue == nil {
@@ -735,6 +723,51 @@ func configPort(content []byte, configType string) (int, error) {
 		return 0, domain.FieldError("content", "配置文件的 port 或 server.port 无效")
 	}
 	return port, nil
+}
+
+// ConfigAPIPort returns the externally reachable service port. Health checks
+// continue to use the required port/server.port value.
+func ConfigAPIPort(content []byte, configType string) (int, bool, error) {
+	root, err := parseConfigRoot(content, configType)
+	if err != nil {
+		return 0, false, err
+	}
+	value, exists := root["api_port"]
+	if !exists || value == nil {
+		return 0, false, nil
+	}
+	port, err := domain.ParsePort(value)
+	if err != nil {
+		return 0, false, domain.FieldError("content", "配置文件的 api_port 无效")
+	}
+	return port, true, nil
+}
+
+func parseConfigRoot(content []byte, configType string) (map[string]any, error) {
+	var root map[string]any
+	switch configType {
+	case "json":
+		if err := json.Unmarshal(content, &root); err != nil {
+			var syntax *json.SyntaxError
+			if errors.As(err, &syntax) {
+				return nil, domain.FieldError("content",
+					fmt.Sprintf("JSON 配置格式错误，位置 %d", syntax.Offset))
+			}
+			return nil, domain.FieldError("content", "JSON 配置必须是对象")
+		}
+	case "yaml":
+		decoder := yaml.NewDecoder(strings.NewReader(string(content)))
+		if err := decoder.Decode(&root); err != nil {
+			return nil, domain.FieldError("content", "YAML 配置格式错误: "+err.Error())
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+			return nil, domain.FieldError("content", "YAML 配置只能包含一个文档")
+		}
+	default:
+		return nil, errors.New("unsupported config type")
+	}
+	return root, nil
 }
 
 func cleanArchivePath(name string) string {
