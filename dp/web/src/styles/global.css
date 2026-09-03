@@ -780,9 +780,27 @@ body { background: var(--apple-canvas); color: var(--apple-label); -webkit-font-
   .system-state { display: none; }
   .account-role { display: none; }
 }
+.upload-task-fab {
+  position: fixed;
+  right: 24px;
+  z-index: 900;
+  min-width: 188px;
+  box-shadow: 0 8px 24px rgb(24 32 56 / 18%);
+}
+.package-upload-fab { bottom: 24px; }
+.model-upload-fab { bottom: 76px; }
+.upload-task-panel {
+  position: fixed;
+  bottom: 24px;
+  z-index: 900;
+  width: min(380px, calc(100vw - 48px));
+  max-height: min(460px, calc(100vh - 96px));
+  overflow: auto;
+  box-shadow: 0 12px 36px rgb(24 32 56 / 18%);
+}
+.package-upload-panel { right: 24px; }
+.model-upload-panel { right: 428px; }
+
 @media (max-width: 900px) {
-  .model-upload-indicator {
-    right: 24px !important;
-    bottom: 500px !important;
-  }
+  .model-upload-panel { right: 24px; bottom: 76px; }
 }

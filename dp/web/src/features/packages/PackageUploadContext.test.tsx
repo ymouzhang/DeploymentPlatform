@@ -32,6 +32,8 @@ describe('PackageUploadProvider', () => {
 
     fireEvent.click(view.getByRole('button', { name: 'start packages' }))
     await waitFor(() => expect(api.uploadPackageWithProgress).toHaveBeenCalledTimes(2))
+    expect(view.getByRole('button', { name: /安装包任务 · 2 个 · 38%/ })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: /安装包任务/ }))
     expect(view.getByText('2 个任务进行中，请勿刷新或关闭浏览器')).toBeTruthy()
     expect(view.getByText('上传中 25%')).toBeTruthy()
     expect(view.getByText('上传中 50%')).toBeTruthy()

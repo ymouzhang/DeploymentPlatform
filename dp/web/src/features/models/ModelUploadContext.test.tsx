@@ -51,6 +51,7 @@ describe('ModelUploadProvider', () => {
 
     fireEvent.click(view.getByRole('button', { name: 'start' }))
     await waitFor(() => expect(api.uploadModelChunk).toHaveBeenCalledOnce())
+    fireEvent.click(view.getByRole('button', { name: /模型任务/ }))
     expect(view.getByText('1 个任务上传中，请勿刷新或关闭浏览器')).toBeTruthy()
 
     view.rerender(wrap(<div>其他 DP 页面</div>))
@@ -74,7 +75,7 @@ describe('ModelUploadProvider', () => {
     await waitFor(() => expect(api.uploadModelChunk).toHaveBeenCalledTimes(2))
     expect(api.uploadModelChunk).toHaveBeenCalledWith('upload-1', 0, expect.any(Blob))
     expect(api.uploadModelChunk).toHaveBeenCalledWith('upload-2', 0, expect.any(Blob))
-    expect(view.getByText('2 个任务上传中，请勿刷新或关闭浏览器')).toBeTruthy()
+    expect(view.getByRole('button', { name: /模型任务 · 2 个/ })).toBeTruthy()
   })
 })
 

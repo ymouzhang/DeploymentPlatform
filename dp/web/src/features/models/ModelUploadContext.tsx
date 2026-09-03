@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { CloudUploadOutlined, PauseOutlined } from '@ant-design/icons'
+import { CloudUploadOutlined, MinusOutlined, PauseOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { App, Button, Card, Progress, Space, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
@@ -197,8 +197,18 @@ function BackgroundUploadIndicator({ pending, activities, pause }: {
   pause: (uploadId: string) => void
 }) {
   const navigate = useNavigate()
+  const [expanded, setExpanded] = useState(false)
   const runningCount = pending.filter((item) => ['uploading', 'pausing'].includes(activities[item.upload_id]?.status ?? '')).length
-  return <Card className="model-upload-indicator" size="small" title={<Space><CloudUploadOutlined /><span>模型上传任务</span></Space>} extra={<Button type="link" size="small" onClick={() => navigate('/models')}>查看</Button>} style={{ position: 'fixed', right: 428, bottom: 24, zIndex: 1090, width: 380, maxHeight: 460, overflow: 'auto', boxShadow: '0 12px 36px rgba(24,32,56,.18)' }}>
+  const running = pending.filter((item) => ['uploading', 'pausing'].includes(activities[item.upload_id]?.status ?? ''))
+  const overallProgress = running.length > 0
+    ? Math.round(running.reduce((sum, item) => sum + (activities[item.upload_id]?.progress ?? 0), 0) / running.length)
+    : 0
+  if (!expanded) {
+    return <Button className="upload-task-fab model-upload-fab" icon={<CloudUploadOutlined />} onClick={() => setExpanded(true)}>
+      模型任务 · {runningCount > 0 ? `${runningCount} 个 · ${overallProgress}%` : `${pending.length} 待处理`}
+    </Button>
+  }
+  return <Card className="upload-task-panel model-upload-panel" size="small" title={<Space><CloudUploadOutlined /><span>模型上传任务</span></Space>} extra={<Space size={2}><Button type="link" size="small" onClick={() => navigate('/models')}>查看</Button><Button type="text" size="small" aria-label="收起模型任务" icon={<MinusOutlined />} onClick={() => setExpanded(false)} /></Space>}>
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       {runningCount > 0 && <Typography.Text type="warning" strong>{runningCount} 个任务上传中，请勿刷新或关闭浏览器</Typography.Text>}
       {pending.map((session) => {

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { CloseOutlined, CloudUploadOutlined, StopOutlined } from '@ant-design/icons'
+import { CloseOutlined, CloudUploadOutlined, MinusOutlined, StopOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { App, Button, Card, Progress, Space, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
@@ -116,8 +116,18 @@ function PackageUploadIndicator({ tasks, cancel, dismiss }: {
   dismiss: (id: string) => void
 }) {
   const navigate = useNavigate()
+  const [expanded, setExpanded] = useState(false)
   const active = tasks.filter((task) => task.status === 'uploading' || task.status === 'validating').length
-  return <Card size="small" title={<Space><CloudUploadOutlined /><span>安装包任务</span></Space>} extra={<Button type="link" size="small" onClick={() => navigate('/packages')}>查看</Button>} style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 1100, width: 380, maxHeight: 460, overflow: 'auto', boxShadow: '0 12px 36px rgba(24,32,56,.18)' }}>
+  const activeTasks = tasks.filter((task) => task.status === 'uploading' || task.status === 'validating')
+  const overallProgress = activeTasks.length > 0
+    ? Math.round(activeTasks.reduce((sum, task) => sum + task.progress, 0) / activeTasks.length)
+    : 100
+  if (!expanded) {
+    return <Button className="upload-task-fab package-upload-fab" icon={<CloudUploadOutlined />} onClick={() => setExpanded(true)}>
+      安装包任务 · {active > 0 ? `${active} 个 · ${overallProgress}%` : `${tasks.length} 项`}
+    </Button>
+  }
+  return <Card className="upload-task-panel package-upload-panel" size="small" title={<Space><CloudUploadOutlined /><span>安装包任务</span></Space>} extra={<Space size={2}><Button type="link" size="small" onClick={() => navigate('/packages')}>查看</Button><Button type="text" size="small" aria-label="收起安装包任务" icon={<MinusOutlined />} onClick={() => setExpanded(false)} /></Space>}>
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       {active > 0 && <Typography.Text type="warning" strong>{active} 个任务进行中，请勿刷新或关闭浏览器</Typography.Text>}
       {tasks.map((task) => {
