@@ -780,3 +780,9 @@ body { background: var(--apple-canvas); color: var(--apple-label); -webkit-font-
   .system-state { display: none; }
   .account-role { display: none; }
 }
+@media (max-width: 900px) {
+  .model-upload-indicator {
+    right: 24px !important;
+    bottom: 500px !important;
+  }
+}

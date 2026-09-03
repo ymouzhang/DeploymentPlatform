@@ -81,6 +81,47 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (payload as DataEnvelope<T>).data
 }
 
+function uploadRequest<T>(
+  url: string,
+  body: FormData,
+  onProgress: (loaded: number, total: number) => void,
+  onUploaded: () => void,
+  signal?: AbortSignal,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', url)
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total)
+    }
+    xhr.upload.onload = onUploaded
+    xhr.onerror = () => reject(new Error('网络连接中断'))
+    xhr.onabort = () => reject(new DOMException('上传已取消', 'AbortError'))
+    xhr.onload = () => {
+      let payload: DataEnvelope<T> | ErrorEnvelope
+      try {
+        payload = (xhr.responseText ? JSON.parse(xhr.responseText) : {}) as DataEnvelope<T> | ErrorEnvelope
+      } catch {
+        reject(new Error(`服务器返回了无法解析的响应（HTTP ${xhr.status}）`))
+        return
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ApiError(xhr.status, payload as ErrorEnvelope))
+        return
+      }
+      resolve((payload as DataEnvelope<T>).data)
+    }
+    const abort = () => xhr.abort()
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    xhr.onloadend = () => signal?.removeEventListener('abort', abort)
+    xhr.send(body)
+  })
+}
+
 async function validationRequest(url: string, input?: HostInput): Promise<ValidationResponse> {
   const response = await fetch(url, {
     method: 'POST',
@@ -179,6 +220,34 @@ export const api = {
     return request<PackageInfo>(
       withOwner(`/api/v1/service-types/${encodeURIComponent(serviceType)}/package`, ownerId),
       { method: 'PUT', body },
+    )
+  },
+  uploadPackageWithProgress: ({
+    serviceType,
+    file,
+    note,
+    ownerId,
+    onProgress,
+    onUploaded,
+    signal,
+  }: {
+    serviceType: string
+    file: File
+    note?: string
+    ownerId?: string
+    onProgress: (loaded: number, total: number) => void
+    onUploaded: () => void
+    signal?: AbortSignal
+  }) => {
+    const body = new FormData()
+    if (note !== undefined) body.append('note', note)
+    body.append('file', file)
+    return uploadRequest<PackageInfo>(
+      withOwner(`/api/v1/service-types/${encodeURIComponent(serviceType)}/package`, ownerId),
+      body,
+      onProgress,
+      onUploaded,
+      signal,
     )
   },
   deletePackage: ({ serviceType, ownerId }: { serviceType: string; ownerId?: string }) =>

@@ -29,12 +29,14 @@ import type { PackageInfo, PackageVersion } from '../../types'
 import { formatBytes } from '../../utils/format'
 import { useAuth } from '../../app/AuthContext'
 import { mainTablePagination } from '../../components/ListPagination'
+import { usePackageUpload } from './PackageUploadContext'
 
 const serviceTypePattern = /^[a-z][a-z0-9-]{0,62}$/
 
 export function PackagesPage() {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
+  const packageUpload = usePackageUpload()
   const { ownerId, user, users, can, hasAll } = useAuth()
 	const packageWriteAll = hasAll('package.write')
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -52,13 +54,11 @@ export function PackagesPage() {
     queryKey: ['packages', ownerId],
     queryFn: () => api.listPackages(ownerId),
   })
-  const uploadMutation = useMutation({
+  const noteMutation = useMutation({
     mutationFn: api.uploadPackage,
     onSuccess: (_, variables) => {
       message.success(
-        variables.file
-          ? `${variables.serviceType} 安装包已上传并通过校验`
-          : `${variables.serviceType} 备注已更新`,
+        `${variables.serviceType} 备注已更新`,
       )
       setUploadOpen(false)
       setSelectedFile(null)
@@ -129,12 +129,24 @@ export function PackagesPage() {
         return
       }
     }
-    uploadMutation.mutate({
+    const input = {
       serviceType: normalized,
-      file: selectedFile ?? undefined,
       note: replacingType || noteTrimmed ? noteTrimmed : undefined,
       ownerId: replacingType ? replacingOwner : uploadOwner,
-    })
+    }
+    if (!selectedFile) {
+      noteMutation.mutate(input)
+      return
+    }
+    try {
+      packageUpload.start({ ...input, file: selectedFile })
+      setUploadOpen(false)
+      setSelectedFile(null)
+      setNote('')
+      message.warning('安装包已转入后台上传，可以继续添加任务或切换 DP 页面；请勿刷新或关闭浏览器')
+    } catch (error) {
+      message.error((error as Error).message)
+    }
   }
 
   const columns: ColumnsType<PackageInfo> = [
@@ -342,11 +354,14 @@ export function PackagesPage() {
         open={uploadOpen}
         okText={replacingType ? '更新' : '上传并校验'}
         cancelText="取消"
-        confirmLoading={uploadMutation.isPending}
+        confirmLoading={noteMutation.isPending}
         onOk={submitUpload}
         onCancel={() => setUploadOpen(false)}
         destroyOnHidden
       >
+        <Typography.Paragraph type="secondary">
+          文件将在后台上传并显示进度；可关闭弹窗、继续添加其他安装包或切换 DP 页面。上传及校验完成前请勿刷新或关闭浏览器。
+        </Typography.Paragraph>
         <div className="upload-form">
           {packageWriteAll && <><label>所属账号</label><Select disabled={Boolean(replacingType)} value={uploadOwner} options={users.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.username }))} onChange={setUploadOwner} /><Typography.Text type="secondary" className="field-help">代其他账号创建时会记录高风险审计。</Typography.Text></>}
           <label>服务类型</label>

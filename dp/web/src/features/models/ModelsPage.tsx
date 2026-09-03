@@ -21,11 +21,12 @@ export function ModelsPage() {
 	const modelReadAll = hasAll('model.read')
 	const modelUploadAll = hasAll('model.upload')
   const queryClient = useQueryClient()
-  const { pending, activity, start, resume, cancel } = useModelUpload()
+  const { pending, activities, start, resume, cancel } = useModelUpload()
   const [form] = Form.useForm<ModelUploadValues>()
   const [open, setOpen] = useState(false)
   const [fileList, setFileList] = useState<UploadFile[]>([])
   const [uploadOwner, setUploadOwner] = useState(user.id)
+	const [resumeUploadID, setResumeUploadID] = useState<string>()
 	const [keyword, setKeyword] = useState('')
   const [deleting, setDeleting] = useState<Model | null>(null)
   const [confirmName, setConfirmName] = useState('')
@@ -56,26 +57,27 @@ export function ModelsPage() {
     const file = fileList[0]?.originFileObj
     if (!file) { message.error('请选择 .tar.gz 模型文件'); return }
     if (!file.name.toLowerCase().endsWith('.tar.gz')) { message.error('模型文件必须是 .tar.gz'); return }
-    if (pending && (pending.filename !== file.name || pending.size !== file.size)) {
+    const resumeSession = pending.find((item) => item.upload_id === resumeUploadID)
+    if (resumeSession && (resumeSession.filename !== file.name || resumeSession.size !== file.size)) {
       message.error('请选择与未完成会话相同的原始文件'); return
     }
     try {
-      if (pending) await resume(file)
+      if (resumeSession) await resume(resumeSession.upload_id, file)
       else await start(values, file, modelUploadAll ? uploadOwner : undefined)
-      setOpen(false); setFileList([]); form.resetFields()
+      setOpen(false); setResumeUploadID(undefined); setFileList([]); form.resetFields()
       message.warning('模型上传已转入后台，可以切换页面，但请勿刷新或关闭浏览器')
     } catch (error) { message.error((error as Error).message) }
   }
 
-  const openUpload = () => {
-    if (activity?.status === 'uploading' || activity?.status === 'pausing') {
-      message.info('模型正在后台上传，可通过右下角进度卡片查看或暂停')
-      return
-    }
-    if (pending) {
-      setUploadOwner(pending.owner_id ?? user.id)
-      form.setFieldsValue({ name: pending.name, host_id: pending.host_id, target_dir: pending.target_dir })
+  const openUpload = (uploadID?: string) => {
+    const session = pending.find((item) => item.upload_id === uploadID)
+    setResumeUploadID(session?.upload_id)
+    setFileList([])
+    if (session) {
+      setUploadOwner(session.owner_id ?? user.id)
+      form.setFieldsValue({ name: session.name, host_id: session.host_id, target_dir: session.target_dir })
     } else {
+      form.resetFields()
       setUploadOwner(modelUploadAll ? (ownerId ?? user.id) : user.id)
       form.setFieldsValue({ target_dir: '/opt/models/model-name' })
     }
@@ -83,8 +85,8 @@ export function ModelsPage() {
   }
 
   const cancelPending = async () => {
-    if (!pending) return
-    try { await cancel(); setOpen(false); message.success('上传会话已取消') }
+    if (!resumeUploadID) return
+    try { await cancel(resumeUploadID); setOpen(false); setResumeUploadID(undefined); message.success('上传会话已取消') }
     catch (error) { message.error((error as Error).message) }
   }
 
@@ -113,16 +115,16 @@ export function ModelsPage() {
 	})
 
   return <div className="page">
-    <div className="page-heading"><div><Typography.Title level={2}>模型管理</Typography.Title><Typography.Paragraph type="secondary">将大模型包分片直传目标主机，DP 不保存完整模型文件。</Typography.Paragraph></div>{can('model.upload') && <Button type="primary" icon={<CloudUploadOutlined />} onClick={openUpload}>上传模型</Button>}</div>
-    {pending && <Alert showIcon type={activity?.status === 'failed' ? 'error' : 'warning'} message={`${activity?.status === 'failed' ? '后台上传失败' : '存在未完成上传'}：${pending.name}`} description={activity?.error ?? (['uploading','pausing'].includes(activity?.status ?? '') ? '上传依赖当前浏览器。可以关闭弹窗并切换 DP 页面，但请勿刷新、关闭标签页或退出浏览器。' : '刷新或关闭浏览器后，需要重新选择同一个本地文件，上传会从目标机已经保存的位置继续。')} action={!['uploading','pausing'].includes(activity?.status ?? '') ? <Button size="small" onClick={openUpload}>继续上传</Button> : undefined} />}
+    <div className="page-heading"><div><Typography.Title level={2}>模型管理</Typography.Title><Typography.Paragraph type="secondary">将大模型包分片直传目标主机，DP 不保存完整模型文件。</Typography.Paragraph></div>{can('model.upload') && <Button type="primary" icon={<CloudUploadOutlined />} onClick={() => openUpload()}>上传模型</Button>}</div>
+	{pending.length > 0 && <Card size="small" title={`模型上传会话（${pending.length}）`} extra={<Typography.Text type="secondary">上传中可切换 DP 页面，请勿刷新或关闭浏览器</Typography.Text>} style={{ marginBottom: 16 }}><Space orientation="vertical" size={8} style={{ width: '100%' }}>{pending.map((session) => { const activity = activities[session.upload_id]; const running = ['uploading','pausing'].includes(activity?.status ?? ''); const status = activity?.status === 'failed' ? `失败：${activity.error}` : running ? `上传中 ${activity?.progress ?? 0}%` : '等待选择原文件继续'; return <Space key={session.upload_id} style={{ width: '100%', justifyContent: 'space-between' }}><Typography.Text ellipsis style={{ maxWidth: 520 }}><Typography.Text strong>{session.name}</Typography.Text> · {session.filename} · <Typography.Text type={activity?.status === 'failed' ? 'danger' : 'secondary'}>{status}</Typography.Text></Typography.Text>{!running && <Button size="small" onClick={() => openUpload(session.upload_id)}>继续</Button>}</Space> })}</Space></Card>}
 	<Card><Input.Search allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索模型、主机、IP 或目标目录" style={{ maxWidth: 420, marginBottom: 16 }} /><Table<Model> rowKey="id" loading={modelsQuery.isLoading} dataSource={visibleModels} columns={columns} scroll={{ x: 1200 }} pagination={{ pageSize: 20, showSizeChanger: true }} /></Card>
-    <Modal title={pending ? '继续上传模型' : '上传离线模型'} open={open} onCancel={() => setOpen(false)} footer={<Space>{pending && <Button danger onClick={() => void cancelPending()}>取消会话</Button>}<Button type="primary" onClick={() => void begin()}>{pending ? '继续后台上传' : '开始后台上传'}</Button></Space>} destroyOnClose={false}>
+    <Modal title={resumeUploadID ? '继续上传模型' : '上传离线模型'} open={open} onCancel={() => { setOpen(false); setResumeUploadID(undefined) }} footer={<Space>{resumeUploadID && <Button danger onClick={() => void cancelPending()}>取消会话</Button>}<Button type="primary" onClick={() => void begin()}>{resumeUploadID ? '继续后台上传' : '开始后台上传'}</Button></Space>} destroyOnClose={false}>
       <Alert type="warning" showIcon message="模型将直传目标机；可切换 DP 页面，上传期间请勿刷新、退出或关闭浏览器。目标机需预留压缩包、解压目录和安全余量。" style={{ marginBottom: 16 }} />
       <Form form={form} layout="vertical">
-        {modelUploadAll && <Form.Item label="所属账号"><Select value={uploadOwner} options={users.filter((item) => item.enabled).map((item) => ({value:item.id,label:item.username}))} onChange={(value) => { setUploadOwner(value); form.setFieldValue('host_id', undefined) }} /></Form.Item>}
-        <Form.Item name="name" label="模型名称" rules={[{required:true,max:128}]}><Input /></Form.Item>
-		<Form.Item name="host_id" label="目标主机" extra="仅展示已保存 SSH 凭据并完成主机指纹校验的主机" rules={[{required:true,message:'请选择目标主机'}]}><Select showSearch optionFilterProp="label" options={(hostsQuery.data ?? []).filter((host) => host.has_password && host.last_validation_at).map((host) => ({value:host.id,label:`${host.name} · ${host.ip}`}))} /></Form.Item>
-        <Form.Item name="target_dir" label="目标绝对目录" rules={[{required:true,pattern:/^\//,message:'请输入绝对目录'}]}><Input placeholder="/opt/models/Qwen3" /></Form.Item>
+        {modelUploadAll && <Form.Item label="所属账号"><Select disabled={Boolean(resumeUploadID)} value={uploadOwner} options={users.filter((item) => item.enabled).map((item) => ({value:item.id,label:item.username}))} onChange={(value) => { setUploadOwner(value); form.setFieldValue('host_id', undefined) }} /></Form.Item>}
+        <Form.Item name="name" label="模型名称" rules={[{required:true,max:128}]}><Input disabled={Boolean(resumeUploadID)} /></Form.Item>
+		<Form.Item name="host_id" label="目标主机" extra="仅展示已保存 SSH 凭据并完成主机指纹校验的主机" rules={[{required:true,message:'请选择目标主机'}]}><Select disabled={Boolean(resumeUploadID)} showSearch optionFilterProp="label" options={(hostsQuery.data ?? []).filter((host) => host.has_password && host.last_validation_at).map((host) => ({value:host.id,label:`${host.name} · ${host.ip}`}))} /></Form.Item>
+        <Form.Item name="target_dir" label="目标绝对目录" rules={[{required:true,pattern:/^\//,message:'请输入绝对目录'}]}><Input disabled={Boolean(resumeUploadID)} placeholder="/opt/models/Qwen3" /></Form.Item>
         <Form.Item label="模型压缩包" required><Upload beforeUpload={() => false} accept=".tar.gz,application/gzip" maxCount={1} fileList={fileList} onChange={({fileList}) => setFileList(fileList.slice(-1))}><Button>选择 .tar.gz 文件</Button></Upload></Form.Item>
       </Form>
     </Modal>

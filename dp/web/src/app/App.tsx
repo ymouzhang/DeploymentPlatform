@@ -27,6 +27,7 @@ import { communicationKeys } from '../features/communications/queryKeys'
 import { RealtimeEvents } from '../realtime/RealtimeEvents'
 import { HeaderMessageEntry, SidebarMessageIcon, SidebarMessageLabel } from '../features/communications/MessageEntrypoints'
 import { ModelUploadProvider } from '../features/models/ModelUploadContext'
+import { PackageUploadProvider } from '../features/packages/PackageUploadContext'
 import { documentTitleForPath, firstAllowedPath, pageNameForPath } from './navigation'
 import { PageErrorBoundary } from './PageErrorBoundary'
 
@@ -197,6 +198,7 @@ function Shell() {
         </Header>
         <Content className="app-content">
           <AuthContext.Provider value={{ user, ownerId, setOwnerId, users, can, hasAll, logout: () => void 0 }}>
+            <PackageUploadProvider>
             <ModelUploadProvider key={user.id} userId={user.id}>
               <RealtimeEvents />
               <Suspense fallback={<div className="page-loading">正在加载…</div>}>
@@ -219,6 +221,7 @@ function Shell() {
                 </PageErrorBoundary>
               </Suspense>
             </ModelUploadProvider>
+            </PackageUploadProvider>
           </AuthContext.Provider>
         </Content>
       </Layout>
