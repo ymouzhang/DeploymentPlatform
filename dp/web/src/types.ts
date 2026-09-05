@@ -234,6 +234,7 @@ export interface HealthResult {
 }
 
 export interface OperationSummary {
+	id: string
   action: 'install' | 'start' | 'stop' | 'reset'
   status: OperationStatus
   error_message?: string

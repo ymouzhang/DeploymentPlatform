@@ -67,6 +67,7 @@ func run() error {
 		return err
 	}
 	remoteExecutor := remote.NewExecutor(cfg.UploadTimeout)
+	remoteExecutor.ConfigureOperationTimeouts(cfg.PackageExtractTimeout, cfg.ServiceScriptTimeout)
 	packageManager := archive.NewManager(cfg.DataDir, cfg.UploadMaxBytes, db)
 	packageManager.ConfigureRetention(cfg.PackageVersionRetention)
 	hostService := application.NewHostService(db, passwordCipher, remoteExecutor)

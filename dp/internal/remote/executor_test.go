@@ -1,6 +1,17 @@
 package remote
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestConfigureOperationTimeouts(t *testing.T) {
+	executor := NewExecutor(time.Minute)
+	executor.ConfigureOperationTimeouts(90*time.Minute, 3*time.Hour)
+	if executor.extractTimeout != 90*time.Minute || executor.scriptTimeout != 3*time.Hour {
+		t.Fatalf("timeouts not applied: extract=%s script=%s", executor.extractTimeout, executor.scriptTimeout)
+	}
+}
 
 func TestShellQuote(t *testing.T) {
 	got := shellQuote("/opt/a'b")

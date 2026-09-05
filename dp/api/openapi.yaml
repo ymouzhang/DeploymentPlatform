@@ -2036,7 +2036,9 @@ components:
         last_operation:
           type: object
           description: Latest lifecycle operation of the service_instance; lets clients distinguish "never installed" from a failed install.
+          required: [id, action, status]
           properties:
+            id: { type: string, format: uuid }
             action: { type: string, enum: [install, start, stop, reset] }
             status: { type: string, enum: [queued, running, succeeded, failed, timed_out, interrupted] }
             error_message: { type: string }

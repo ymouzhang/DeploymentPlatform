@@ -761,6 +761,7 @@ type ServiceView struct {
 }
 
 type OperationSummary struct {
+	ID           string          `json:"id"`
 	Action       OperationAction `json:"action"`
 	Status       OperationStatus `json:"status"`
 	ErrorMessage string          `json:"error_message,omitempty"`

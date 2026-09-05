@@ -730,6 +730,7 @@ func (a *API) listServices(w http.ResponseWriter, r *http.Request) {
 		var lastOperation *domain.OperationSummary
 		if op, ok := latestOps[instance.ID]; ok {
 			lastOperation = &domain.OperationSummary{
+				ID:           op.ID,
 				Action:       op.Action,
 				Status:       op.Status,
 				ErrorMessage: op.ErrorMessage,

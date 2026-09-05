@@ -168,4 +168,6 @@ make package
 
 完整环境变量见 [.env.example](.env.example)。
 
+大体积离线安装包可分别通过 `DP_PACKAGE_EXTRACT_TIMEOUT` 和 `DP_SERVICE_SCRIPT_TIMEOUT` 调整远端解压、`install.sh`/启停脚本的执行上限，默认均为 `2h`。这两个参数修改后需要重启 DP 生效。
+
 版本与治理相关参数：`DP_PACKAGE_VERSION_RETENTION` 控制每个服务类型的版本保留目标数量，`DP_OPERATION_RETENTION_DAYS` 控制终态操作及 JSONL 日志保留期，`DP_NOTIFICATION_RETENTION_DAYS` 控制已处理通知保留期，`DP_STALE_ACCOUNT_DAYS` 控制长期未登录账号提醒阈值（默认 90 天）。被服务实例引用的安装包版本、未处理通知和运行中操作不会被自动清理。

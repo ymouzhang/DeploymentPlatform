@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestAuditConfigDefaultsAndTrustedProxyValidation(t *testing.T) {
 	t.Setenv("DP_MASTER_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
@@ -12,7 +15,7 @@ func TestAuditConfigDefaultsAndTrustedProxyValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.AuditRetentionDays != 180 || config.AuditExportMaxRows != 100000 || config.NotificationRetentionDays != 180 || config.OperationRetentionDays != 180 || config.PackageVersionRetention != 10 || config.UploadMaxBytes != int64(100<<30) || config.ModelUploadMaxBytes != int64(1<<40) || config.ModelUploadChunkBytes != int64(64<<20) || config.ModelTaskConcurrency != 2 {
+	if config.AuditRetentionDays != 180 || config.AuditExportMaxRows != 100000 || config.NotificationRetentionDays != 180 || config.OperationRetentionDays != 180 || config.PackageVersionRetention != 10 || config.UploadMaxBytes != int64(100<<30) || config.PackageExtractTimeout != 2*time.Hour || config.ServiceScriptTimeout != 2*time.Hour || config.ModelUploadMaxBytes != int64(1<<40) || config.ModelUploadChunkBytes != int64(64<<20) || config.ModelTaskConcurrency != 2 {
 		t.Fatalf("config=%+v", config)
 	}
 	t.Setenv("DP_TRUSTED_PROXY_CIDRS", "not-a-cidr")
@@ -33,6 +36,24 @@ func TestModelConfigValidation(t *testing.T) {
 	t.Setenv("DP_MODEL_TASK_CONCURRENCY", "0")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected invalid task concurrency")
+	}
+}
+
+func TestServiceOperationTimeoutConfig(t *testing.T) {
+	t.Setenv("DP_MASTER_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv("DP_DATABASE_URL", "postgres://dp:test@localhost:5432/dp")
+	t.Setenv("DP_PACKAGE_EXTRACT_TIMEOUT", "90m")
+	t.Setenv("DP_SERVICE_SCRIPT_TIMEOUT", "3h")
+	config, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.PackageExtractTimeout != 90*time.Minute || config.ServiceScriptTimeout != 3*time.Hour {
+		t.Fatalf("operation timeouts not loaded: %+v", config)
+	}
+	t.Setenv("DP_PACKAGE_EXTRACT_TIMEOUT", "0s")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected non-positive package extract timeout to fail")
 	}
 }
 

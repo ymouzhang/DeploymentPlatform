@@ -43,13 +43,24 @@ type Executor struct {
 	connectTimeout time.Duration
 	scriptTimeout  time.Duration
 	uploadTimeout  time.Duration
+	extractTimeout time.Duration
 }
 
 func NewExecutor(uploadTimeout time.Duration) *Executor {
 	return &Executor{
 		connectTimeout: 10 * time.Second,
-		scriptTimeout:  3 * time.Minute,
+		scriptTimeout:  2 * time.Hour,
 		uploadTimeout:  uploadTimeout,
+		extractTimeout: 2 * time.Hour,
+	}
+}
+
+func (e *Executor) ConfigureOperationTimeouts(extractTimeout, scriptTimeout time.Duration) {
+	if extractTimeout > 0 {
+		e.extractTimeout = extractTimeout
+	}
+	if scriptTimeout > 0 {
+		e.scriptTimeout = scriptTimeout
 	}
 }
 
@@ -204,7 +215,7 @@ func (e *Executor) Install(
 	}
 	emit("system", "安装包上传完成")
 
-	extractCtx, cancelExtract := context.WithTimeout(ctx, time.Minute)
+	extractCtx, cancelExtract := context.WithTimeout(ctx, e.extractTimeout)
 	extractCommand := buildExtractCommand(remotePackage, env.InstallDir, stripRoot)
 	if stripRoot {
 		emit("system", "检测到安装包单层根目录，解压时自动剥离")

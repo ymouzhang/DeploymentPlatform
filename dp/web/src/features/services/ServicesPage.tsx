@@ -7,6 +7,7 @@ import {
   DeploymentUnitOutlined,
   FileTextOutlined,
   HistoryOutlined,
+	LoadingOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -345,6 +346,7 @@ export function ServicesPage() {
         fixed: 'right',
         render: (_, record) => {
           const { service_instance: serviceInstance, busy } = record
+		  const lastOperation = record.last_operation
           const pending = actionMutation.isPending && actionMutation.variables?.id === serviceInstance.id
           const execute = (action: 'install' | 'start' | 'stop') => {
             const run = () => actionMutation.mutate({ id: serviceInstance.id, action })
@@ -353,6 +355,9 @@ export function ServicesPage() {
               modal.confirm({ title: `${action === 'install' ? '安装' : action === 'start' ? '启动' : '停止'}其他账号的服务？`, content: `目标：${serviceInstance.name}（所属账号：${owner}）。操作将记录高风险审计。`, okText: '确认执行', onOk: run })
             } else run()
           }
+		  if (busy && lastOperation?.id && ['queued', 'running'].includes(lastOperation.status) && can('operation.read', serviceInstance.owner_id)) {
+			return <Button size="small" type="primary" ghost icon={<LoadingOutlined />} onClick={() => { setOperationId(lastOperation.id); setOperationOpen(true) }}>查看进度</Button>
+		  }
           return (
             <div className="row-actions">
 			  {can('service.write', serviceInstance.owner_id) && <Button size="small" icon={<EditOutlined />} disabled={busy} onClick={() => openInstance(serviceInstance)}>编辑</Button>}

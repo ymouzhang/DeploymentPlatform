@@ -17,6 +17,8 @@ const (
 	defaultDataDir                 = "./data"
 	defaultHealthInterval          = 10 * time.Second
 	defaultUploadTimeout           = 10 * time.Minute
+	defaultPackageExtractTimeout   = 2 * time.Hour
+	defaultServiceScriptTimeout    = 2 * time.Hour
 	defaultUploadMaxBytes          = int64(100 << 30)
 	defaultSessionTTL              = 24 * time.Hour
 	defaultAuditRetention          = int64(180)
@@ -39,6 +41,8 @@ type Config struct {
 	MasterKey                 []byte
 	HealthInterval            time.Duration
 	UploadTimeout             time.Duration
+	PackageExtractTimeout     time.Duration
+	ServiceScriptTimeout      time.Duration
 	UploadMaxBytes            int64
 	AdminUsername             string
 	AdminPassword             string
@@ -127,6 +131,12 @@ func Load() (Config, error) {
 	}
 	if cfg.UploadTimeout, err = durationEnv("DP_UPLOAD_TIMEOUT", defaultUploadTimeout); err != nil {
 		return Config{}, err
+	}
+	if cfg.PackageExtractTimeout, err = durationEnv("DP_PACKAGE_EXTRACT_TIMEOUT", defaultPackageExtractTimeout); err != nil || cfg.PackageExtractTimeout <= 0 {
+		return Config{}, errors.New("DP_PACKAGE_EXTRACT_TIMEOUT must be a positive duration")
+	}
+	if cfg.ServiceScriptTimeout, err = durationEnv("DP_SERVICE_SCRIPT_TIMEOUT", defaultServiceScriptTimeout); err != nil || cfg.ServiceScriptTimeout <= 0 {
+		return Config{}, errors.New("DP_SERVICE_SCRIPT_TIMEOUT must be a positive duration")
 	}
 	if cfg.UploadMaxBytes, err = int64Env("DP_UPLOAD_MAX_BYTES", defaultUploadMaxBytes); err != nil {
 		return Config{}, err
