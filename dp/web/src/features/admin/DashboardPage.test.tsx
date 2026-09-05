@@ -21,7 +21,8 @@ describe('DashboardPage', () => {
     vi.mocked(api.listTags).mockResolvedValue([])
     vi.mocked(api.adminDashboard).mockResolvedValue({
       metrics: {
-        users: 3, enabled_users: 2, disabled_users: 1, packages: 7, hosts: 3, service_instances: 4,
+        users: 3, enabled_users: 2, disabled_users: 1, packages: 7, hosts: 3,
+        models: 6, ready_models: 3, processing_models: 2, failed_models: 1, service_instances: 4,
         installed_services: 2, running_services: 1, active_operations: 0,
         failed_operations_24h: 1, login_failures_24h: 5, unvalidated_hosts: 0,
         stale_validation_hosts: 0, unhealthy_installed_services: 0,
@@ -38,6 +39,8 @@ describe('DashboardPage', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const view = render(<QueryClientProvider client={client}><MemoryRouter><DashboardPage /></MemoryRouter></QueryClientProvider>)
     await waitFor(() => expect(view.getByText('安装包')).toBeTruthy())
+	expect(view.getByText('模型')).toBeTruthy()
+	expect(view.getByText('3 可用 · 2 处理中 · 1 失败')).toBeTruthy()
     expect(view.getByText('登录失败')).toBeTruthy()
     expect(view.getByText('5')).toBeTruthy()
     expect(view.getByText('待处理消息')).toBeTruthy()

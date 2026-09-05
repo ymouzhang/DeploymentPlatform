@@ -483,8 +483,12 @@ export interface DashboardMetrics {
   users: number
   enabled_users: number
   disabled_users: number
-  packages: number
+	packages: number
 	hosts: number
+	models: number
+	ready_models: number
+	processing_models: number
+	failed_models: number
 	service_instances: number
   installed_services: number
   running_services: number

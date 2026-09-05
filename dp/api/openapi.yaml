@@ -2285,13 +2285,17 @@ components:
           properties:
             metrics:
               type: object
-              required: [users, enabled_users, disabled_users, packages, hosts, service_instances, installed_services, running_services, active_operations, failed_operations_24h, login_failures_24h, unvalidated_hosts, stale_validation_hosts, unhealthy_installed_services, high_risk_audits_24h, unread_notifications, unread_communications]
+              required: [users, enabled_users, disabled_users, packages, hosts, models, ready_models, processing_models, failed_models, service_instances, installed_services, running_services, active_operations, failed_operations_24h, login_failures_24h, unvalidated_hosts, stale_validation_hosts, unhealthy_installed_services, high_risk_audits_24h, unread_notifications, unread_communications]
               properties:
                 users: { type: integer }
                 enabled_users: { type: integer }
                 disabled_users: { type: integer }
                 packages: { type: integer }
                 hosts: { type: integer }
+                models: { type: integer, description: Non-deleted models }
+                ready_models: { type: integer }
+                processing_models: { type: integer, description: Models uploading, deploying, or deleting }
+                failed_models: { type: integer }
                 service_instances: { type: integer }
                 installed_services: { type: integer }
                 running_services: { type: integer }

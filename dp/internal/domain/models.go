@@ -667,6 +667,10 @@ type DashboardMetrics struct {
 	DisabledUsers              int `json:"disabled_users"`
 	Packages                   int `json:"packages"`
 	Hosts                      int `json:"hosts"`
+	Models                     int `json:"models"`
+	ReadyModels                int `json:"ready_models"`
+	ProcessingModels           int `json:"processing_models"`
+	FailedModels               int `json:"failed_models"`
 	ServiceInstances           int `json:"service_instances"`
 	InstalledServices          int `json:"installed_services"`
 	RunningServices            int `json:"running_services"`

@@ -93,7 +93,7 @@ func TestAdminRepositoryIntegration(t *testing.T) {
 	}
 
 	metrics, err := db.DashboardMetrics(ctx, time.Now().UTC().Add(-24*time.Hour), time.Now().UTC().Add(-30*24*time.Hour))
-	if err != nil || metrics.Users != 3 || metrics.ServiceInstances != 1 {
+	if err != nil || metrics.Users != 3 || metrics.ServiceInstances != 1 || metrics.Models != 1 {
 		t.Fatalf("unexpected dashboard metrics: metrics=%+v err=%v", metrics, err)
 	}
 	staleUsers, err := db.ListStaleUsers(ctx, time.Now().UTC().Add(time.Hour))

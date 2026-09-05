@@ -1,4 +1,4 @@
-import { AlertOutlined, BellOutlined, CloudServerOutlined, DeploymentUnitOutlined, FileZipOutlined, HistoryOutlined, MessageOutlined, SafetyCertificateOutlined, TeamOutlined } from '@ant-design/icons'
+import { AlertOutlined, BellOutlined, CloudServerOutlined, DatabaseOutlined, DeploymentUnitOutlined, FileZipOutlined, HistoryOutlined, MessageOutlined, SafetyCertificateOutlined, TeamOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { Badge, Button, Card, Col, Empty, Row, Skeleton, Tag, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
@@ -16,6 +16,7 @@ export function DashboardPage() {
     ['账号', metrics.users, `${metrics.enabled_users} 启用 · ${metrics.disabled_users} 禁用`, TeamOutlined, '/users'],
     ['安装包', metrics.packages, '当前服务类型', FileZipOutlined, '/packages'],
 	['主机', metrics.hosts, `${metrics.unvalidated_hosts} 未校验 · ${metrics.stale_validation_hosts} 已过期`, CloudServerOutlined, '/hosts'],
+	['模型', metrics.models, `${metrics.ready_models} 可用 · ${metrics.processing_models} 处理中 · ${metrics.failed_models} 失败`, DatabaseOutlined, '/models'],
     ['已安装服务', metrics.installed_services, `${metrics.running_services} 运行 · ${metrics.unhealthy_installed_services} 异常`, DeploymentUnitOutlined, withTags('/services', tagFilter)],
     ['执行中操作', metrics.active_operations, `24 小时失败 ${metrics.failed_operations_24h}`, HistoryOutlined, withTags('/operations', tagFilter)],
     ['高风险审计', metrics.high_risk_audits_24h, '最近 24 小时', AlertOutlined, '/audit'],
@@ -26,8 +27,8 @@ export function DashboardPage() {
   const notifications = query.data?.notifications.slice(0, 5) ?? []
   return <div className="page">
     <div className="page-heading"><div><div className="page-eyebrow">Administrator overview</div><Typography.Title level={2}>管理总览</Typography.Title><Typography.Paragraph type="secondary">聚焦系统健康、失败操作和需要处理的风险。</Typography.Paragraph></div><TagFilter tags={tagsQuery.data ?? []} value={tagFilter} onChange={setTagFilter} width={340} /></div>
-	{tagFilter.length > 0 && <Typography.Paragraph type="secondary">当前标签仅收窄服务实例和操作指标；主机、账号、安装包、安全审计、通知与通讯仍为全局口径。</Typography.Paragraph>}
-    {query.isLoading ? <Skeleton active /> : <Row gutter={[14, 14]}>{cards.map(([label, value, caption, Icon, link]) => <Col xs={24} sm={12} xl={6} key={label}><Card hoverable className="dashboard-card" onClick={() => navigate(link)}><div className="metric-label"><Icon /> {label}</div><div className="metric-value">{value}</div><Typography.Text type="secondary">{caption}</Typography.Text></Card></Col>)}</Row>}
+	{tagFilter.length > 0 && <Typography.Paragraph type="secondary">当前标签仅收窄服务实例和操作指标；主机、模型、账号、安装包、安全审计、通知与通讯仍为全局口径。</Typography.Paragraph>}
+    {query.isLoading ? <Skeleton active /> : <Row gutter={[14, 14]}>{cards.map(([label, value, caption, Icon, link]) => <Col xs={24} sm={12} xl={8} key={label}><Card hoverable className="dashboard-card" onClick={() => navigate(link)}><div className="metric-label"><Icon /> {label}</div><div className="metric-value">{value}</div><Typography.Text type="secondary">{caption}</Typography.Text></Card></Col>)}</Row>}
     <Card className="content-card dashboard-notifications" title="待处理事项">
       {query.isLoading ? <Skeleton active paragraph={{ rows: 4 }} /> : <div className="dashboard-pending-grid">
         <section className="dashboard-pending-section">
