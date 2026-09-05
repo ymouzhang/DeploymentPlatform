@@ -283,6 +283,7 @@ export const api = {
 	retryModel: (id: string) => request<ModelTask>(`/api/v1/models/${id}/retry`, { method: 'POST', body: '{}' }),
 	deleteModel: (id: string, confirm_name: string) => request<ModelTask | { deleted: string }>(`/api/v1/models/${id}`, { method: 'DELETE', body: JSON.stringify({ confirm_name }) }),
 	getModelTask: (id: string) => request<ModelTask>(`/api/v1/model-tasks/${id}`),
+	cancelModelTask: (id: string) => request<{ cancelled: string }>(`/api/v1/model-tasks/${id}/cancel`, { method: 'POST', body: '{}' }),
   getServiceConfig: (serviceInstanceId: string) =>
     request<ServiceConfig>(`/api/v1/services/${serviceInstanceId}/config`),
   updateServiceConfig: ({ serviceInstanceId, content }: { serviceInstanceId: string; content: string }) =>

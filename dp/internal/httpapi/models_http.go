@@ -206,6 +206,26 @@ func (a *API) getModelTask(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, task)
 }
 
+func (a *API) cancelModelTask(w http.ResponseWriter, r *http.Request) {
+	task, err := a.authorizeModelTask(r, r.PathValue("id"), access.ModelUpload)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	model, err := a.models.Get(r.Context(), task.ModelID)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	owner, _ := a.store.GetUser(r.Context(), task.OwnerID)
+	setAuditTarget(r, owner, "model", model.ID, model.Name, map[string]any{"task_id": task.ID, "target_dir": model.TargetDir})
+	if err := a.models.CancelTask(r.Context(), task.ID); err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, map[string]string{"cancelled": task.ID})
+}
+
 func (a *API) modelTaskEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CloudUploadOutlined, DeleteOutlined, FileSearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CloudUploadOutlined, DeleteOutlined, FileSearchOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, App, Button, Card, Form, Input, Modal, Progress, Select, Space, Table, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Button, Card, Form, Input, Modal, Popconfirm, Progress, Select, Space, Table, Tag, Typography, Upload } from 'antd'
 import type { UploadFile } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../../api/client'
@@ -32,6 +32,7 @@ export function ModelsPage() {
   const [confirmName, setConfirmName] = useState('')
   const [logTask, setLogTask] = useState<ModelTask | null>(null)
   const [logs, setLogs] = useState<OperationEvent[]>([])
+  const [stoppingTaskID, setStoppingTaskID] = useState<string>()
 
   const modelsQuery = useQuery({
     queryKey: ['models', ownerId], queryFn: () => api.listModels(ownerId),
@@ -96,6 +97,19 @@ export function ModelsPage() {
     catch (error) { message.error((error as Error).message) }
   }
 
+  const stopDeploy = async (task: ModelTask) => {
+    setStoppingTaskID(task.id)
+    try {
+      await api.cancelModelTask(task.id)
+      message.success('部署已停止，目标目录和任务暂存数据已清理')
+    } catch (error) {
+      message.error((error as Error).message)
+    } finally {
+      setStoppingTaskID(undefined)
+      void queryClient.invalidateQueries({ queryKey: ['models'] })
+    }
+  }
+
   const columns = useMemo<ColumnsType<Model>>(() => [
     { title: '模型', dataIndex: 'name', width: 180, render: (value, item) => <Space direction="vertical" size={0}><Typography.Text strong>{value}</Typography.Text><Typography.Text type="secondary" ellipsis style={{ maxWidth: 210 }}>{item.original_filename}</Typography.Text></Space> },
     ...(modelReadAll ? [{ title: '所属账号', dataIndex: 'owner_username', width: 120 }] : []),
@@ -105,10 +119,18 @@ export function ModelsPage() {
     { title: '状态', width: 150, render: (_, item) => <Space direction="vertical" size={2}><Tag color={statusLabels[item.status].color}>{statusLabels[item.status].text}</Tag>{item.latest_task && ['deploying','deleting'].includes(item.status) && <Progress size="small" percent={item.latest_task.progress} showInfo={false} />}</Space> },
     { title: '操作', width: 210, fixed: 'right', render: (_, item) => <Space>
       {item.latest_task && <Button size="small" icon={<FileSearchOutlined />} onClick={() => setLogTask(item.latest_task!)}>日志</Button>}
+      {can('model.upload', item.owner_id) && item.status === 'deploying' && item.latest_task?.action === 'deploy' && ['queued', 'running'].includes(item.latest_task.status) && <Popconfirm
+        title="停止模型部署？"
+        description="停止后会删除远端压缩包和专属解压目录，并确认目标目录不存在。若模型已原子提交，则不会删除并会提示停止失败。"
+        okText="确认停止"
+        cancelText="继续部署"
+        okButtonProps={{ danger: true, loading: stoppingTaskID === item.latest_task.id }}
+        onConfirm={() => stopDeploy(item.latest_task!)}
+      ><Button danger size="small" loading={stoppingTaskID === item.latest_task.id} icon={<StopOutlined />}>停止</Button></Popconfirm>}
       {can('model.upload', item.owner_id) && item.status === 'failed' && item.latest_task?.action === 'deploy' && <Button size="small" icon={<ReloadOutlined />} onClick={() => void api.retryModel(item.id).then((task) => { setLogTask(task); void queryClient.invalidateQueries({queryKey:['models']}) }).catch((e: Error) => message.error(e.message))}>重试</Button>}
       {can('model.delete', item.owner_id) && ['ready','failed','uploading'].includes(item.status) && <Button danger size="small" icon={<DeleteOutlined />} onClick={() => { setDeleting(item); setConfirmName('') }}>删除</Button>}
     </Space> },
-  ], [can, message, modelReadAll, queryClient])
+  ], [can, message, modelReadAll, queryClient, stoppingTaskID])
 	const visibleModels = (modelsQuery.data ?? []).filter((item) => {
 		const value = keyword.trim().toLowerCase()
 		return !value || [item.name, item.host_name, item.host_ip, item.target_dir, item.original_filename].some((field) => field.toLowerCase().includes(value))

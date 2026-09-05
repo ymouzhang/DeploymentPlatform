@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { App, Button, Card, Progress, Space, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
+import { useDraggablePanel } from '../../components/useDraggablePanel'
 
 export type PackageUploadInput = {
   serviceType: string
@@ -117,6 +118,7 @@ function PackageUploadIndicator({ tasks, cancel, dismiss }: {
 }) {
   const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
+  const draggable = useDraggablePanel()
   const active = tasks.filter((task) => task.status === 'uploading' || task.status === 'validating').length
   const activeTasks = tasks.filter((task) => task.status === 'uploading' || task.status === 'validating')
   const overallProgress = activeTasks.length > 0
@@ -127,7 +129,7 @@ function PackageUploadIndicator({ tasks, cancel, dismiss }: {
       安装包任务 · {active > 0 ? `${active} 个 · ${overallProgress}%` : `${tasks.length} 项`}
     </Button>
   }
-  return <Card className="upload-task-panel package-upload-panel" size="small" title={<Space><CloudUploadOutlined /><span>安装包任务</span></Space>} extra={<Space size={2}><Button type="link" size="small" onClick={() => navigate('/packages')}>查看</Button><Button type="text" size="small" aria-label="收起安装包任务" icon={<MinusOutlined />} onClick={() => setExpanded(false)} /></Space>}>
+  return <Card ref={draggable.panelRef} style={draggable.panelStyle} className="upload-task-panel package-upload-panel" size="small" title={<span className="upload-task-drag-handle" title="拖动标题栏可移动" {...draggable.handleProps}><CloudUploadOutlined />安装包任务</span>} extra={<Space size={2}><Button type="link" size="small" onClick={() => navigate('/packages')}>查看</Button><Button type="text" size="small" aria-label="收起安装包任务" icon={<MinusOutlined />} onClick={() => setExpanded(false)} /></Space>}>
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       {active > 0 && <Typography.Text type="warning" strong>{active} 个任务进行中，请勿刷新或关闭浏览器</Typography.Text>}
       {tasks.map((task) => {

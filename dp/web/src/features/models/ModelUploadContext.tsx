@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { App, Button, Card, Progress, Space, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
+import { useDraggablePanel } from '../../components/useDraggablePanel'
 
 export type ModelUploadValues = { name: string; host_id: string; target_dir: string }
 export type PendingModelUpload = ModelUploadValues & {
@@ -198,6 +199,7 @@ function BackgroundUploadIndicator({ pending, activities, pause }: {
 }) {
   const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
+  const draggable = useDraggablePanel()
   const runningCount = pending.filter((item) => ['uploading', 'pausing'].includes(activities[item.upload_id]?.status ?? '')).length
   const running = pending.filter((item) => ['uploading', 'pausing'].includes(activities[item.upload_id]?.status ?? ''))
   const overallProgress = running.length > 0
@@ -208,7 +210,7 @@ function BackgroundUploadIndicator({ pending, activities, pause }: {
       模型任务 · {runningCount > 0 ? `${runningCount} 个 · ${overallProgress}%` : `${pending.length} 待处理`}
     </Button>
   }
-  return <Card className="upload-task-panel model-upload-panel" size="small" title={<Space><CloudUploadOutlined /><span>模型上传任务</span></Space>} extra={<Space size={2}><Button type="link" size="small" onClick={() => navigate('/models')}>查看</Button><Button type="text" size="small" aria-label="收起模型任务" icon={<MinusOutlined />} onClick={() => setExpanded(false)} /></Space>}>
+  return <Card ref={draggable.panelRef} style={draggable.panelStyle} className="upload-task-panel model-upload-panel" size="small" title={<span className="upload-task-drag-handle" title="拖动标题栏可移动" {...draggable.handleProps}><CloudUploadOutlined />模型上传任务</span>} extra={<Space size={2}><Button type="link" size="small" onClick={() => navigate('/models')}>查看</Button><Button type="text" size="small" aria-label="收起模型任务" icon={<MinusOutlined />} onClick={() => setExpanded(false)} /></Space>}>
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       {runningCount > 0 && <Typography.Text type="warning" strong>{runningCount} 个任务上传中，请勿刷新或关闭浏览器</Typography.Text>}
       {pending.map((session) => {

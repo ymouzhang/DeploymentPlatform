@@ -1371,6 +1371,15 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200": { description: Model task snapshot, content: { application/json: { schema: { $ref: "#/components/schemas/ModelTaskResponse" } } } }
+  /model-tasks/{id}/cancel:
+    post:
+      operationId: cancelModelDeployTask
+      description: Cancels an active deployment. A successful response guarantees that the task extraction directory, uploaded archive, and final target directory are absent. Cancellation is rejected after atomic commit.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Deployment interrupted and all task-owned remote data verified absent }
+        "409": { $ref: "#/components/responses/Conflict" }
   /model-tasks/{id}/events:
     get:
       operationId: streamModelTaskEvents

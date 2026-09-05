@@ -53,7 +53,15 @@ type Manager struct {
 	log             *slog.Logger
 	mu              sync.Mutex
 	active          map[string]struct{}
+	tasks           map[string]*activeTask
 	wg              sync.WaitGroup
+}
+
+type activeTask struct {
+	cancel    context.CancelFunc
+	done      chan struct{}
+	requested chan struct{}
+	once      sync.Once
 }
 
 type UploadCreated struct {
@@ -69,7 +77,7 @@ func NewManager(ctx context.Context, dataDir string, db Repository, cipher *secu
 	return &Manager{ctx: ctx, dataDir: dataDir, store: db, cipher: cipher, remote: executor,
 		audit:    auditService,
 		maxBytes: maxBytes, chunkBytes: chunkBytes, retention: retention, transferTimeout: transferTimeout,
-		sem: make(chan struct{}, concurrency), active: make(map[string]struct{}), log: log}
+		sem: make(chan struct{}, concurrency), active: make(map[string]struct{}), tasks: make(map[string]*activeTask), log: log}
 }
 
 func (m *Manager) CreateUpload(ctx context.Context, owner domain.User, actor domain.User, input domain.ModelUploadCreateInput) (UploadCreated, error) {
@@ -244,6 +252,47 @@ func (m *Manager) Retry(ctx context.Context, modelID string, actor domain.User) 
 	return task, err
 }
 
+// CancelTask cancels an active deployment and waits until task-owned remote
+// data has been removed and the final target directory is confirmed absent.
+func (m *Manager) CancelTask(ctx context.Context, taskID string) error {
+	task, err := m.store.GetModelTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task.Action != domain.ModelTaskDeploy {
+		return &domain.AppError{Code: "MODEL_TASK_NOT_CANCELLABLE", Message: "只有模型部署任务可以停止"}
+	}
+	if task.Status != domain.OperationQueued && task.Status != domain.OperationRunning {
+		return &domain.AppError{Code: "MODEL_TASK_NOT_CANCELLABLE", Message: "模型任务已经结束，不能停止"}
+	}
+	m.mu.Lock()
+	run := m.tasks[taskID]
+	m.mu.Unlock()
+	if run == nil {
+		return &domain.AppError{Code: "MODEL_TASK_NOT_CANCELLABLE", Message: "模型任务不在当前进程中运行，不能停止"}
+	}
+	run.once.Do(func() {
+		close(run.requested)
+		run.cancel()
+	})
+	select {
+	case <-run.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	finished, err := m.store.GetModelTask(context.Background(), taskID)
+	if err != nil {
+		return err
+	}
+	if finished.Status == domain.OperationInterrupted && finished.ErrorCode == "MODEL_DEPLOY_CANCELLED" {
+		return nil
+	}
+	if finished.Status == domain.OperationSucceeded {
+		return &domain.AppError{Code: "MODEL_TASK_ALREADY_COMMITTED", Message: "模型目录已经原子提交，不能停止；如需清理请使用删除模型"}
+	}
+	return &domain.AppError{Code: "MODEL_CANCEL_CLEANUP_FAILED", Message: "停止未完成安全清理，请查看任务日志后重试", Err: errors.New(finished.ErrorMessage)}
+}
+
 func (m *Manager) Delete(ctx context.Context, modelID string, actor domain.User) (domain.ModelTask, error) {
 	model, err := m.store.GetModel(ctx, modelID)
 	if err != nil {
@@ -376,18 +425,29 @@ func (m *Manager) startTask(ctx context.Context, model domain.Model, action doma
 		m.release(model.ID)
 		return task, err
 	}
+	taskCtx, cancel := context.WithCancel(m.ctx)
+	run := &activeTask{cancel: cancel, done: make(chan struct{}), requested: make(chan struct{})}
+	m.mu.Lock()
+	m.tasks[task.ID] = run
+	m.mu.Unlock()
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
+		defer cancel()
+		defer close(run.done)
+		defer func() { m.mu.Lock(); delete(m.tasks, task.ID); m.mu.Unlock() }()
 		defer m.release(model.ID)
-		m.sem <- struct{}{}
-		defer func() { <-m.sem }()
-		m.run(task)
+		select {
+		case m.sem <- struct{}{}:
+			defer func() { <-m.sem }()
+		case <-taskCtx.Done():
+		}
+		m.run(taskCtx, task, run)
 	}()
 	return task, nil
 }
 
-func (m *Manager) run(task domain.ModelTask) {
+func (m *Manager) run(taskCtx context.Context, task domain.ModelTask, run *activeTask) {
 	logger, err := newLogger(filepath.Join(m.dataDir, task.LogPath))
 	if err != nil {
 		m.finish(&task, domain.OperationFailed, "prepare", "LOG_CREATE_FAILED", err.Error(), nil)
@@ -420,12 +480,16 @@ func (m *Manager) run(task domain.ModelTask) {
 		return
 	}
 	defer clearBytes(password)
-	ctx, cancel := context.WithTimeout(m.ctx, m.transferTimeout)
+	ctx, cancel := context.WithTimeout(taskCtx, m.transferTimeout)
 	defer cancel()
 	if task.Action == domain.ModelTaskDeploy {
-		upload, err := m.uploadByModel(ctx, model.ID)
+		upload, err := m.uploadByModel(m.ctx, model.ID)
 		if err != nil {
 			m.finishLogged(&task, logger, domain.OperationFailed, "prepare", "MODEL_UPLOAD_NOT_FOUND", err.Error())
+			return
+		}
+		if errors.Is(ctx.Err(), context.Canceled) && cancelWasRequested(run) {
+			m.cancelDeploy(&task, logger, model, env, password, upload)
 			return
 		}
 		m.stage(&task, logger, "validate", 20, "正在流式校验远端模型包")
@@ -458,6 +522,10 @@ func (m *Manager) run(task domain.ModelTask) {
 			err = m.remote.DeployModelArchive(ctx, env, password, model, upload.ID, inspection, emit)
 		}
 		if err != nil {
+			if errors.Is(ctx.Err(), context.Canceled) && cancelWasRequested(run) {
+				m.cancelDeploy(&task, logger, model, env, password, upload)
+				return
+			}
 			m.finishLogged(&task, logger, classify(err), task.Stage, errorCode(err), err.Error())
 			_ = m.store.SetModelState(context.Background(), model.ID, domain.ModelFailed, err.Error())
 			return
@@ -481,6 +549,33 @@ func (m *Manager) run(task domain.ModelTask) {
 	m.finishLogged(&task, logger, domain.OperationSucceeded, "completed", "", "模型任务完成")
 }
 
+func cancelWasRequested(run *activeTask) bool {
+	select {
+	case <-run.requested:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Manager) cancelDeploy(task *domain.ModelTask, logger *eventLogger, model domain.Model, env domain.Host, password []byte, upload domain.ModelUpload) {
+	m.stage(task, logger, "cleanup", 90, "停止已确认，正在清理远端任务数据")
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := m.remote.CleanupCancelledModelDeploy(cleanupCtx, env, password, model, upload.ID, func(stream, message string) {
+		_ = logger.write(domain.OperationEvent{Type: "log", Stream: stream, Message: message, Stage: "cleanup"})
+	}); err != nil {
+		m.finishLogged(task, logger, domain.OperationFailed, "cleanup", errorCode(err), "停止失败，未能确认目标目录为空："+err.Error())
+		return
+	}
+	if err := m.store.MarkModelDeleted(context.Background(), model.ID); err != nil {
+		m.log.Error("hide cancelled model", "model_id", model.ID, "error", err)
+		m.finishLogged(task, logger, domain.OperationFailed, "commit", "MODEL_CANCEL_COMMIT_FAILED", "远端数据已清理，但更新模型记录失败："+err.Error())
+		return
+	}
+	m.finishLogged(task, logger, domain.OperationInterrupted, "cancelled", "MODEL_DEPLOY_CANCELLED", "模型部署已停止，远端任务数据已清理，目标目录不存在")
+}
+
 func (m *Manager) stage(task *domain.ModelTask, logger *eventLogger, stage string, progress int, message string) {
 	task.Stage, task.Progress = stage, progress
 	_ = m.store.UpdateModelTask(m.ctx, *task)
@@ -496,7 +591,7 @@ func (m *Manager) finish(task *domain.ModelTask, status domain.OperationStatus, 
 	if err := m.store.UpdateModelTask(context.Background(), *task); err != nil {
 		m.log.Error("update model task", "task_id", task.ID, "error", err)
 	}
-	if status != domain.OperationSucceeded {
+	if status != domain.OperationSucceeded && code != "MODEL_DEPLOY_CANCELLED" {
 		_ = m.store.SetModelState(context.Background(), task.ModelID, domain.ModelFailed, message)
 	}
 	if m.audit != nil {

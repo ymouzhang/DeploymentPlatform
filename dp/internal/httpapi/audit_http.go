@@ -200,6 +200,8 @@ func auditAction(method, path string) (category, action, targetType string, ok b
 		return "model", "model.upload.cancel", "model", true
 	case method == http.MethodPost && strings.HasPrefix(path, "/api/v1/models/") && strings.HasSuffix(path, "/retry"):
 		return "model", "model.deploy.retry", "model", true
+	case method == http.MethodPost && strings.HasPrefix(path, "/api/v1/model-tasks/") && strings.HasSuffix(path, "/cancel"):
+		return "model", "model.deploy.cancel", "model", true
 	case method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/models/"):
 		return "model", "model.delete.request", "model", true
 	case method == http.MethodPut && strings.HasSuffix(path, "/config") && strings.Contains(path, "/services/"):

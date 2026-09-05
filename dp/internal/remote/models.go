@@ -601,6 +601,54 @@ func (e *Executor) DeployModelArchive(ctx context.Context, host domain.Host, pas
 	return nil
 }
 
+// CleanupCancelledModelDeploy removes only one deployment's staging data. It
+// refuses to remove a committed target directory and succeeds only after all
+// task-owned paths and the final target are confirmed absent.
+func (e *Executor) CleanupCancelledModelDeploy(ctx context.Context, host domain.Host, password []byte, model domain.Model, uploadID string, emit EmitFunc) error {
+	client, _, err := e.connectHost(ctx, host, password)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		return err
+	}
+	defer sftpClient.Close()
+	if _, err := sftpClient.Stat(model.TargetDir); err == nil {
+		return &domain.AppError{Code: "MODEL_TASK_ALREADY_COMMITTED", Message: "模型目标目录已经存在，已拒绝将停止操作伪装为成功"}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("确认模型目标目录失败: %w", err)
+	}
+	tempDir := path.Join(path.Dir(model.TargetDir), ".dp-model-extract-"+uploadID)
+	if emit != nil {
+		emit("system", "正在删除任务专属解压目录和远端压缩包")
+	}
+	if _, err := runCommand(ctx, client, "rm -rf -- "+shellQuote(tempDir), password, emit); err != nil {
+		return fmt.Errorf("删除任务专属解压目录失败: %w", err)
+	}
+	archivePath := ModelUploadRemotePath(model.TargetDir, uploadID)
+	if err := sftpClient.Remove(archivePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("删除远端模型压缩包失败: %w", err)
+	}
+	checks := []struct{ label, target string }{
+		{"模型目标目录", model.TargetDir},
+		{"任务解压目录", tempDir},
+		{"远端压缩包", archivePath},
+	}
+	for _, check := range checks {
+		if _, err := sftpClient.Stat(check.target); err == nil {
+			return fmt.Errorf("%s清理后仍然存在", check.label)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("确认%s清理结果失败: %w", check.label, err)
+		}
+	}
+	if emit != nil {
+		emit("system", "清理完成，已确认模型目标目录不存在")
+	}
+	return nil
+}
+
 func (e *Executor) DeleteModel(ctx context.Context, host domain.Host, password []byte, model domain.Model, taskID string, emit EmitFunc) error {
 	client, _, err := e.connectHost(ctx, host, password)
 	if err != nil {

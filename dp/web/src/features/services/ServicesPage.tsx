@@ -487,7 +487,7 @@ export function ServicesPage() {
 
   return (
     <div className="page">
-      <div className="page-heading">
+      <div className="page-heading service-page-heading">
         <div>
           <div className="page-eyebrow">Service operations</div>
           <Typography.Title level={2}>服务管理</Typography.Title>
@@ -495,19 +495,7 @@ export function ServicesPage() {
             安装、启停和配置远端服务，持续观测部署结果与实时健康状态。
           </Typography.Paragraph>
         </div>
-        <Space>
-		  {can('service.write', ownerId) && <Button type="primary" icon={<PlusOutlined />} onClick={() => openInstance()}>创建实例</Button>}
-          <TagFilter tags={tagsQuery.data ?? []} value={tagFilter} onChange={setTagFilter} />
-          <Input.Search
-            allowClear
-            placeholder="搜索 IP 或服务类型"
-            style={{ width: 240 }}
-            onChange={(event) => setKeyword(event.target.value)}
-          />
-          <Button icon={<ReloadOutlined />} onClick={() => void servicesQuery.refetch()}>
-            刷新状态
-          </Button>
-        </Space>
+		{can('service.write', ownerId) && <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => openInstance()}>创建实例</Button>}
       </div>
 
       <div className="metric-strip">
@@ -525,13 +513,27 @@ export function ServicesPage() {
       )}
 
       <Card
-        className="content-card table-card"
+        className="content-card table-card service-table-card"
         title={
           <div>
             <Typography.Text strong>服务实例</Typography.Text>
             <span className="section-caption">每 10 秒自动更新健康状态</span>
           </div>
         }
+		extra={
+		  <Space className="service-list-tools" wrap>
+			<TagFilter tags={tagsQuery.data ?? []} value={tagFilter} onChange={setTagFilter} />
+			<Input.Search
+			  allowClear
+			  placeholder="搜索 IP 或服务类型"
+			  style={{ width: 240 }}
+			  onChange={(event) => setKeyword(event.target.value)}
+			/>
+			<Button icon={<ReloadOutlined />} onClick={() => void servicesQuery.refetch()}>
+			  刷新状态
+			</Button>
+		  </Space>
+		}
         styles={{ body: { padding: 0 } }}
       >
         <Table

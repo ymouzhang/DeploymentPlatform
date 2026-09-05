@@ -213,6 +213,7 @@ body { min-height: 100vh; }
   box-shadow: 0 14px 40px rgb(27 45 35 / 7%);
 }
 .table-card .ant-card-head { min-height: 61px; padding-inline: 20px; border-bottom-color: #eef0ec; }
+.service-list-tools { justify-content: flex-end; padding-block: 10px; }
 .section-caption { margin-left: 10px; color: #949b95; font-size: 12px; font-weight: 400; }
 .ant-table-thead > tr > th { padding-block: 13px !important; color: #778078 !important; background: #fafbf9 !important; font-size: 11px; font-weight: 700 !important; letter-spacing: .035em; }
 .ant-table-wrapper .ant-table-tbody > tr > td { padding-block: 17px; border-bottom-color: #eff1ee; }
@@ -401,9 +402,17 @@ body { min-height: 100vh; }
   .app-header { padding-inline: 24px; }
   .metric-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .page-heading { align-items: flex-start; flex-direction: column; }
+	.page-heading.service-page-heading { align-items: flex-start; }
   .page-heading > .ant-space { justify-content: flex-start; }
+	.service-table-card .ant-card-head-wrapper { align-items: flex-start; flex-direction: column; padding-block: 12px; }
+	.service-table-card .ant-card-extra { width: 100%; margin-inline-start: 0; }
+	.service-list-tools { justify-content: flex-start; width: 100%; }
   .audit-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .dashboard-pending-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+	.service-list-tools > .ant-select, .service-list-tools > .ant-input-group-wrapper { width: 100% !important; }
 }
 
 .target-row > td {
@@ -797,7 +806,18 @@ body { background: var(--apple-canvas); color: var(--apple-label); -webkit-font-
   max-height: min(460px, calc(100vh - 96px));
   overflow: auto;
   box-shadow: 0 12px 36px rgb(24 32 56 / 18%);
+  will-change: transform;
 }
+.upload-task-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.upload-task-drag-handle:active { cursor: grabbing; }
 .package-upload-panel { right: 24px; }
 .model-upload-panel { right: 428px; }
 
