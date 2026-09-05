@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"DP/internal/domain"
+	"DP/internal/remote"
 	"DP/internal/security"
 )
 
@@ -22,10 +24,12 @@ type hostStoreStub struct {
 func (s *hostStoreStub) CreateHost(_ context.Context, host domain.Host) (domain.Host, error) {
 	host.ID = "host-1"
 	s.host = host
+	s.created++
 	return host, nil
 }
 func (s *hostStoreStub) UpdateHost(_ context.Context, host domain.Host) (domain.Host, error) {
 	s.host = host
+	s.updated++
 	return host, nil
 }
 func (s *hostStoreStub) DeleteHost(context.Context, string) error { s.deleted = true; return nil }
@@ -53,6 +57,21 @@ func (s *hostStoreStub) HostHasServiceInstances(context.Context, string) (bool, 
 }
 func (s *hostStoreStub) HostHasModels(context.Context, string) (bool, error) { return s.hasModels, nil }
 
+type hostValidatorStub struct {
+	result   remote.ValidationResult
+	err      error
+	calls    int
+	host     domain.Host
+	password string
+}
+
+func (s *hostValidatorStub) ValidateHost(_ context.Context, host domain.Host, password []byte) (remote.ValidationResult, error) {
+	s.calls++
+	s.host = host
+	s.password = string(password)
+	return s.result, s.err
+}
+
 func testHostCipher(t *testing.T) *security.PasswordCipher {
 	t.Helper()
 	cipher, err := security.NewPasswordCipher(bytes.Repeat([]byte{3}, 32))
@@ -64,7 +83,8 @@ func testHostCipher(t *testing.T) *security.PasswordCipher {
 
 func TestHostCreateEncryptsPasswordAndHidesSecrets(t *testing.T) {
 	store := &hostStoreStub{}
-	view, err := NewHostService(store, testHostCipher(t), nil).Create(context.Background(), "owner", domain.HostInput{
+	validator := &hostValidatorStub{result: remote.ValidationResult{Fingerprint: "SHA256:test", Arch: "amd64"}}
+	view, err := NewHostService(store, testHostCipher(t), validator).Create(context.Background(), "owner", domain.HostInput{
 		Name: "gpu-1", IP: "192.0.2.10", SSHUser: "root", SSHPort: 22, SSHPassword: "secret",
 	})
 	if err != nil {
@@ -76,19 +96,68 @@ func TestHostCreateEncryptsPasswordAndHidesSecrets(t *testing.T) {
 	if !view.HasPassword || view.SSHPasswordEnc != "" || view.HostKeyFingerprint != "" {
 		t.Fatalf("secret leaked in view: %+v", view)
 	}
+	if validator.calls != 1 || validator.password != "secret" || store.host.HostKeyFingerprint != "SHA256:test" || store.host.Arch != "amd64" || store.host.LastValidationAt == nil {
+		t.Fatalf("validation was not persisted: validator=%+v host=%+v", validator, store.host)
+	}
 }
 
-func TestHostUpdateConnectionInvalidatesValidation(t *testing.T) {
-	store := &hostStoreStub{host: domain.Host{ID: "host-1", OwnerID: "owner", Name: "old", IP: "192.0.2.10", SSHUser: "root", SSHPort: 22, SSHPasswordEnc: "cipher", Arch: "x86_64", HostKeyFingerprint: "fp"}}
-	_, err := NewHostService(store, testHostCipher(t), nil).Update(context.Background(), "host-1", domain.HostInput{Name: "new", IP: "192.0.2.11", SSHUser: "root", SSHPort: 22})
+func TestHostUpdateConnectionValidatesBeforeSaving(t *testing.T) {
+	cipher := testHostCipher(t)
+	encrypted, err := cipher.Encrypt("secret")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.host.Arch != "" || store.host.HostKeyFingerprint != "" || store.host.LastValidationAt != nil {
-		t.Fatalf("validation was retained: %+v", store.host)
+	previousValidation := time.Now().Add(-time.Hour)
+	store := &hostStoreStub{host: domain.Host{ID: "host-1", OwnerID: "owner", Name: "old", IP: "192.0.2.10", SSHUser: "root", SSHPort: 22, SSHPasswordEnc: encrypted, Arch: "x86_64", HostKeyFingerprint: "old-fp", LastValidationAt: &previousValidation}}
+	validator := &hostValidatorStub{result: remote.ValidationResult{Fingerprint: "new-fp", Arch: "arm64"}}
+	_, err = NewHostService(store, cipher, validator).Update(context.Background(), "host-1", domain.HostInput{Name: "new", IP: "192.0.2.11", SSHUser: "root", SSHPort: 22})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if store.host.SSHPasswordEnc != "cipher" {
+	if validator.calls != 1 || validator.password != "secret" || validator.host.HostKeyFingerprint != "" {
+		t.Fatalf("new target was not validated correctly: %+v", validator)
+	}
+	if store.host.Arch != "arm64" || store.host.HostKeyFingerprint != "new-fp" || store.host.LastValidationAt == nil || !store.host.LastValidationAt.After(previousValidation) {
+		t.Fatalf("validation was not refreshed: %+v", store.host)
+	}
+	if store.host.SSHPasswordEnc != encrypted {
 		t.Fatal("blank password replaced the stored password")
+	}
+}
+
+func TestHostCreateValidationFailureDoesNotPersist(t *testing.T) {
+	store := &hostStoreStub{}
+	validator := &hostValidatorStub{
+		result: remote.ValidationResult{Stages: []remote.ValidationStage{{Name: "connect", Message: "SSH 认证失败"}}},
+		err:    errors.New("handshake failed"),
+	}
+	_, err := NewHostService(store, testHostCipher(t), validator).Create(context.Background(), "owner", domain.HostInput{
+		Name: "gpu-1", IP: "192.0.2.10", SSHUser: "root", SSHPort: 22, SSHPassword: "wrong",
+	})
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "HOST_VALIDATION_FAILED" || appErr.Message != "SSH 认证失败" || store.created != 0 {
+		t.Fatalf("unexpected result: err=%v created=%d", err, store.created)
+	}
+}
+
+func TestHostUpdateValidationFailurePreservesStoredHost(t *testing.T) {
+	cipher := testHostCipher(t)
+	encrypted, err := cipher.Encrypt("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := domain.Host{ID: "host-1", OwnerID: "owner", Name: "gpu-old", IP: "192.0.2.10", SSHUser: "root", SSHPort: 22, SSHPasswordEnc: encrypted, HostKeyFingerprint: "old-fp", Arch: "amd64"}
+	store := &hostStoreStub{host: original}
+	validator := &hostValidatorStub{
+		result: remote.ValidationResult{Stages: []remote.ValidationStage{{Name: "connect", Message: "SSH 认证失败"}}},
+		err:    errors.New("handshake failed"),
+	}
+	_, err = NewHostService(store, cipher, validator).Update(context.Background(), "host-1", domain.HostInput{
+		Name: "gpu-new", IP: "192.0.2.11", SSHUser: "root", SSHPort: 22,
+	})
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "HOST_VALIDATION_FAILED" || store.updated != 0 || store.host != original {
+		t.Fatalf("failed update changed stored host: err=%v updated=%d host=%+v", err, store.updated, store.host)
 	}
 }
 

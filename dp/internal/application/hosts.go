@@ -25,10 +25,14 @@ type HostRepository interface {
 type HostService struct {
 	store  HostRepository
 	cipher *security.PasswordCipher
-	remote *remote.Executor
+	remote HostValidator
 }
 
-func NewHostService(store HostRepository, cipher *security.PasswordCipher, executor *remote.Executor) *HostService {
+type HostValidator interface {
+	ValidateHost(context.Context, domain.Host, []byte) (remote.ValidationResult, error)
+}
+
+func NewHostService(store HostRepository, cipher *security.PasswordCipher, executor HostValidator) *HostService {
 	return &HostService{store: store, cipher: cipher, remote: executor}
 }
 
@@ -49,12 +53,24 @@ func (s *HostService) Create(ctx context.Context, ownerID string, input domain.H
 	if err := input.Validate(true); err != nil {
 		return domain.HostView{}, err
 	}
+	password := []byte(input.SSHPassword)
+	defer clear(password)
+	host := domain.Host{OwnerID: ownerID, Name: input.Name, IP: input.IP,
+		SSHUser: input.SSHUser, SSHPort: input.SSHPort, Note: input.Note}
+	validation, err := s.remote.ValidateHost(ctx, host, password)
+	if err != nil {
+		return domain.HostView{}, hostValidationError(validation, err)
+	}
 	encrypted, err := s.cipher.Encrypt(input.SSHPassword)
 	if err != nil {
 		return domain.HostView{}, err
 	}
-	host, err := s.store.CreateHost(ctx, domain.Host{OwnerID: ownerID, Name: input.Name, IP: input.IP,
-		SSHUser: input.SSHUser, SSHPort: input.SSHPort, SSHPasswordEnc: encrypted, Note: input.Note})
+	now := time.Now().UTC()
+	host.SSHPasswordEnc = encrypted
+	host.HostKeyFingerprint = validation.Fingerprint
+	host.Arch = validation.Arch
+	host.LastValidationAt = &now
+	host, err = s.store.CreateHost(ctx, host)
 	if errors.Is(err, domain.ErrConflict) {
 		return domain.HostView{}, &domain.AppError{Code: "HOST_CONFLICT", Message: "该账号已注册相同 IP 和 SSH 端口的主机"}
 	}
@@ -73,17 +89,33 @@ func (s *HostService) Update(ctx context.Context, id string, input domain.HostIn
 	if err != nil {
 		return domain.HostView{}, err
 	}
-	connectionChanged := host.IP != input.IP || host.SSHUser != input.SSHUser || host.SSHPort != input.SSHPort
+	targetChanged := host.IP != input.IP || host.SSHPort != input.SSHPort
+	connectionChanged := targetChanged || host.SSHUser != input.SSHUser || input.SSHPassword != ""
 	host.Name, host.IP, host.SSHUser, host.SSHPort, host.Note = input.Name, input.IP, input.SSHUser, input.SSHPort, input.Note
+	var password []byte
 	if input.SSHPassword != "" {
+		password = []byte(input.SSHPassword)
 		host.SSHPasswordEnc, err = s.cipher.Encrypt(input.SSHPassword)
 		if err != nil {
 			return domain.HostView{}, err
 		}
-		connectionChanged = true
+	} else if connectionChanged {
+		password, err = s.cipher.Decrypt(host.SSHPasswordEnc)
+		if err != nil {
+			return domain.HostView{}, err
+		}
 	}
 	if connectionChanged {
-		host.HostKeyFingerprint, host.Arch, host.LastValidationAt = "", "", nil
+		defer clear(password)
+		if targetChanged {
+			host.HostKeyFingerprint = ""
+		}
+		validation, validateErr := s.remote.ValidateHost(ctx, host, password)
+		if validateErr != nil {
+			return domain.HostView{}, hostValidationError(validation, validateErr)
+		}
+		now := time.Now().UTC()
+		host.HostKeyFingerprint, host.Arch, host.LastValidationAt = validation.Fingerprint, validation.Arch, &now
 	}
 	host, err = s.store.UpdateHost(ctx, host)
 	if errors.Is(err, domain.ErrConflict) {
@@ -93,6 +125,17 @@ func (s *HostService) Update(ctx context.Context, id string, input domain.HostIn
 		return domain.HostView{}, err
 	}
 	return hostView(host), nil
+}
+
+func hostValidationError(result remote.ValidationResult, err error) error {
+	message := "SSH 主机校验失败"
+	for index := len(result.Stages) - 1; index >= 0; index-- {
+		if !result.Stages[index].Success && result.Stages[index].Message != "" {
+			message = result.Stages[index].Message
+			break
+		}
+	}
+	return &domain.AppError{Code: "HOST_VALIDATION_FAILED", Message: message, Err: err}
 }
 
 func (s *HostService) Delete(ctx context.Context, id string) error {

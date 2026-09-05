@@ -20,11 +20,11 @@ export function HostsPage() {
 
   const save = useMutation({
     mutationFn: (input: HostInput) => editing ? api.updateHost(editing.id, input) : api.createHost(input, ownerId),
-    onSuccess: () => { message.success(editing ? '主机已更新' : '主机已注册'); setOpen(false); void queryClient.invalidateQueries({ queryKey: ['hosts'] }) },
+    onSuccess: () => { message.success(editing ? '主机已更新' : '主机已注册并通过校验'); setOpen(false); void queryClient.invalidateQueries({ queryKey: ['hosts'] }) },
     onError: (error: Error) => message.error(error.message),
   })
   const validate = useMutation({
-    mutationFn: ({ id, input }: { id?: string; input?: HostInput }) => id ? api.validateHost(id) : api.validateDraftHost(input!),
+    mutationFn: api.validateHost,
     onSuccess: (result) => {
       if (result.validation_error) message.error(result.validation_error)
       else { message.success('SSH 连接、架构识别和 SFTP 传输均正常'); void queryClient.invalidateQueries({ queryKey: ['hosts'] }) }
@@ -70,19 +70,18 @@ export function HostsPage() {
       { title: '校验状态', render: (_, host) => host.last_validation_at ? <Tag color="green">已校验</Tag> : <Tag>未校验</Tag> },
       { title: '备注', dataIndex: 'note', ellipsis: true },
       { title: '操作', width: 250, render: (_, host) => <Space>
-        {can('host.validate', host.owner_id) && <Button size="small" icon={<SafetyCertificateOutlined />} loading={validate.isPending && validate.variables?.id === host.id} onClick={() => validate.mutate({ id: host.id })}>校验</Button>}
+        {can('host.validate', host.owner_id) && <Button size="small" icon={<SafetyCertificateOutlined />} loading={validate.isPending && validate.variables === host.id} onClick={() => validate.mutate(host.id)}>校验</Button>}
         {can('host.write', host.owner_id) && <Button size="small" icon={<EditOutlined />} onClick={() => showEdit(host)}>编辑</Button>}
         {can('host.delete', host.owner_id) && <Button danger size="small" icon={<DeleteOutlined />} onClick={() => modal.confirm({ title: `删除主机“${host.name}”？`, content: '存在服务实例或模型时不能删除。', okButtonProps: { danger: true }, onOk: () => remove.mutateAsync(host.id) })}>删除</Button>}
       </Space> },
     ]} />
-    <Drawer width={520} title={editing ? '编辑主机' : '注册主机'} open={open} onClose={() => setOpen(false)} extra={<Space><Button onClick={() => setOpen(false)}>取消</Button><Button type="primary" loading={save.isPending} onClick={() => form.validateFields().then((v) => save.mutate(v))}>保存</Button></Space>}>
+    <Drawer width={520} title={editing ? '编辑主机' : '注册主机'} open={open} onClose={() => setOpen(false)} extra={<Space><Button onClick={() => setOpen(false)}>取消</Button><Button type="primary" loading={save.isPending} onClick={() => form.validateFields().then((v) => save.mutate(v))}>{editing ? '保存' : '校验并保存'}</Button></Space>}>
       <Form form={form} layout="vertical" initialValues={defaults}>
         <Form.Item name="name" label="主机名称" rules={[{ required: true }]}><Input placeholder="例如：GPU 服务器 A" /></Form.Item>
         <Form.Item name="ip" label="服务器 IP" rules={[{ required: true }]}><Input placeholder="10.0.0.8" /></Form.Item>
         <Space align="start" style={{ width: '100%' }}><Form.Item name="ssh_user" label="SSH 用户" rules={[{ required: true }]}><Input style={{ width: 220 }} /></Form.Item><Form.Item name="ssh_port" label="SSH 端口" rules={[{ required: true }]}><InputNumber min={1} max={65535} style={{ width: 180 }} /></Form.Item></Space>
-        <Form.Item name="ssh_password" label="SSH 密码" extra={editing ? '留空表示保持原密码' : '密码加密保存'} rules={editing ? [] : [{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item>
+        <Form.Item name="ssh_password" label="SSH 密码" extra={editing ? '留空表示保持原密码；连接信息变化时将先校验再保存' : '保存时自动校验 SSH、SFTP 和主机指纹，密码加密存储'} rules={editing ? [] : [{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item>
         <Form.Item name="note" label="备注"><Input.TextArea rows={3} maxLength={200} showCount /></Form.Item>
-        {!editing && <Button icon={<SafetyCertificateOutlined />} loading={validate.isPending} onClick={() => form.validateFields().then((input) => validate.mutate({ input }))}>保存前校验 SSH</Button>}
       </Form>
     </Drawer>
   </div>

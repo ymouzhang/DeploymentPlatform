@@ -383,7 +383,7 @@ paths:
               $ref: "#/components/schemas/HostInput"
       responses:
         "201":
-          description: Host created
+          description: Host created after SSH and SFTP validation; validation metadata is persisted atomically
           content:
             application/json:
               schema:
@@ -405,7 +405,7 @@ paths:
               $ref: "#/components/schemas/HostInput"
       responses:
         "200":
-          description: Host updated
+          description: Host updated; changed connection details are validated before persistence
           content:
             application/json:
               schema:
