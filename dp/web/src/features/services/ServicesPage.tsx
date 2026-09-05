@@ -354,9 +354,9 @@ export function ServicesPage() {
               const owner = users.find((item) => item.id === serviceInstance.owner_id)?.username ?? serviceInstance.owner_id
               modal.confirm({ title: `${action === 'install' ? '安装' : action === 'start' ? '启动' : '停止'}其他账号的服务？`, content: `目标：${serviceInstance.name}（所属账号：${owner}）。操作将记录高风险审计。`, okText: '确认执行', onOk: run })
             } else run()
-          }
+		  }
 		  if (busy && lastOperation?.id && ['queued', 'running'].includes(lastOperation.status) && can('operation.read', serviceInstance.owner_id)) {
-			return <Button size="small" type="primary" ghost icon={<LoadingOutlined />} onClick={() => { setOperationId(lastOperation.id); setOperationOpen(true) }}>查看进度</Button>
+			return <Button className="operation-progress-button" size="small" icon={<LoadingOutlined spin />} onClick={() => { setOperationId(lastOperation.id); setOperationOpen(true) }}>查看进度</Button>
 		  }
           return (
             <div className="row-actions">

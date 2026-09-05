@@ -278,6 +278,18 @@ body { min-height: 100vh; }
 .package-table .ant-table-tbody > tr:hover > .ant-table-cell-fix-right { background: #fbfcfa !important; }
 .row-actions { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .row-actions .ant-btn { box-shadow: none; }
+.operation-progress-button.ant-btn {
+  border-color: #aeb9ff;
+  background: #eef1ff;
+  color: #3448cc;
+  font-weight: 600;
+  box-shadow: none;
+}
+.operation-progress-button.ant-btn:not(:disabled):hover {
+  border-color: #5366e8;
+  background: #e2e7ff;
+  color: #263ab8;
+}
 .row-actions.package-row-actions { gap: 6px; }
 .package-row-actions .ant-btn { padding-inline: 10px; }
 .server-address { color: #273a30; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; font-weight: 600; }
